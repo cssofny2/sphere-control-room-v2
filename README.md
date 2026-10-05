@@ -4,13 +4,13 @@ A Vite + React + TypeScript package for the S.P.H.E.R.E. location-variable metro
 
 ## Requirements
 
-- Node.js 20 or newer recommended
+- Node.js 24.x (matching `.nvmrc`, `package.json`, and Vercel)
 - npm
 
 ## Start the development app
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -27,15 +27,28 @@ The compiled production files are written to `dist/`.
 
 ## Main files
 
-- `src/MetrologyLab.tsx`: complete simulator
-- `src/main.tsx`: React entry point
+- `src/MetrologyLabV3.tsx`: active v3 simulator, including Lab Overview and the interactive laboratory digital twin
+- `src/MetrologyLab.tsx`: retained earlier simulator (not imported by the entry point)
+- `src/main.tsx`: React entry point importing the v3 simulator
 - `src/index.css`: Tailwind directives and global styles
 - `vite.config.ts`: Vite configuration
 - `tailwind.config.cjs`: Tailwind source scanning
 
 ## Spatial Field Explorer
 
-Open **Spatial Field Explorer** from the simulator navigation. If no experimental measurements exist yet, use **Load Demo Volume** to populate a clearly labeled synthetic demonstration dataset.
+Open **Spatial Field Explorer** from the simulator navigation to inspect simulated records collected during experiment runs.
+
+## Vercel deployment
+
+The repository's `vercel.json` selects Vite, installs the committed lockfile with `npm ci`, runs `npm run build` (including TypeScript checks), and serves `dist/`. Pull requests receive preview deployments; the `main` branch is the production source.
+
+## v3 smoke checks
+
+- Open the Operator Console and each navigation page, including Lab Overview.
+- In 3D Chamber & Stage, exercise the digital twin's view modes, camera presets, render-quality selector, assembly visibility, and Reset view.
+- Turn the main breaker on, move and home the XYZ stage, then turn the breaker off to confirm reset.
+- Verify an empty Experiment Runs ledger renders without crashing.
+- Check desktop and mobile layouts and confirm there are no uncaught browser errors.
 
 ## Notes
 
