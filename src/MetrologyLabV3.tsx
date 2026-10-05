@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useReducer, useRef, useMemo, useCallback } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
@@ -544,7 +545,7 @@ export default function MetrologyLab() {
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `sphere-journal-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href);
   };
 
-  const navGroups = [
+  const navGroups: { group: string; items: [string, string, LucideIcon][] }[] = [
     {
       group: "Operations",
       items: [
@@ -596,7 +597,7 @@ export default function MetrologyLab() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => set("ui", { cmdPaletteOpen: true })} className="rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 flex items-center gap-1.5 font-mono">
               <Command size={13} /> Cmd+K <span className="text-[10px] text-zinc-500">Search</span>
             </button>
@@ -715,7 +716,7 @@ export default function MetrologyLab() {
       </header>
 
       <main className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto] md:overflow-hidden xl:grid-cols-[auto_minmax(0,1fr)_310px] xl:grid-rows-1">
-        <aside className={`border-r border-zinc-800 bg-zinc-950/60 p-2.5 flex flex-col gap-3 transition-all duration-300 shrink-0 relative ${collapsed ? "w-16" : "w-60"}`}>
+        <aside className={`border-r border-zinc-800 bg-zinc-950/60 p-2.5 flex flex-col gap-3 transition-all duration-300 shrink-0 relative max-h-52 md:max-h-none ${collapsed ? "w-full md:w-16" : "w-full md:w-60"}`}>
           <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
             {!collapsed && <span className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500">Lab Navigation</span>}
             <button 
@@ -727,7 +728,7 @@ export default function MetrologyLab() {
             </button>
           </div>
 
-          <div className="space-y-4 overflow-y-auto flex-1 pr-1">
+          <div className="grid grid-cols-2 gap-2 md:block md:space-y-4 overflow-y-auto flex-1 pr-1">
             {navGroups.map((group, idx) => (
               <div key={idx} className="space-y-1">
                 {!collapsed && <div className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 px-2">{group.group}</div>}
@@ -1443,7 +1444,7 @@ const TW_FALLBACK = "\n.lab-root{font-family:\"Inter Tight\",\"Segoe UI\",system
 
 const SCREEN = { grid: "#142030", major: "#24384c", axis: "#6b7c90", s11: "#5fd4ff", fit: "#ffb347", scope: "#ffe066", ldv: "#e879f9" };
 
-const ScreenTip = ({ active, payload, label, xFmt, yFmt }) => {
+const ScreenTip = ({ active = false, payload = [], label = null, xFmt, yFmt }) => {
   if (!active || !payload || !payload.length) return null;
   return (
     <div style={{ background: "rgba(6,10,16,.94)", border: "1px solid #2f4357", borderRadius: 6, padding: "6px 8px", fontFamily: "ui-monospace, monospace", fontSize: 11, color: "#cfe3f5" }}>
@@ -1472,11 +1473,11 @@ function GlowDefs({ id, color }) {
   );
 }
 
-function S11Plot({ trace, compact, progress = null }) {
+function S11Plot({ trace, compact = false, progress = null }) {
   const shown = progress == null ? trace : trace.slice(0, Math.max(2, Math.ceil(trace.length * progress)));
   const min = progress == null && trace.length ? trace.reduce((a, b) => (a.s11 < b.s11 ? a : b)) : null;
   const fs = compact ? 9 : 10;
-  const axisLabel = (value, angle) => compact ? undefined : { value, angle, position: angle ? "insideLeft" : "insideBottom", offset: angle ? 4 : -8, fill: SCREEN.axis, fontSize: 10 };
+  const axisLabel = (value, angle) => compact ? undefined : { value, angle, position: angle ? "insideLeft" as const : "insideBottom" as const, offset: angle ? 4 : -8, fill: SCREEN.axis, fontSize: 10 };
   return (
     <>
     <GlowDefs id="s11" color={SCREEN.s11} />
@@ -1497,7 +1498,7 @@ function S11Plot({ trace, compact, progress = null }) {
   );
 }
 
-function ScopePlot({ trace, scale, timebase, compact }) {
+function ScopePlot({ trace, scale = 0.5, timebase = 10, compact = false }) {
   const xt = Array.from({ length: 11 }, (_, i) => i * 25);
   const yt = Array.from({ length: 9 }, (_, i) => -1.5 + i * 0.375);
   return (
@@ -1544,7 +1545,7 @@ function SpectrumPlot({ data }) {
   );
 }
 
-function ChamberSVG({ state, mini, cv }) {
+function ChamberSVG({ state, mini = false, cv = null }) {
   const { stage, chamber, ldv, vna } = state;
   const px = 300 + stage.x * 4, py = 190 - stage.z * 3;
   const r = 24 + stage.y * 0.12;
@@ -1780,7 +1781,7 @@ function RotaryKnob({ value, min, max, label, unit = "" }) {
     </div>
   );
 }
-function TelemetryReadout({ label, value, unit = "", sub, tone = "#7dd3fc" }) {
+function TelemetryReadout({ label, value, unit = "", sub = null, tone = "#7dd3fc" }) {
   return (
     <div className="rounded border border-zinc-800 bg-black/60 px-2 py-1 font-mono">
       <div className="text-[9px] text-zinc-500">{label}</div>
@@ -1792,7 +1793,7 @@ function TelemetryReadout({ label, value, unit = "", sub, tone = "#7dd3fc" }) {
 function AnimatedScanCursor({ p }) {
   return <div aria-hidden="true" className="pointer-events-none absolute top-2 bottom-4 z-10" style={{ left: `calc(46px + (100% - 64px) * ${p})`, width: 2, background: "#22d3ee", boxShadow: "0 0 10px 2px rgba(34,211,238,.7)" }} />;
 }
-function SignalPath({ d, color, dash, active, label }) {
+function SignalPath({ d, color, dash = undefined, active, label }) {
   return <path d={d} fill="none" stroke={color} strokeWidth={active ? 2.5 : 1} strokeDasharray={dash} opacity={active ? 1 : 0.15} className={active ? "lab-deco sig-flow" : ""}><title>{label}{active ? " (active)" : " (idle)"}</title></path>;
 }
 
@@ -1855,8 +1856,9 @@ function SpatialMarks({ p, records, stage, planned, o, sx, sy, colorOf, get, uni
 
 function LabOverview({ state, dispatch }) {
   const go = id => dispatch({ type: "SET_UI", patch: { active: id } });
-  const al = state.alarms.filter(a => !a.acknowledged), src = {};
-  al.forEach(a => [[/turbo|vacuum|pressure|door/i, "chamber"], [/RF|VNA|sweep/i, "vna"], [/vibration|scope/i, "scope"], [/clock/i, "clock"], [/laser|LDV/i, "ldv"]].forEach(([r, k]) => { if (r.test(a.text)) src[k] = a.severity; }));
+  const al = state.alarms.filter(a => !a.acknowledged), src: Record<string, string> = {};
+  const alarmSources: [RegExp, string][] = [[/turbo|vacuum|pressure|door/i, "chamber"], [/RF|VNA|sweep/i, "vna"], [/vibration|scope/i, "scope"], [/clock/i, "clock"], [/laser|LDV/i, "ldv"]];
+  al.forEach(a => alarmSources.forEach(([r, k]) => { if (r.test(a.text)) src[k] = a.severity; }));
   const N = [
     { k: "clock", l: "Rb Clock", pg: "clock", x: 60, y: 60, w: 120, h: 70 }, { k: "vna", l: "VNA", pg: "vna", x: 60, y: 200, w: 120, h: 70 },
     { k: "scope", l: "Oscilloscope", pg: "scope", x: 60, y: 330, w: 120, h: 70 }, { k: "chamber", l: "Thermal-Vac Chamber", pg: "chamber", x: 330, y: 190, w: 170, h: 100 },
@@ -1942,7 +1944,8 @@ function TwDefs() {
 function twinExtra(st, g, sz) {
   const sc = k => ST[instStatus(st, k)][2], tn = k => ST[instStatus(st, k)][0], o = [];
   [["uldv", 850, "ldv", "LDV controller unit"], ["uenv", 600, "chamber", "Vacuum / thermal controller unit"]].forEach(([id, z, k, l]) => o.push({ id, g: "rack", label: l, k: "box", c: [1590, 0, z], s: [20, 560, 140], col: "#14181f", mt: "black", inst: k, note: tn(k) }));
-  [["uclk", 1600, "clock"], ["uvna", 1350, "vna"], ["uscp", 1100, "scope"], ["uldv", 850, "ldv"], ["uenv", 600, "chamber"]].forEach(([id, z, k]) => o.push({ id: "led" + id, g: "rack", label: "Status LED: " + tn(k), k: "box", c: [1579, -245, z - 45], s: [4, 24, 10], col: sc(k), mt: "emit", note: tn(k) }));
+  const rackLeds: [string, number, string][] = [["uclk", 1600, "clock"], ["uvna", 1350, "vna"], ["uscp", 1100, "scope"], ["uldv", 850, "ldv"], ["uenv", 600, "chamber"]];
+  rackLeds.forEach(([id, z, k]) => o.push({ id: "led" + id, g: "rack", label: "Status LED: " + tn(k), k: "box", c: [1579, -245, z - 45], s: [4, 24, 10], col: sc(k), mt: "emit", note: tn(k) }));
   [[-800, -500], [800, -500], [-800, 500], [800, 500]].forEach(([x, y], i) => { o.push({ id: "pad" + i, g: "table", label: "Rubber isolation pad", k: "box", c: [x, y, 12], s: [110, 110, 24], col: "#1d1f23", mt: "rubber" }); o.push({ id: "pis" + i, g: "table", label: "Isolator piston (detail)", k: "cyl", ax: "z", c: [x, y, 700], r: 20, len: 100, col: "#cbd5e1", mt: "steel", hi: 1 }); });
   o.push({ id: "lensA", g: "ldv", label: "LDV objective lens (optical glass)", k: "cyl", ax: "z", c: [0, 0, 1550], r: 55, len: 30, col: "#9fd0e8", mt: "glass", a: 0.55 });
   o.push({ id: "lensB", g: "ldv", label: "LDV B objective lens", k: "cyl", ax: "z", c: [650, -650, 1410], r: 45, len: 20, col: "#9fd0e8", mt: "glass", a: 0.55, conceptual: 1 });
@@ -2081,7 +2084,7 @@ function DigitalTwin({ state, dispatch }) {
   if (drag.current && drag.current.m > 4) tier = tier === "high" ? "normal" : "low";
   const TN = tier === "high" ? 20 : tier === "normal" ? 12 : 6;
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pit), sp = Math.sin(pit);
-  const P = (x, y, z) => { x -= t[0]; y -= t[1]; z -= t[2]; const x1 = x * cy - y * sy, y1 = x * sy + y * cy, y2 = y1 * cp - z * sp, z2 = y1 * sp + z * cp, k = 700 / Math.max(60, dist + y2); return [400 + x1 * k, 240 - z2 * k, y2, k]; };
+  const P = (...coordinates: number[]) => { let [x, y, z] = coordinates; x -= t[0]; y -= t[1]; z -= t[2]; const x1 = x * cy - y * sy, y1 = x * sy + y * cy, y2 = y1 * cp - z * sp, z2 = y1 * sp + z * cp, k = 700 / Math.max(60, dist + y2); return [400 + x1 * k, 240 - z2 * k, y2, k]; };
   const items = [];
   parts.forEach(p => {
     if (hid[p.g] || (solo && solo !== p.g)) return;
@@ -2133,7 +2136,7 @@ function DigitalTwin({ state, dispatch }) {
       { k: "wf", n: [0, 1, 0], q: [[-RX, -RY, 0], [RX, -RY, 0], [RX, -RY, RZ], [-RX, -RY, RZ]], m: Math.round(2 * RX / 1000) },
       { k: "ce", n: [0, 0, -1], q: [[-RX, -RY, RZ], [RX, -RY, RZ], [RX, RY, RZ], [-RX, RY, RZ]], m: 0 }
     ];
-    const shown = {};
+    const shown: Record<string, number> = {};
     W.forEach(w => {
       if (w.n[0] * Vt[0] + w.n[1] * Vt[1] + w.n[2] * Vt[2] < 0.15) return;
       shown[w.k] = 1; const [b0, b1, t1, t0] = w.q; let sm = "";
@@ -2161,7 +2164,8 @@ function DigitalTwin({ state, dispatch }) {
   cab("cabrf2", [[300, 0, 1100], [70, 40, 1100]], 5, "#cfd4da", "rf", "Internal RF coax");
   cab("cabfb", [[110, 0, 1760], [600, 0, 1950], [1580, 0, 1700]], 3, "#fde047", "ldv", "LDV fibre-optic cable (conceptual)");
   cab("cabse", [[-220, 220, 1000], [0, 250, 950], [300, -130, 1100]], 4, "#f59e0b", "probes", "Sensor cable");
-  if (tier !== "low" && vis("rack") && Math.sin(yaw) * cp > 0.05) [[1600, "clk"], [1350, "vna"], [1100, "scp"], [850, "ldv"], [600, "env"]].forEach(([zc, kk]) => {
+  const rackScreens: [number, string][] = [[1600, "clk"], [1350, "vna"], [1100, "scp"], [850, "ldv"], [600, "env"]];
+  if (tier !== "low" && vis("rack") && Math.sin(yaw) * cp > 0.05) rackScreens.forEach(([zc, kk]) => {
     const p0 = P(1579, 240, zc + 55), p1 = P(1579, -240, zc + 55), p2 = P(1579, 240, zc - 55), W = 240, H = 55;
     items.push({ d: p0[2] - 1, s: <g key={"scr" + kk} transform={`matrix(${(p1[0] - p0[0]) / W} ${(p1[1] - p0[1]) / W} ${(p2[0] - p0[0]) / H} ${(p2[1] - p0[1]) / H} ${p0[0]} ${p0[1]})`} style={{ pointerEvents: "none" }}><ScreenFace k={kk} st={state} /></g> });
   });
@@ -2174,7 +2178,7 @@ function DigitalTwin({ state, dispatch }) {
   const act = { clk: c && state.clock.locked, vna: state.vna.power, rf: state.vna.power && state.vna.rf, las: state.ldv.power && state.ldv.shutter, ldv: state.ldv.power };
   const sp0 = parts.find(q => q.id === sel);
   const key = e2 => { const q = camRef.current; if (e2.key === "ArrowLeft") setCam({ ...q, yaw: q.yaw - 0.1 }); else if (e2.key === "ArrowRight") setCam({ ...q, yaw: q.yaw + 0.1 }); else if (e2.key === "ArrowUp") setCam({ ...q, pit: Math.min(1.5, q.pit + 0.08) }); else if (e2.key === "ArrowDown") setCam({ ...q, pit: Math.max(-0.2, q.pit - 0.08) }); else if (e2.key === "+" || e2.key === "=") setCam({ ...q, dist: q.dist * 0.85 }); else if (e2.key === "-") setCam({ ...q, dist: q.dist / 0.85 }); else if (e2.key === "Escape") setSel(null); };
-  const B = ({ on, f, children }) => <button aria-pressed={on} onClick={f} className={`rounded border px-2 py-1 text-[10px] ${on ? "border-sky-500 text-sky-200" : "border-zinc-700 text-zinc-300"}`}>{children}</button>;
+  const B = ({ on = false, f, children }) => <button aria-pressed={on} onClick={f} className={`rounded border px-2 py-1 text-[10px] ${on ? "border-sky-500 text-sky-200" : "border-zinc-700 text-zinc-300"}`}>{children}</button>;
   const rows = [["Door", c.doorOpen ? "▲ OPEN" : "● closed"], ["Stage mm", `${g.x.toFixed(1)}, ${g.y.toFixed(1)}, ${g.z.toFixed(1)} (±${LIMIT_MM})`], ["Faraday", c.faraday ? "● on" : "▲ OFF (panel open)"], ["Isolation", c.isolation ? "● active" : "▲ OFF (jitter)"], ["Roughing", c.roughing ? "▶ running" : "○ off"], ["Turbo", c.turbo ? "▶ running" : "○ off"], ["LDV shutter", state.ldv.shutter ? "▶ open (beam)" : "○ closed"], ["VNA RF", act.rf ? "▶ on" : "○ off"], ["Clock ref", state.clock.locked ? "● locked" : "○ unlocked"]];
   return (
     <div className="space-y-2">
@@ -2187,7 +2191,7 @@ function DigitalTwin({ state, dispatch }) {
       <div className="flex flex-wrap items-center gap-1">
         {[["iso", "Isometric"], ["front", "Front"], ["top", "Top"], ["interior", "Chamber interior"], ["optical", "Optical path"], ["rf", "RF path"], ["vacuum", "Vacuum path"], ["rack", "Instrument rack"], ["stage", "Stage position"]].map(([n, l]) => <button key={n} onClick={() => goTo(n)} className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-sky-500">{l}</button>)}
       </div>
-      <div className="flex flex-col gap-3 lg:flex-row">
+      <div className="flex flex-col gap-3">
         <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800 bg-black">
           <svg ref={svgRef} viewBox="0 0 800 480" tabIndex={0} role="application" aria-label="3D laboratory digital twin. Drag to rotate, shift-drag to pan, wheel or plus and minus to zoom, arrow keys to orbit." onKeyDown={key} className="w-full cursor-grab touch-none select-none"
             onPointerDown={e => { drag.current = { x: e.clientX, y: e.clientY, m: 0 }; e.currentTarget.setPointerCapture(e.pointerId); }}
@@ -2207,7 +2211,7 @@ function DigitalTwin({ state, dispatch }) {
             <g fontFamily="monospace" fontSize="10" fill="#cbd5e1"><line x1="20" y1="455" x2={20 + nice * k0} y2="455" stroke="#e2e8f0" strokeWidth="2" /><line x1="20" y1="450" x2="20" y2="460" stroke="#e2e8f0" /><line x1={20 + nice * k0} y1="450" x2={20 + nice * k0} y2="460" stroke="#e2e8f0" /><text x="20" y="444">{nice >= 1000 ? nice / 1000 + " m" : nice + " mm"} (scale at focus)</text><text x="780" y="470" textAnchor="end" fill="#64748b">view dist {(dist / 1000).toFixed(2)} m · LOD {tier} · {items.length} faces</text></g>
           </svg>
         </div>
-        <div className="w-full space-y-2 text-[11px] lg:w-72">
+        <div className="w-full space-y-2 text-[11px]">
           <div className="rounded border border-zinc-800 bg-zinc-950 p-2">
             <div className="mb-1 font-bold text-zinc-300">Assemblies</div>
             {Object.keys(GRP).map(k => (
@@ -2922,7 +2926,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
                     <td className="p-2">{r.q}</td>
                     <td className={`p-2 font-bold ${r.valid ? "text-emerald-400" : "text-amber-400"}`}>{r.valid ? "VALID" : "SUSPECT"}</td>
                   </tr>
-                )) : <tr><td colSpan="5" className="p-8 text-center text-zinc-500">No recorded measurements. Start a run and trigger sweeps.</td></tr>}
+                )) : <tr><td colSpan={5} className="p-8 text-center text-zinc-500">No recorded measurements. Start a run and trigger sweeps.</td></tr>}
               </tbody>
             </table>
           </div>
