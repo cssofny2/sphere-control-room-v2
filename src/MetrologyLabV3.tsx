@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useReducer, useRef, useMemo, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
 } from 'recharts';
-import { 
-  Power, Settings, Activity, Thermometer, Wind, Target, Maximize, AlertCircle, 
+import {
+  Power, Settings, Activity, Thermometer, Wind, Target, Maximize, AlertCircle,
   Play, Square, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, CheckCircle2,
   Zap, BookOpen, Book, HelpCircle, X, Info, ShieldCheck, Download, Archive, ListOrdered, Save, BrainCircuit, TimerReset,
   AlertTriangle, Radio, ScanLine, Waves, FlaskConical, Cpu, Award, CheckSquare, FileText,
-  Sliders, Disc, Compass, Box, Orbit, Cuboid, Map, Video, PlaySquare, MonitorPlay, Tv, Wrench, Compass as CompassIcon,
+  Sliders, Disc, Compass, Box, Orbit, Cuboid, Video, PlaySquare, MonitorPlay, Tv, Wrench, Compass as CompassIcon,
   Search, Command, Filter, Terminal, Layers, FileSpreadsheet
 } from 'lucide-react';
 
@@ -79,9 +79,9 @@ const initialState = {
   clock: { power: false, warmup: 0, locked: false, holdover: false, distributionAmplifier: true, cableFault: false, timeSinceLock: 0 },
   chamber: {
     targetTemp: 20.0, temperature: 22.0, pressure: 760, vent: true, roughing: false,
-    turbo: false, thermostat: true, faraday: true, isolation: true, doorOpen: false
+    turbo: false, turboRpm: 0, roughingRpm: 0, pumpPhase: "vented", pumpPhaseTime: 0, pressureRate: 0, thermostat: true, faraday: true, isolation: true, doorOpen: false
   },
-  stage: { x: 0.0, y: 0.0, z: 0.0, homed: true, moving: false, clampActive: false },
+  stage: { x: 0.0, y: 0.0, z: 0.0, actualX: 0.0, actualY: 0.0, actualZ: 0.0, vx: 0, vy: 0, vz: 0, homed: true, moving: false, settling: false, settleTime: 0, clampActive: false, motionId: 0, lastCompletedMotionId: 0 },
   vna: {
     power: false, rf: false, continuous: true, sweepMode: "continuous", triggerMode: "internal",
     center: BASE_FREQUENCY, span: 5000, startFrequency: 228000, stopFrequency: 233000,
@@ -89,14 +89,15 @@ const initialState = {
     calibrated: false, calibrationType: "none", calibrationTime: null, calibrationAgeSeconds: 0,
     trace: [], reference: [], markers: [], traceMath: "live", sweeping: false
   },
-  ldv: { 
+  ldv: {
+    scanPhase: 0, opticalQuality: 100, laserReturn: 0,
     power: false, shutter: false, range: "20 mm/s/V", filter: "10 MHz", grid: 64,
     laserPower: 50, focus: 0, alignmentX: 0, alignmentY: 0, opticalReturn: 85,
     signalQuality: "good", decoderLocked: true, measurementMode: "velocity",
     scanPattern: "grid", scanProgress: 0, scanActive: false, modeShapeData: []
   },
-  scope: { 
-    power: false, running: true, timebase: 10, scale: 0.5, 
+  scope: {
+    power: false, running: true, timebase: 10, scale: 0.5,
     triggerMode: "edge", triggerSource: "CH1", triggerLevel: 0, acquisitionMode: "sample",
     channels: {
       ch1: { enabled: true, scale: 0.5, offset: 0, coupling: "DC", source: "rf_monitor" },
@@ -116,11 +117,13 @@ const initialState = {
     activeSlice: { x: 0, y: 0, z: 0 }
   },
   failures: { clockDrift: false, ldvMisalign: false, vacuumLeak: false, emiSpike: false, stageBacklash: false },
-  experiment: {
+  experiment: { scanActive:false, scanPaused:false, scanProgress:0, scanPath:[], currentScanIndex:0, scanStep:"idle", scanRecordBaseline:0, heatmapPulse:false, scanMessage:"Ready", adaptiveRescan:true, maxRescans:2, rescanCounts:{}, qualityResults:{}, acceptedPoints:0, suspectPoints:0, failedPoints:0, adaptiveMessage:"Quality gate ready",
     id: null, active: false, axis: "x", start: -20, stop: 20,
     step: 5, repeats: 3, randomized: true, records: []
   },
   ui: { active: "dashboard", modal: null, alarmsOpen: false, helpModal: null, glossaryOpen: false, manualOpen: false, peerModal: false, videoModal: false, activeVideo: TUTORIAL_VIDEOS[0], confirmModal: null, validatorModalOpen: false, wizardOpen: false, cmdPaletteOpen: false, navCollapsed: false, calModalOpen: false },
+  notebook: [],
+  faultDrill: { hiddenKey: null, revealed: false, startedAt: null },
   badges: [],
   activeChallenge: null,
   challengePassed: {},
@@ -135,15 +138,15 @@ const now = () => new Date().toLocaleTimeString();
 const fmtPressure = p => p >= 10 ? `${p.toFixed(1)} Torr` : `${p.toExponential(1)} Torr`;
 
 function addEvent(state, text, level = "info", subsystem = "SYSTEM", x = null, y = null, z = null, runId = null) {
-  const ev = { 
-    id: Math.random(), 
-    time: now(), 
+  const ev = {
+    id: Math.random(),
+    time: now(),
     simulationTime: Math.floor(state.facility.simulationTime),
-    subsystem, 
-    text, 
-    level, 
-    x, y, z, 
-    runId: runId || state.experiment.id 
+    subsystem,
+    text,
+    level,
+    x, y, z,
+    runId: runId || state.experiment.id
   };
   return { ...state, events: [ev, ...state.events].slice(0, 200) };
 }
@@ -161,7 +164,7 @@ function getMeasurementValidation(state) {
   const tempPass = tempDiff < 0.03;
   const faradayPass = state.chamber.faraday;
   const isolationPass = state.chamber.isolation;
-  const stagePass = !state.stage.moving && !state.stage.clampActive;
+  const stagePass = !state.stage.moving && !state.stage.settling && !state.stage.clampActive && (state.stage.positionError ?? 0) < 0.075;
   const vnaCalibPass = state.vna.calibrated && state.vna.calibrationAgeSeconds < 3600;
 
   const rules = [
@@ -209,10 +212,72 @@ function getMeasurementValidation(state) {
   return { overall, rules };
 }
 
+function evaluateScanRecord(record,state){
+  const checks=[
+    {id:"record_valid",pass:record.valid===true,weight:3,label:"Measurement validity"},
+    {id:"uncertainty",pass:Number(record.uncertaintyHz)<=1,weight:2,label:"Uncertainty ≤ 1 Hz"},
+    {id:"clock",pass:record.clockLocked===true,weight:3,label:"Clock locked"},
+    {id:"calibration",pass:record.vnaCalibrated===true,weight:2,label:"VNA calibrated"},
+    {id:"shield",pass:record.faradayEnabled===true,weight:2,label:"Faraday enabled"},
+    {id:"isolation",pass:record.isolationEnabled===true,weight:2,label:"Isolation enabled"},
+    {id:"ldv",pass:Number(record.ldvSignal)>=60,weight:1,label:"LDV return ≥ 60%"},
+    {id:"stage",pass:(state.stage.positionError??0)<.075,weight:3,label:"Stage within tolerance"}
+  ];
+  const failed=checks.filter(c=>!c.pass),score=Math.round(100*(checks.reduce((a,c)=>a+(c.pass?c.weight:0),0)/checks.reduce((a,c)=>a+c.weight,0)));
+  const critical=failed.some(c=>["clock","stage","record_valid"].includes(c.id));
+  return {status:failed.length===0?"accepted":critical||score<70?"failed":"suspect",score,checks,failed:failed.map(c=>c.id),reason:failed.map(c=>c.label).join(", ")||"All quality checks passed"};
+}
+
+function csvEscape(v){const t=String(v??"");return /[",\n]/.test(t)?`"${t.replace(/"/g,'""')}"`:t;}
+function downloadBlob(blob,filename){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function buildQualitySummary(experiment){const entries=Object.entries((experiment.qualityResults||{}) as Record<string, ReturnType<typeof evaluateScanRecord>>).map(([point,result])=>({point:Number(point)+1,...result,retries:experiment.rescanCounts?.[point]||0}));const total=entries.length,accepted=entries.filter(x=>x.status==="accepted").length,suspect=entries.filter(x=>x.status==="suspect").length,failed=entries.filter(x=>x.status==="failed").length;return {runId:experiment.id||null,total,accepted,suspect,failed,acceptanceRate:total?Math.round(accepted*100/total):0,maxRescans:experiment.maxRescans??0,adaptiveRescan:experiment.adaptiveRescan!==false,results:entries};}
+function exportQualityJson(experiment){downloadBlob(new Blob([JSON.stringify(buildQualitySummary(experiment),null,2)],{type:"application/json"}),`${experiment.id||"sphere"}-quality-summary.json`);}
+function exportQualityCsv(experiment){const q=buildQualitySummary(experiment),rows=[["point","status","score","retries","failed_checks","reason"],...q.results.map(x=>[x.point,x.status,x.score,x.retries,(x.failed||[]).join("|"),x.reason])];downloadBlob(new Blob([rows.map(r=>r.map(csvEscape).join(",")).join("\n")],{type:"text/csv;charset=utf-8"}),`${experiment.id||"sphere"}-quality-results.csv`);}
+
+function createSerpentineScanPlan(){const v=[-20,-10,0,10,20],out=[];v.forEach((y,row)=>{const xs=row%2?[...v].reverse():v;xs.forEach(x=>out.push({x,y,z:0,kind:(x===0&&y===0)?"reference":"measurement"}))});return out;}
+
+const FAULT_CATALOG = {
+  clockDrift: { title: "Rubidium clock drift", symptoms: "Reference reports unlocked, VNA peak wanders, clock-noise term rises.", fix: "Check the Frequency Reference panel and Validation rules; clear the drift fault and confirm lock before measuring." },
+  ldvMisalign: { title: "LDV misalignment", symptoms: "Optical return and signal quality drop; scan data becomes patchy.", fix: "Re-align LDV X/Y and refocus; verify optical quality recovers." },
+  vacuumLeak: { title: "Vacuum leak", symptoms: "Pressure rises again after pumping; turbo cannot hold deep vacuum.", fix: "Watch the pressure rate on the Chamber panel; the leak must be cleared before pressure can drop below 1e-3 Torr." },
+  emiSpike: { title: "EMI spike", symptoms: "Strong interference tone on the scope and elevated VNA noise even with the Faraday cage on.", fix: "Inspect the scope FFT; shielding alone will not fix an active source, so clear the fault." },
+  stageBacklash: { title: "Stage backlash", symptoms: "XYZ stage never fully settles; small jitter on actual position; LDV quality dips.", fix: "Compare commanded vs actual position and wait for settle before recording." }
+};
+
+function getCopilotAdvice(state, validation) {
+  const tips = [];
+  const push = (priority, title, body, tab) => tips.push({ priority, title, body, tab });
+  if (!state.facility.power) { push(0, "Close the main breaker", "Nothing else can run until facility AC is online.", "dashboard"); return tips; }
+  if (!state.clock.power) push(1, "Power the Rubidium clock", "Without an external 10 MHz lock, every measurement is flagged invalid.", "clock");
+  else if (!state.clock.locked) push(1, "Wait for clock lock", `Warm-up is in progress (${Math.round(state.clock.warmup || 0)}s). Do not record until LOCKED.`, "clock");
+  if (state.chamber.pressure >= 1e-3) push(2, "Pump the chamber down", `Pressure is ${fmtPressure(state.chamber.pressure)}; target is below 1e-3 Torr. ${state.chamber.roughing ? (state.chamber.pressure < 50 && !state.chamber.turbo ? "Roughing is below 50 Torr, so engage the turbo pump." : "Roughing pump is running.") : "Start the roughing pump first."}`, "chamber");
+  const tempDiff = Math.abs(state.chamber.temperature - state.chamber.targetTemp);
+  if (tempDiff >= 0.03) push(3, "Let temperature settle", `${tempDiff.toFixed(3)} °C from setpoint; needs under 0.03 °C.${state.chamber.thermostat ? "" : " The thermostat is off, so enable it."}`, "chamber");
+  if (!state.chamber.faraday) push(2, "Enable the Faraday cage", "RF noise is contaminating the S11 trace.", "chamber");
+  if (!state.chamber.isolation) push(2, "Re-enable vibration isolation", "LDV and scope noise are elevated while the platform is bypassed.", "chamber");
+  if (!state.vna.power) push(4, "Power the VNA", "Turn on power and RF output to see the S11 resonance.", "vna");
+  else if (!state.vna.calibrated) push(4, "Calibrate the VNA", "Run a calibration over the current span (calibration is invalidated when the span changes).", "vna");
+  else if (state.vna.calibrationAgeSeconds >= 3600) push(4, "Calibration expired", "Calibration is over 1 hour old. Recalibrate.", "vna");
+  if (state.stage.moving || state.stage.settling) push(5, "Wait for stage to settle", "Recording during motion adds position error.", "chamber");
+  if (!state.ldv.power || !state.ldv.shutter) push(6, "Prepare the LDV", "Power it on and open the shutter if you need structural displacement data.", "ldv");
+  const active = Object.keys(state.failures).filter(k => state.failures[k]);
+  if (active.length && !(state.faultDrill?.hiddenKey && !state.faultDrill.revealed)) active.forEach(k => push(1, `Active fault: ${FAULT_CATALOG[k]?.title || k}`, FAULT_CATALOG[k]?.fix || "Clear this fault.", "faults"));
+  const recs = state.experiment.records || [];
+  if (recs.length === 0 && tips.length === 0) push(7, "Ready to measure", "All validation rules pass. Start a scan plan from Experiment Runs.", "runs");
+  if (recs.length >= 3) {
+    const bad = recs.filter(r => r.valid === false || r.excluded).length;
+    const maxU = Math.max(...recs.map(r => Number(r.uncertaintyHz) || 0));
+    if (bad / recs.length > 0.3) push(5, "Many records are invalid", `${bad} of ${recs.length} records failed validation. Check which rules were failing when they were taken.`, "runs");
+    if (maxU > 1) push(6, "Uncertainty above 1 Hz", `Worst record is ${maxU.toFixed(2)} Hz. Improve lock, thermal stability or averaging, then repeat.`, "runs");
+    if (recs.length < 5) push(8, "Add repeats", "Fewer than 5 records is weak for separating a location effect from drift. Randomize order and repeat.", "runs");
+  }
+  return tips.sort((a, b) => a.priority - b.priority);
+}
+
 function reducer(state, action) {
   switch (action.type) {
     case "POWER": {
-      if (!action.value) return addEvent({ ...initialState, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
+      if (!action.value) return addEvent({ ...initialState, notebook: state.notebook, faultDrill: initialState.faultDrill, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
       return addEvent({ ...state, facility: { ...state.facility, power: true } }, "MAIN BREAKER closed; facility AC online.", "info", "SYSTEM");
     }
     case "SET_MODE": {
@@ -242,40 +307,90 @@ function reducer(state, action) {
     case "MOVE_STAGE": {
       if (!state.facility.power || state.chamber.doorOpen) return addAlarm(state, "Stage move rejected: facility offline or chamber access door open.", "critical");
       if (state.stage.clampActive) return addAlarm(state, "Stage move rejected: mechanical clamp is active.", "critical");
-      let pos = action.position;
-      if (state.failures.stageBacklash) {
-        Object.keys(pos).forEach(k => { pos[k] += (Math.random() - 0.5) * 0.4; });
-      }
-      const stage = { ...state.stage, ...pos, moving: false };
-      return addEvent({ ...state, stage }, `Stage positioned at X ${stage.x.toFixed(3)}, Y ${stage.y.toFixed(3)}, Z ${stage.z.toFixed(3)} mm.`, "info", "CHAMBER", stage.x, stage.y, stage.z);
+      if (state.chamber.vent) return addAlarm(state, "Stage move rejected: chamber vent cycle is active.", "warning");
+      const pos = Object.fromEntries(Object.entries(action.position || {}).map(([k,v]) => [k, clamp(Number(v), -LIMIT_MM, LIMIT_MM)]));
+      const stage = { ...state.stage, ...pos, moving: true, settling: false, settleTime: 0, motionId: (state.stage.motionId || 0) + 1 };
+      return addEvent({ ...state, stage }, `Stage command accepted: X ${stage.x.toFixed(3)}, Y ${stage.y.toFixed(3)}, Z ${stage.z.toFixed(3)} mm.`, "info", "CHAMBER", stage.x, stage.y, stage.z);
     }
     case "HOME_STAGE": {
       if (state.stage.clampActive) return addAlarm(state, "Stage homing rejected: mechanical clamp is active.", "critical");
-      return addEvent({ ...state, stage: { ...state.stage, x: 0, y: 0, z: 0, homed: true } }, "XYZ stage homed at reference coordinate.", "info", "CHAMBER", 0, 0, 0);
+      if (!state.facility.power || state.chamber.doorOpen) return addAlarm(state, "Stage homing rejected: facility offline or chamber door open.", "critical");
+      const stage = { ...state.stage, x: 0, y: 0, z: 0, homed: false, moving: true, settling: false, settleTime: 0, motionId: (state.stage.motionId || 0) + 1 };
+      return addEvent({ ...state, stage }, "XYZ stage homing command accepted.", "info", "CHAMBER", 0, 0, 0);
     }
     case "CALIBRATE_VNA": {
-      const vna = { 
-        ...state.vna, 
-        calibrated: true, 
-        calibrationType: action.calType || "SOLT 1-Port", 
+      const vna = {
+        ...state.vna,
+        calibrated: true,
+        calibrationType: action.calType || "SOLT 1-Port",
         calibrationTime: new Date().toLocaleTimeString(),
-        calibrationAgeSeconds: 0 
+        calibrationAgeSeconds: 0
       };
       return addEvent({ ...state, vna }, `VNA calibration completed (${vna.calibrationType}); state VALID.`, "info", "VNA");
     }
     case "CAPTURE_REFERENCE": return addEvent({ ...state, vna: { ...state.vna, reference: state.vna.trace } }, "Reference trace captured.", "info", "VNA");
+    case "START_SCAN": {
+      if (!state.facility.power || !state.vna.power || !state.vna.rf) return addAlarm(state, "Automated scan requires facility power, VNA power, and RF output.", "warning");
+      if (state.stage.clampActive || state.chamber.doorOpen || state.chamber.vent) return addAlarm(state, "Automated scan blocked by stage or chamber interlock.", "critical");
+      const plan = action.plan?.length ? action.plan : createSerpentineScanPlan();
+      const experiment = { ...state.experiment, active:true, id:uid(), records:[], scanActive:true, scanPaused:false, scanPath:plan, currentScanIndex:0, scanProgress:0, scanStep:"command", scanRecordBaseline:0, scanMessage:"Commanding point 1", rescanCounts:{}, qualityResults:{}, acceptedPoints:0, suspectPoints:0, failedPoints:0, adaptiveMessage:"Awaiting first acquisition" };
+      return addEvent({ ...state, experiment }, `Automated scan started with ${plan.length} planned points.`, "info", "RESEARCH");
+    }
+    case "PAUSE_SCAN": return addEvent({ ...state, experiment:{...state.experiment,scanPaused:true,scanMessage:"Paused by operator"} }, "Automated scan paused.", "warning", "RESEARCH");
+    case "RESUME_SCAN": return addEvent({ ...state, experiment:{...state.experiment,scanPaused:false,scanStep:state.experiment.scanStep==="fault"?"command":state.experiment.scanStep,scanMessage:"Resuming sequence"} }, "Automated scan resumed.", "info", "RESEARCH");
+    case "ABORT_SCAN": return addEvent({ ...state, experiment:{...state.experiment,active:false,scanActive:false,scanPaused:false,scanStep:"idle",scanMessage:"Aborted"} }, "Automated scan aborted.", "warning", "RESEARCH");
+    case "QUALITY_DECISION": {
+      const i=state.experiment.currentScanIndex,key=String(i),q=action.quality,retries=state.experiment.rescanCounts[key]||0;
+      const qualityResults={...state.experiment.qualityResults,[key]:q};
+      if(q.status==="accepted"){
+        const experiment={...state.experiment,qualityResults,acceptedPoints:state.experiment.acceptedPoints+1,adaptiveMessage:`Point ${i+1} accepted · score ${q.score}%`,scanStep:"quality_complete"};
+        return addEvent({...state,experiment},`Quality accepted at point ${i+1}: ${q.score}%.`,"info","RESEARCH");
+      }
+      if(state.experiment.adaptiveRescan&&retries<state.experiment.maxRescans){
+        const rescanCounts={...state.experiment.rescanCounts,[key]:retries+1};
+        const experiment={...state.experiment,qualityResults,rescanCounts,scanStep:"rescan_prepare",adaptiveMessage:`Adaptive rescan ${retries+1}/${state.experiment.maxRescans}: ${q.reason}`};
+        const vna={...state.vna,points:Math.min(1001,Math.max(state.vna.points,401)+200),ifbw:Math.max(1,(state.vna.ifbw||10)/2),averagingEnabled:true,averagingCount:Math.max(4,state.vna.averagingCount||1)};
+        return addEvent({...state,experiment,vna},`Adaptive rescan queued for point ${i+1}: ${q.reason}.`,"warning","RESEARCH");
+      }
+      const countKey=q.status==="suspect"?"suspectPoints":"failedPoints";
+      const experiment={...state.experiment,qualityResults,[countKey]:state.experiment[countKey]+1,adaptiveMessage:`Point ${i+1} ${q.status} after ${retries} retries`,scanStep:"quality_complete"};
+      return addEvent({...state,experiment},`Quality ${q.status} at point ${i+1}: ${q.reason}.`,q.status==="failed"?"critical":"warning","RESEARCH");
+    }
+    case "ADVANCE_SCAN": {
+      const nextIndex=state.experiment.currentScanIndex+1, done=nextIndex>=state.experiment.scanPath.length;
+      const experiment={...state.experiment,currentScanIndex:done?state.experiment.currentScanIndex:nextIndex,scanProgress:done?1:nextIndex/state.experiment.scanPath.length,scanStep:done?"complete":"command",scanActive:!done,active:!done,heatmapPulse:true,scanMessage:done?"Scan complete":`Commanding point ${nextIndex+1}`};
+      return addEvent({...state,experiment},done?"Automated scan completed.":`Advancing to scan point ${nextIndex+1}.`,"info","RESEARCH");
+    }
+    case "SET_SCAN_STEP": return { ...state, experiment:{...state.experiment,...action.patch} };
     case "START_RUN": {
       const id = uid();
       return addEvent({ ...state, experiment: { ...state.experiment, active: true, id, records: [] } }, `Experiment ${id} started.`, "info", "RESEARCH", null, null, null, id);
     }
     case "STOP_RUN": {
-      const nextState = addEvent({ ...state, experiment: { ...state.experiment, active: false } }, `Experiment run stopped.`, "warning", "RESEARCH");
+      const nextState = addEvent({ ...state, experiment: { ...state.experiment, active: false, scanActive: false, scanPaused: false, scanStep: "idle" } }, `Experiment run stopped.`, "warning", "RESEARCH");
       if (state.facility.mode === "peer") {
         return { ...nextState, ui: { ...nextState.ui, peerModal: true } };
       }
       return nextState;
     }
     case "RECORD": return { ...state, experiment: { ...state.experiment, records: [action.record, ...state.experiment.records].slice(0, 200) } };
+    case "SET_FAILURE": {
+      const label = FAULT_CATALOG[action.key]?.title || action.key;
+      const next = { ...state, failures: { ...state.failures, [action.key]: action.value } };
+      if (action.silent) return next;
+      const withEv = addEvent(next, `Fault ${action.value ? "INJECTED" : "CLEARED"}: ${label}`, action.value ? "warning" : "info", "FAULT");
+      return action.value ? addAlarm(withEv, `Fault simulator: ${label} active.`, "warning") : withEv;
+    }
+    case "CLEAR_FAILURES": return addEvent({ ...state, failures: { ...initialState.failures }, faultDrill: initialState.faultDrill }, "All simulated faults cleared.", "info", "FAULT");
+    case "START_FAULT_DRILL": {
+      const keys = Object.keys(FAULT_CATALOG);
+      const hiddenKey = keys[Math.floor(Math.random() * keys.length)];
+      const cleared = { ...initialState.failures, [hiddenKey]: true };
+      return addEvent({ ...state, failures: cleared, faultDrill: { hiddenKey, revealed: false, startedAt: Math.floor(state.facility.simulationTime) } }, "Blind fault drill started: diagnose the hidden fault.", "warning", "FAULT");
+    }
+    case "REVEAL_FAULT_DRILL": return { ...state, faultDrill: { ...state.faultDrill, revealed: true } };
+    case "NOTEBOOK_ADD": return addEvent({ ...state, notebook: [action.entry, ...state.notebook].slice(0, 300) }, `Notebook entry added (${action.entry.tag}).`, "info", "NOTEBOOK");
+    case "NOTEBOOK_DELETE": return { ...state, notebook: state.notebook.filter(n => n.id !== action.id) };
     case "TICK": return tick(state, action.dt);
     default: return state;
   }
@@ -288,7 +403,7 @@ function noise(i, seed) {
 
 function trueFrequency(state) {
   const { stage, chamber, model, clock, failures } = state;
-  const loc = model.location ? stage.x * 45.2 + stage.y * -12.5 + stage.z * 80.1 : 0;
+  const loc = model.location ? (stage.actualX ?? stage.x) * 45.2 + (stage.actualY ?? stage.y) * -12.5 + (stage.actualZ ?? stage.z) * 80.1 : 0;
   const thermal = model.temperature ? (chamber.temperature - 20) * 5 : 0;
   const air = model.pressure ? (chamber.pressure > 1 ? -250 : -Math.log10(Math.max(chamber.pressure, 1e-8)) * .3) : 0;
   const clockDrift = (model.clockDrift && (!clock.locked || clock.cableFault)) || failures.clockDrift ? 15.5 : 0;
@@ -303,7 +418,7 @@ function buildSweep(state) {
   const rfNoise = (state.model.rfNoise && !chamber.faraday) || failures.emiSpike ? 4.5 : .18;
   const clockNoise = clock.locked && !clock.cableFault && !failures.clockDrift ? .02 : 1.2;
   const n = Math.max(101, Math.min(1001, vna.points));
-  
+
   let start = vna.startFrequency;
   let stop = vna.stopFrequency;
   if (vna.center && vna.span) {
@@ -320,7 +435,9 @@ function buildSweep(state) {
     }
     const normalized = 2 * (f - resonance) / (resonance / q);
     const dip = -28 / (1 + normalized * normalized);
-    const jitter = (noise(i + facility.simulationTime * 7, facility.seed) - .5) * (rfNoise + clockNoise);
+    const averagingGain = vna.averagingEnabled ? Math.sqrt(Math.max(1, vna.averagingCount)) : 1;
+    const bandwidthGain = Math.sqrt(clamp((vna.ifbw || 100) / 100, 0.01, 10));
+    const jitter = (noise(i + facility.simulationTime * 7, facility.seed) - .5) * (rfNoise + clockNoise) * bandwidthGain / averagingGain;
     let s11Val = -2 + dip + jitter;
 
     if (vna.traceMath === "ref" && vna.reference.length === n) {
@@ -348,21 +465,49 @@ function buildScope(state) {
   });
 }
 
+function getPumpLifecycle(state){
+  const c=state.chamber;
+  if(!state.facility.power)return {id:"offline",visual:"offline",label:"Pumps offline",detail:"Facility power unavailable."};
+  if(state.failures.vacuumLeak)return {id:"fault",visual:"fault",label:"Vacuum leak",detail:"Pressure cannot be reduced while the leak fault is active."};
+  if(c.doorOpen)return {id:"interlock",visual:"fault",label:"Door interlock",detail:"Close the chamber door before pumping."};
+  if(c.turbo&&c.pressure>50)return {id:"turbo_protection",visual:"fault",label:"Turbo protection",detail:"Turbo command is blocked above the 50 Torr crossover threshold."};
+  if(c.vent)return {id:"venting",visual:"warning",label:"Venting",detail:"Gas is flowing into the chamber toward atmosphere."};
+  if(c.turbo&&c.turboRpm<90)return {id:"turbo_spinup",visual:"booting",label:"Turbo spin-up",detail:`Rotor speed ${c.turboRpm.toFixed(0)}%.`};
+  if(c.turbo&&c.pressure>1e-3)return {id:"high_vacuum_pumpdown",visual:"active",label:"High-vacuum pumpdown",detail:"Turbo pump is removing residual gas."};
+  if(c.turbo&&c.pressure<=1e-3)return {id:"high_vacuum",visual:"stable",label:"High vacuum",detail:"Vacuum environment is quiet and within the high-vacuum band."};
+  if(c.roughing)return {id:"roughing",visual:"active",label:"Roughing",detail:"Mechanical pump is reducing chamber pressure."};
+  if(c.turboRpm>2)return {id:"turbo_spindown",visual:"settling",label:"Turbo spin-down",detail:`Rotor coasting at ${c.turboRpm.toFixed(0)}%.`};
+  return {id:c.pressure>700?"vented":"hold",visual:c.pressure>700?"standby":"ready",label:c.pressure>700?"Vented":"Vacuum hold",detail:c.pressure>700?"Chamber is near atmospheric pressure.":"Pumps are off; chamber pressure is drifting."};
+}
 function tick(state, dt) {
   if (!state.facility.power) return state;
   const speed = state.facility.speed;
   const elapsed = state.facility.simulationTime + dt * speed;
   const chamber = { ...state.chamber };
-  chamber.temperature += (chamber.thermostat ? chamber.targetTemp - chamber.temperature : AMBIENT_C - chamber.temperature) * (chamber.thermostat ? .10 : .035) * speed;
-  if (state.failures.vacuumLeak) { chamber.pressure = 760; }
-  else if (chamber.vent || chamber.doorOpen) { chamber.pressure = 760; chamber.turbo = false; chamber.roughing = false; }
-  else if (chamber.turbo && chamber.pressure < 10) chamber.pressure = Math.max(1e-6, chamber.pressure * Math.pow(.72, speed));
-  else if (chamber.roughing) chamber.pressure = Math.max(.01, chamber.pressure * Math.pow(.88, speed));
-  else chamber.pressure = Math.min(760, chamber.pressure * Math.pow(1.02, speed));
-  
+  chamber.temperature += (chamber.thermostat ? chamber.targetTemp - chamber.temperature : AMBIENT_C - chamber.temperature) * (chamber.thermostat ? .10 : .035) * speed * dt;
+  const previousPressure = chamber.pressure, pumpDt = Math.min(.1,dt) * Math.min(6,Math.max(1,Math.sqrt(speed)));
+  const roughTarget = chamber.roughing && !chamber.vent && !chamber.doorOpen ? 100 : 0;
+  const turboAllowed = chamber.turbo && !chamber.vent && !chamber.doorOpen && chamber.pressure <= 50;
+  const turboTarget = turboAllowed ? 100 : 0;
+  chamber.roughingRpm = clamp((chamber.roughingRpm||0) + clamp(roughTarget-(chamber.roughingRpm||0),-70*pumpDt,90*pumpDt),0,100);
+  chamber.turboRpm = clamp((chamber.turboRpm||0) + clamp(turboTarget-(chamber.turboRpm||0),-18*pumpDt,12*pumpDt),0,100);
+  if (state.failures.vacuumLeak) chamber.pressure = Math.min(760,chamber.pressure + 220*dt*speed);
+  else if (chamber.vent || chamber.doorOpen) { chamber.pressure = Math.min(760,chamber.pressure + Math.max(2,(760-chamber.pressure)*.16)*dt*speed); chamber.turbo=false; chamber.roughing=false; }
+  else {
+    const roughFactor = Math.pow(1-.12*(chamber.roughingRpm/100),speed*dt);
+    const turboFactor = Math.pow(1-.28*(chamber.turboRpm/100),speed*dt);
+    if(chamber.roughingRpm>1) chamber.pressure=Math.max(chamber.turboRpm>5?1e-6:Math.min(.01,chamber.pressure),chamber.pressure*roughFactor);
+    if(chamber.turboRpm>5 && chamber.pressure<55) chamber.pressure=Math.max(1e-6,chamber.pressure*turboFactor);
+    if(chamber.roughingRpm<=1&&chamber.turboRpm<=1) chamber.pressure=Math.min(760,chamber.pressure*Math.pow(1.02,speed*dt));
+  }
+  chamber.pressureRate=(chamber.pressure-previousPressure)/Math.max(dt,.001);
+  const pumpLife=getPumpLifecycle({...state,chamber});
+  chamber.pumpPhase=pumpLife.id;
+  chamber.pumpPhaseTime=pumpLife.id===state.chamber.pumpPhase?(state.chamber.pumpPhaseTime||0)+dt*speed:0;
+
   const clock = { ...state.clock };
-  if (clock.power && !clock.locked && !state.failures.clockDrift) { 
-    clock.warmup += dt * speed; 
+  if (clock.power && !clock.locked && !state.failures.clockDrift) {
+    clock.warmup += dt * speed;
     if (clock.warmup >= WARMUP_SECONDS) {
       clock.locked = true;
       clock.timeSinceLock = 0;
@@ -370,7 +515,7 @@ function tick(state, dt) {
   } else if (clock.locked) {
     clock.timeSinceLock += dt * speed;
   }
-  
+
   const vna = { ...state.vna };
   if (vna.calibrated) {
     vna.calibrationAgeSeconds += dt * speed;
@@ -380,11 +525,53 @@ function tick(state, dt) {
   if (vna.power && vna.rf && vna.continuous && vna.triggerMode === "internal") {
     vna.trace = buildSweep({ ...state, chamber, clock, vna, facility: { ...state.facility, simulationTime: elapsed } });
   }
-  
+
   const scope = { ...state.scope };
   if (scope.power && scope.running) scope.trace = buildScope({ ...state, chamber, clock, vna, scope, facility: { ...state.facility, simulationTime: elapsed } });
-  
-  let next = { ...state, chamber, clock, vna, scope, facility: { ...state.facility, simulationTime: elapsed } };
+
+
+  const envNoise=(!chamber.isolation?18:0)+(!chamber.faraday?10:0)+(Math.abs(chamber.temperature-chamber.targetTemp)>0.03?8:0);
+  const ldv={...state.ldv}; ldv.scanPhase=((ldv.scanPhase||0)+dt*(state.ldv.shutter?0.8:0))%1;
+  const alignmentPenalty=Math.min(75,(Math.abs(ldv.alignmentX||0)+Math.abs(ldv.alignmentY||0))*4+Math.abs(ldv.focus||0)*3)+(state.failures.ldvMisalign?65:0);
+  ldv.opticalQuality=Math.max(0,100-envNoise-alignmentPenalty-(state.failures.stageBacklash?10:0)); ldv.laserReturn=ldv.power&&ldv.shutter?ldv.opticalQuality/100:0;
+  scope.persistence=Math.min(1,(scope.persistence||0)+(scope.running?dt*0.7:-dt*0.5)); scope.triggerState=scope.running?(envNoise>20?'unstable':'triggered'):'armed';
+const stage = { ...state.stage };
+  const servoDt = Math.min(0.08, dt) * Math.min(4, Math.max(1, Math.sqrt(speed)));
+  const maxVel = 14, accel = 42, decel = 48, posTol = 0.025, velTol = 0.05;
+  const axes = [["x","actualX","vx"],["y","actualY","vy"],["z","actualZ","vz"]];
+  let totalErr = 0, peakVel = 0;
+  for (const [cmdKey, actKey, velKey] of axes) {
+    let actual = Number.isFinite(stage[actKey]) ? stage[actKey] : stage[cmdKey];
+    let velocity = Number.isFinite(stage[velKey]) ? stage[velKey] : 0;
+    const command = stage[cmdKey], error = command - actual, direction = Math.sign(error);
+    const stopDistance = (velocity * velocity) / (2 * decel);
+    const desired = Math.abs(error) <= stopDistance + posTol ? 0 : direction * maxVel;
+    const dv = clamp(desired - velocity, -accel * servoDt, accel * servoDt);
+    velocity += dv;
+    if (Math.abs(error) < 0.35) velocity += error * 7.5 * servoDt;
+    actual += velocity * servoDt;
+    if ((command - actual) * error < 0) { actual = command; velocity *= -0.18; }
+    if (state.failures.stageBacklash && Math.abs(error) < .7) actual += Math.sin(elapsed * 11 + (cmdKey.charCodeAt(0))) * .018;
+    stage[actKey] = clamp(actual, -LIMIT_MM, LIMIT_MM); stage[velKey] = velocity;
+    totalErr += Math.abs(command - stage[actKey]); peakVel = Math.max(peakVel, Math.abs(velocity));
+  }
+  const wasMoving = !!state.stage.moving;
+  if (totalErr <= posTol * 3 && peakVel <= velTol) {
+    stage.settleTime = (stage.settleTime || 0) + servoDt;
+    stage.moving = false; stage.settling = stage.settleTime < 0.55;
+    if (!stage.settling) {
+      for (const [cmdKey, actKey, velKey] of axes) { stage[actKey] = stage[cmdKey]; stage[velKey] = 0; }
+      if (stage.x === 0 && stage.y === 0 && stage.z === 0) stage.homed = true;
+    }
+  } else {
+    stage.moving = true; stage.settling = totalErr < 0.4; stage.settleTime = 0;
+  }
+  stage.positionError = totalErr; stage.velocity = peakVel;
+  let next = { ...state, chamber, clock, vna, scope, ldv, stage, facility: { ...state.facility, simulationTime: elapsed } };
+  if (!stage.moving && !stage.settling && stage.lastCompletedMotionId !== stage.motionId) {
+    stage.lastCompletedMotionId = stage.motionId;
+    next = addEvent(next, `Stage settled at X ${stage.actualX.toFixed(3)}, Y ${stage.actualY.toFixed(3)}, Z ${stage.actualZ.toFixed(3)} mm.`, "info", "CHAMBER", stage.actualX, stage.actualY, stage.actualZ);
+  }
   if (chamber.turbo && chamber.pressure > 50) next = addAlarm(next, "Turbo pump protection: chamber pressure too high.", "critical");
   if (!chamber.faraday) next = addAlarm(next, "RF shielding disabled: VNA data may be corrupted.");
   if (!chamber.isolation) next = addAlarm(next, "Vibration isolation disabled: LDV and scope noise elevated.");
@@ -396,6 +583,21 @@ export default function MetrologyLab() {
   const [journalFilter, setJournalFilter] = useState("all");
   const [journalSearch, setJournalSearch] = useState("");
   const timer = useRef(null);
+  const sweepTimers = useRef<ReturnType<typeof window.setTimeout>[]>([]);
+  const clearSweepTimers = () => {
+    sweepTimers.current.forEach(id => window.clearTimeout(id));
+    sweepTimers.current = [];
+  };
+  useEffect(() => {
+    if (!state.facility.power) clearSweepTimers();
+    return clearSweepTimers;
+  }, [state.facility.power]);
+  useEffect(() => {
+    if (!state.experiment.active && state.vna.sweeping) {
+      clearSweepTimers();
+      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "idle", recordPacket: false, spatialCommitPulse: false } });
+    }
+  }, [state.experiment.active]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -433,10 +635,37 @@ export default function MetrologyLab() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [state.facility.power, state.experiment.active, state.vna.power, state.ui]);
 
-  useEffect(() => { 
-    timer.current = window.setInterval(() => dispatch({ type: "TICK", dt: 1 }), 1000); 
-    return () => clearInterval(timer.current); 
+  useEffect(() => {
+    timer.current = window.setInterval(() => dispatch({ type: "TICK", dt: 0.05 }), 50);
+    return () => clearInterval(timer.current);
   }, []);
+
+  useEffect(() => {
+    const e=state.experiment;
+    if(!e.scanActive||e.scanPaused||!e.scanPath.length)return;
+    const target=e.scanPath[e.currentScanIndex]; if(!target)return;
+    const blocked=!state.facility.power||state.chamber.doorOpen||state.chamber.vent||state.stage.clampActive||!state.vna.power||!state.vna.rf;
+    if(blocked){dispatch({type:"SET_SCAN_STEP",patch:{scanPaused:true,scanStep:"fault",scanMessage:"Paused by interlock"}});dispatch({type:"ALARM",text:"Automated scan paused by hardware interlock.",severity:"critical"});return;}
+    if(e.scanStep==="command"){
+      dispatch({type:"MOVE_STAGE",position:{x:target.x,y:target.y,z:target.z}});
+      dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"moving",scanMessage:`Moving to point ${e.currentScanIndex+1}`}});
+    }else if(e.scanStep==="moving"&&!state.stage.moving&&!state.stage.settling&&(state.stage.positionError??0)<.075){
+      dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"acquiring",scanRecordBaseline:e.records.length,scanMessage:"Stage stable · VNA acquiring"}});
+      performSweep();
+    }else if(e.scanStep==="acquiring"&&!state.vna.sweeping&&state.vna.acquisitionPhase==="complete"){
+      const committed=e.records.length>e.scanRecordBaseline;
+      if(committed){const newest=e.records[0],quality=evaluateScanRecord(newest,state);dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"quality_check",scanMessage:"Evaluating measurement quality"}});dispatch({type:"QUALITY_DECISION",quality});}
+      else dispatch({type:"SET_SCAN_STEP",patch:{scanPaused:true,scanStep:"fault",scanMessage:"No record committed · inspect quality"}});
+    }else if(e.scanStep==="quality_check"){
+      return;
+    }else if(e.scanStep==="rescan_prepare"){
+      dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"acquiring",scanRecordBaseline:e.records.length,scanMessage:"Adaptive rescan acquiring"}});performSweep();
+    }else if(e.scanStep==="quality_complete"){
+      dispatch({type:"ADVANCE_SCAN"});
+    }else if(e.scanStep==="acquiring"&&!state.vna.sweeping&&state.vna.acquisitionPhase==="idle"&&e.records.length>e.scanRecordBaseline){
+      const newest=e.records[0],quality=evaluateScanRecord(newest,state);dispatch({type:"QUALITY_DECISION",quality});
+    }
+  },[state.experiment.scanActive,state.experiment.scanPaused,state.experiment.scanStep,state.experiment.currentScanIndex,state.experiment.records.length,state.stage.moving,state.stage.settling,state.stage.positionError,state.vna.sweeping,state.vna.acquisitionPhase,state.facility.power,state.chamber.doorOpen,state.chamber.vent,state.stage.clampActive,state.vna.power,state.vna.rf,state.experiment.adaptiveRescan,state.experiment.maxRescans]);
 
   const f0 = useMemo(() => trueFrequency(state), [state]);
   const validationResult = useMemo(() => getMeasurementValidation(state), [state]);
@@ -454,8 +683,8 @@ export default function MetrologyLab() {
   const recordingState = state.experiment.active ? "RUNNING" : state.experiment.records.length > 0 ? "COMPLETE" : "IDLE";
 
   const HelpInfo = ({ termKey }) => (
-    <span 
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); set("ui", { helpModal: GLOSSARY[termKey] || { title: termKey, desc: "Detailed metrology specification and operational documentation." } }); }} 
+    <span
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); set("ui", { helpModal: GLOSSARY[termKey] || { title: termKey, desc: "Detailed metrology specification and operational documentation." } }); }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -473,6 +702,7 @@ export default function MetrologyLab() {
   );
 
   const performSweep = () => {
+    if (state.vna.sweeping) return;
     if (!state.vna.calibrated && state.facility.mode === "training") {
       dispatch({ type: "ALARM", text: "VNA sweep warning: running uncalibrated in training mode.", severity: "warning" });
     }
@@ -480,46 +710,55 @@ export default function MetrologyLab() {
       dispatch({ type: "ALARM", text: "Sweep rejected: power the VNA and enable RF output.", severity: "warning" });
       return;
     }
+    clearSweepTimers();
     const trace = buildSweep(state);
-    dispatch({ type: "PATCH", domain: "vna", patch: { trace, sweeping: false } });
+    dispatch({ type: "PATCH", domain: "vna", patch: { trace, sweeping: true, acquisitionPhase: "sweeping", sweepProgress: 0, sweepId: (state.vna.sweepId || 0) + 1, resonanceHold: false, fitVisible: false, recordPacket: false, spatialCommitPulse: false } });
     const min = trace.reduce((a, b) => a.s11 < b.s11 ? a : b);
     const isVal = validationResult.overall === "VALID";
-    const record = { 
-      id: Math.random(), 
+    const record = {
+      id: Math.random(),
       runId: state.experiment.id || "RUN-DEFAULT",
       sequence: state.experiment.records.length + 1,
       repeatIndex: 1,
       timestamp: new Date().toISOString(),
-      x: state.stage.x, 
-      y: state.stage.y, 
-      z: state.stage.z, 
-      resonance: min.freq, 
+      x: state.stage.actualX ?? state.stage.x,
+      y: state.stage.actualY ?? state.stage.y,
+      z: state.stage.actualZ ?? state.stage.z,
+      resonance: min.freq,
       resonanceShift: min.freq - BASE_FREQUENCY,
-      depth: min.s11, 
-      q: state.chamber.pressure > 1 ? 1200 : 4500, 
+      depth: min.s11,
+      q: state.chamber.pressure > 1 ? 1200 : 4500,
       uncertaintyHz: 0.25,
       repeatMeanHz: min.freq,
       repeatSdHz: 0.05,
       sampleCount: 1,
-      valid: isVal, 
-      temp: state.chamber.temperature, 
+      valid: isVal,
+      temp: state.chamber.temperature,
       pressure: state.chamber.pressure,
-      clockLocked: state.clock.locked,
+      clockLocked: state.clock.locked && !state.failures.clockDrift && !state.clock.cableFault,
       vnaCalibrated: state.vna.calibrated,
       faradayEnabled: state.chamber.faraday,
       isolationEnabled: state.chamber.isolation,
-      ldvSignal: 85,
+      ldvSignal: state.ldv.power && state.ldv.shutter ? state.ldv.opticalQuality : 0,
       excluded: false,
       exclusionReason: null,
       note: ""
     };
-    if (state.experiment.active) dispatch({ type: "RECORD", record });
-    dispatch({ type: "EVENT", text: `Sweep captured: ${min.freq.toFixed(2)} Hz (${validationResult.overall}).`, level: isVal ? "info" : "warning", subsystem: "VNA", x: state.stage.x, y: state.stage.y, z: state.stage.z });
+    dispatch({ type: "EVENT", text: `Sweep acquisition started at X ${state.stage.x.toFixed(2)}, Y ${state.stage.y.toFixed(2)}, Z ${state.stage.z.toFixed(2)}.`, subsystem: "VNA", x: state.stage.x, y: state.stage.y, z: state.stage.z });
+    const duration = FX.reduced ? 40 : 1650;
+    sweepTimers.current.push(window.setTimeout(() => dispatch({ type: "PATCH", domain: "vna", patch: { resonanceHold: true, acquisitionPhase: "resonance_hold", sweepProgress: .72 } }), duration * .72));
+    sweepTimers.current.push(window.setTimeout(() => dispatch({ type: "PATCH", domain: "vna", patch: { resonanceHold: false, fitVisible: true, acquisitionPhase: "fitting", sweepProgress: 1 } }), duration * .84));
+    sweepTimers.current.push(window.setTimeout(() => {
+      if (state.experiment.active) dispatch({ type: "RECORD", record });
+      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "complete", sweepProgress: 1, fitVisible: true, recordPacket: state.experiment.active, spatialCommitPulse: state.experiment.active, lastMetrics: { f0: min.freq, minS11: min.s11, q: record.q, quality: validationResult.overall }, lastSweepCompletedAt: Date.now() } });
+      dispatch({ type: "EVENT", text: `Sweep complete: ${min.freq.toFixed(2)} Hz, ${min.s11.toFixed(2)} dB, Q ${record.q}.`, subsystem: "VNA", x: state.stage.x, y: state.stage.y, z: state.stage.z });
+    }, duration));
+    sweepTimers.current.push(window.setTimeout(() => dispatch({ type: "PATCH", domain: "vna", patch: { recordPacket: false, spatialCommitPulse: false, acquisitionPhase: "idle" } }), duration + 850));
   };
 
   const exportCsv = () => {
     const rows = [
-      ["run_id", "timestamp", "x_mm", "y_mm", "z_mm", "resonance_hz", "s11_db", "q", "valid", "temperature_c", "pressure_torr"], 
+      ["run_id", "timestamp", "x_mm", "y_mm", "z_mm", "resonance_hz", "s11_db", "q", "valid", "temperature_c", "pressure_torr"],
       ...state.experiment.records.map(r => [r.runId, r.timestamp, r.x, r.y, r.z, r.resonance, r.depth, r.q, r.valid, r.temp, r.pressure])
     ];
     const blob = new Blob([rows.map(r => r.join(",")).join("\n")], { type: "text/csv" });
@@ -552,6 +791,7 @@ export default function MetrologyLab() {
         ["overview", "Lab Overview", Layers],
         ["dashboard", "Operator Console", Radio],
         ["chamber", "3D Chamber & Stage", Wind],
+        ["copilot", "AI Copilot", BrainCircuit],
       ]
     },
     {
@@ -568,6 +808,7 @@ export default function MetrologyLab() {
       group: "Research",
       items: [
         ["runs", "Experiment Runs", FlaskConical],
+        ["notebook", "Lab Notebook", FileText],
       ]
     },
     {
@@ -575,6 +816,7 @@ export default function MetrologyLab() {
       items: [
         ["training", "Training & Checklist", CheckSquare],
         ["challenges", "Challenge Mode", Award],
+        ["faults", "Fault Injector", AlertTriangle],
       ]
     }
   ];
@@ -604,8 +846,8 @@ export default function MetrologyLab() {
             <button onClick={() => set("ui", { wizardOpen: true })} className="rounded border border-emerald-600/50 bg-emerald-950/60 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900 flex items-center gap-1">
               <Wrench size={14} /> Startup Wizard
             </button>
-            <select 
-              value={state.facility.mode} 
+            <select
+              value={state.facility.mode}
               onChange={e => dispatch({ type: "SET_MODE", mode: e.target.value })}
               className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-sky-300 font-semibold"
             >
@@ -624,7 +866,7 @@ export default function MetrologyLab() {
             <button onClick={() => set("ui", { glossaryOpen: true })} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 flex items-center gap-1">
               <Book size={14} /> Glossary
             </button>
-            <button 
+            <button
               onClick={() => {
                 if (state.facility.power) {
                   set("ui", { confirmModal: { title: "Open Main Breaker?", desc: "Opening the main breaker will cut AC power to all instruments and reset session state.", onConfirm: () => { dispatch({ type: "POWER", value: false }); set("ui", { confirmModal: null }); } } });
@@ -687,7 +929,7 @@ export default function MetrologyLab() {
             <span>RUN: <strong>{state.experiment.id || "NONE"}</strong></span>
           </div>
 
-          <div 
+          <div
             onClick={() => set("ui", { validatorModalOpen: true })}
             className={`flex items-center gap-1.5 rounded px-2 py-1 border cursor-pointer hover:bg-zinc-800 transition ${
               recordQuality === "VALID" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" :
@@ -714,13 +956,14 @@ export default function MetrologyLab() {
           </div>
         </div>
       </header>
+      <LivingTelemetryBar state={state} validationResult={validationResult} unresolved={unresolved} />
 
       <main className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto] md:overflow-hidden xl:grid-cols-[auto_minmax(0,1fr)_310px] xl:grid-rows-1">
         <aside className={`border-r border-zinc-800 bg-zinc-950/60 p-2.5 flex flex-col gap-3 transition-all duration-300 shrink-0 relative max-h-52 md:max-h-none ${collapsed ? "w-full md:w-16" : "w-full md:w-60"}`}>
           <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
             {!collapsed && <span className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500">Lab Navigation</span>}
-            <button 
-              onClick={() => set("ui", { navCollapsed: !collapsed })} 
+            <button
+              onClick={() => set("ui", { navCollapsed: !collapsed })}
               className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition mx-auto"
               title={collapsed ? "Expand navigation" : "Collapse navigation"}
             >
@@ -734,14 +977,18 @@ export default function MetrologyLab() {
                 {!collapsed && <div className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 px-2">{group.group}</div>}
                 {group.items.map(([id, label, Icon]) => {
                   const isAlarmPage = id === "dashboard" && unresolved > 0;
+                  const navSubsystem = ({vna:"vna",scope:"scope",ldv:"ldv",clock:"clock",chamber:"chamber",spatial:"spatial",runs:"experiment",overview:"facility"})[id];
+                  const navState = navSubsystem ? getSubsystemVisualState(state, navSubsystem) : "standby";
+                  const navToken = visualToken(active === id ? "selected" : navState);
                   return (
-                    <button 
-                      key={id} 
-                      onClick={() => set("ui", { active: id })} 
+                    <button
+                      key={id}
+                      onClick={() => set("ui", { active: id })}
                       title={collapsed ? label : ""}
-                      className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition relative ${active === id ? "border border-sky-500/40 bg-sky-500/10 text-sky-200 font-bold" : "border border-transparent text-zinc-400 hover:bg-zinc-900"}`}
+                      data-visual-state={active === id ? "selected" : navState}
+                      className={`flex w-full items-center gap-2 rounded border px-2.5 py-2 text-left text-xs transition relative ${active === id ? `${visualClass("selected")} font-bold` : `${navToken.border} text-zinc-400 hover:bg-zinc-900`}`}
                     >
-                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${navToken.led}`} style={{boxShadow:navState==="offline"?"none":`0 0 6px ${navToken.hex}`}} aria-hidden="true"/><Icon className="h-4 w-4 shrink-0" />
                       {!collapsed && <span className="truncate">{label}</span>}
                       {isAlarmPage && (
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-rose-500 animate-ping" />
@@ -776,6 +1023,9 @@ export default function MetrologyLab() {
           {active === "clock" && <Clock state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "runs" && <Runs state={state} dispatch={dispatch} exportCsv={exportCsv} exportJson={exportJson} sweep={performSweep} HelpInfo={HelpInfo} />}
           {active === "training" && <TrainingMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
+          {active === "copilot" && <LabCopilot state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
+          {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
+          {active === "faults" && <FaultInjector state={state} dispatch={dispatch} />}
           {active === "challenges" && <ChallengeMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
         </section>
 
@@ -938,16 +1188,16 @@ export default function MetrologyLab() {
               </div>
               <button onClick={() => set("ui", { videoModal: false })} className="text-gray-400 hover:text-white"><X size={20}/></button>
             </div>
-            
+
             <div className="grid md:grid-cols-[1fr_320px] flex-1 bg-black overflow-hidden">
               <div className="p-4 flex flex-col justify-center items-center bg-zinc-950 border-r border-zinc-800">
                 <div className="w-full aspect-video bg-black rounded-lg border border-zinc-800 overflow-hidden relative shadow-inner">
                   {state.ui.activeVideo ? (
-                    <iframe 
+                    <iframe
                       className="w-full h-full"
-                      src={`https://www.youtube.com/embed/${state.ui.activeVideo.id}?autoplay=1`} 
+                      src={`https://www.youtube.com/embed/${state.ui.activeVideo.id}?autoplay=1`}
                       title={state.ui.activeVideo.title}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       allowFullScreen
                     />
                   ) : (
@@ -963,8 +1213,8 @@ export default function MetrologyLab() {
               <div className="p-3 bg-zinc-900 overflow-y-auto space-y-2 flex flex-col">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1">Available Tutorials</div>
                 {TUTORIAL_VIDEOS.map(v => (
-                  <button 
-                    key={v.id} 
+                  <button
+                    key={v.id}
                     onClick={() => set("ui", { activeVideo: v })}
                     className={`w-full text-left p-2.5 rounded border transition flex flex-col gap-1 ${state.ui.activeVideo?.id === v.id ? "bg-sky-500/20 border-sky-500/50 text-sky-200" : "bg-zinc-950 border-zinc-800 text-zinc-300 hover:bg-zinc-800"}`}
                   >
@@ -994,7 +1244,7 @@ export default function MetrologyLab() {
             </div>
             <div className="p-6 overflow-y-auto space-y-4 text-xs">
               <p className="text-zinc-400">To complete this experimental run record, answer the following peer-review validation questions:</p>
-              
+
               <label className="flex items-center justify-between p-2 rounded bg-zinc-950 border border-zinc-800">
                 <span>1. Was the rubidium clock locked during acquisition?</span>
                 <input type="checkbox" checked={state.peerReviewData.clockLocked} onChange={e => set("peerReviewData", { clockLocked: e.target.checked })} />
@@ -1017,8 +1267,8 @@ export default function MetrologyLab() {
 
               <div className="p-2 rounded bg-zinc-950 border border-zinc-800 space-y-1">
                 <span className="text-zinc-400 block">5. What uncertainty dominates this measurement?</span>
-                <select 
-                  value={state.peerReviewData.dominantUncertainty} 
+                <select
+                  value={state.peerReviewData.dominantUncertainty}
                   onChange={e => set("peerReviewData", { dominantUncertainty: e.target.value })}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded p-1 text-zinc-200"
                 >
@@ -1096,12 +1346,12 @@ function VnaCalibrationModal({ state, dispatch, close }) {
 
         <div className="p-6 space-y-4">
           <p className="text-xs text-zinc-300">Select calibration standard plane and execute vector error correction.</p>
-          
+
           <label className="block text-xs text-zinc-400">Calibration Standard Type
-            <select 
-              value={calType} 
+            <select
+              value={calType}
               disabled={calibrating}
-              onChange={e => setCalType(e.target.value)} 
+              onChange={e => setCalType(e.target.value)}
               className="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded p-2 text-zinc-200"
             >
               <option value="Response (Thru)">Response (Thru)</option>
@@ -1158,33 +1408,33 @@ function CommandPalette({ state, dispatch, close, performSweep, exportCsv, expor
     { label: "Navigate: Experiment Runs", action: () => dispatch({ type: "SET_UI", patch: { active: "runs" } }), category: "Navigation" },
     { label: "Navigate: Training & Checklist", action: () => dispatch({ type: "SET_UI", patch: { active: "training" } }), category: "Navigation" },
     { label: "Navigate: Challenge Mode", action: () => dispatch({ type: "SET_UI", patch: { active: "challenges" } }), category: "Navigation" },
-    
+
     { label: "Start Standard Experiment Run", action: () => dispatch({ type: "START_RUN" }), category: "Experiment" },
     { label: "Stop Active Experiment Run", action: () => dispatch({ type: "STOP_RUN" }), category: "Experiment" },
     { label: "Capture Single VNA Sweep", action: performSweep, category: "Instruments", disabled: !state.vna.power, reason: "VNA must be powered on" },
     { label: "Capture VNA Reference Trace", action: () => dispatch({ type: "CAPTURE_REFERENCE" }), category: "Instruments" },
     { label: "Open VNA Calibration Wizard", action: () => dispatch({ type: "SET_UI", patch: { calModalOpen: true } }), category: "Instruments" },
     { label: "Home XYZ Stage (0,0,0)", action: () => dispatch({ type: "HOME_STAGE" }), category: "Hardware" },
-    
+
     { label: "Start Roughing Vacuum Pump", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { vent: false, roughing: true } }), category: "Chamber" },
-    { label: 
-      state.chamber.pressure <= 50 ? "Start Turbomolecular Pump" : "Start Turbomolecular Pump — unavailable until pressure is below 50 Torr", 
+    { label:
+      state.chamber.pressure <= 50 ? "Start Turbomolecular Pump" : "Start Turbomolecular Pump — unavailable until pressure is below 50 Torr",
       action: () => {
         if (state.chamber.pressure <= 50) dispatch({ type: "PATCH", domain: "chamber", patch: { vent: false, roughing: true, turbo: true } });
         else dispatch({ type: "ALARM", text: "Turbo interlock active: pressure must be below 50 Torr.", severity: "critical" });
-      }, 
+      },
       category: "Chamber",
       disabled: state.chamber.pressure > 50,
       reason: "Pressure must be < 50 Torr"
     },
     { label: "Toggle Faraday Cage Shielding", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { faraday: !state.chamber.faraday } }), category: "Chamber" },
     { label: "Toggle Active Vibration Isolation", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { isolation: !state.chamber.isolation } }), category: "Chamber" },
-    
+
     { label: "Open Startup Wizard", action: () => dispatch({ type: "SET_UI", patch: { wizardOpen: true } }), category: "Help" },
     { label: "Open Procedure Manual", action: () => dispatch({ type: "SET_UI", patch: { manualOpen: true } }), category: "Help" },
     { label: "Open Glossary of Terms", action: () => dispatch({ type: "SET_UI", patch: { glossaryOpen: true } }), category: "Help" },
     { label: "Open Video Tutorial Laptop", action: () => dispatch({ type: "SET_UI", patch: { videoModal: true } }), category: "Help" },
-    
+
     { label: "Acknowledge All Alarms", action: () => state.alarms.forEach(a => dispatch({ type: "ACK_ALARM", id: a.id })), category: "System" },
     { label: "Export Experiment Run CSV", action: exportCsv, category: "Data" },
     { label: "Export Experiment Run JSON", action: exportJson, category: "Data" },
@@ -1197,11 +1447,11 @@ function CommandPalette({ state, dispatch, close, performSweep, exportCsv, expor
       <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-2xl shadow-2xl overflow-hidden font-sans flex flex-col">
         <div className="p-3 border-b border-zinc-800 flex items-center gap-2 bg-zinc-950">
           <Search size={16} className="text-zinc-400" />
-          <input 
+          <input
             ref={inputRef}
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Type a command or search workspace (e.g., 'sweep', 'vacuum', 'vna')..." 
+            placeholder="Type a command or search workspace (e.g., 'sweep', 'vacuum', 'vna')..."
             className="w-full bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none font-mono"
           />
           <button onClick={close} className="text-zinc-500 hover:text-white px-2 py-1 text-xs">Esc</button>
@@ -1311,16 +1561,16 @@ function StartupWizard({ state, dispatch, close }) {
 
           <div className="flex gap-2">
             {isTraining && (
-              <button 
-                onClick={() => autoFixStep(step)} 
+              <button
+                onClick={() => autoFixStep(step)}
                 className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition"
               >
                 Do this for me (Training Auto-Fix)
               </button>
             )}
             {!isTraining && (
-              <button 
-                onClick={() => setStep(s => Math.min(steps.length, s + 1))} 
+              <button
+                onClick={() => setStep(s => Math.min(steps.length, s + 1))}
                 className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded text-xs transition"
               >
                 Skip for Free-Lab
@@ -1360,7 +1610,7 @@ function TrainingMode({ state, dispatch, HelpInfo }) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4"><ScanAutomationPanel state={state} dispatch={dispatch} /><LDVScopePanel state={state} />
       <div>
         <h1 className="text-xl font-bold flex items-center">Training Mode & Interactive Checklist <HelpInfo termKey="location_variable" /></h1>
         <p className="mt-1 text-sm text-zinc-400">Follow the interactive checklist below. Complete each step to earn professional laboratory badges and master experimental metrology.</p>
@@ -1435,6 +1685,165 @@ function ChallengeMode({ state, dispatch, HelpInfo }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/* ───────────── Copilot, Fault Injector, Notebook ───────────── */
+function LabCopilot({ state, dispatch, validationResult, f0 }) {
+  const tips = useMemo(() => getCopilotAdvice(state, validationResult), [state, validationResult]);
+  const rules = validationResult.rules;
+  const passN = rules.filter(r => r.status === "Pass").length;
+  const score = Math.round(passN * 100 / rules.length);
+  const recs = state.experiment.records || [];
+  const [answer, setAnswer] = useState("");
+  const ask = q => {
+    if (q === "why") {
+      const bad = rules.filter(r => r.status !== "Pass");
+      setAnswer(bad.length ? `Status is ${validationResult.overall} because: ${bad.map(b => `${b.rule} (${b.details})`).join("; ")}.` : "All validation rules pass, so measurements are currently VALID.");
+    } else if (q === "unc") {
+      if (!recs.length) return setAnswer("No records yet. Take a measurement or run a scan first.");
+      const u = recs.map(r => Number(r.uncertaintyHz) || 0), mean = u.reduce((a, b) => a + b, 0) / u.length;
+      setAnswer(`Across ${recs.length} records, mean uncertainty is ${mean.toFixed(3)} Hz and the worst is ${Math.max(...u).toFixed(3)} Hz (limit 1 Hz).`);
+    } else if (q === "f0") {
+      setAnswer(`Model resonance is ${(f0 / 1000).toFixed(4)} kHz, a ${(f0 - BASE_FREQUENCY).toFixed(2)} Hz shift from the ${(BASE_FREQUENCY / 1000).toFixed(1)} kHz base.`);
+    } else if (q === "sig") {
+      if (recs.length < 5) return setAnswer("At least 5 valid synthetic records are needed for this descriptive summary. Simulator data cannot establish a physical location effect.");
+      const good = recs.filter(r => r.valid !== false && !r.excluded && r.resonanceShift !== undefined);
+      if (good.length < 5) return setAnswer(`Only ${good.length} valid records carry a frequency shift. Collect more valid data.`);
+      const v = good.map(r => Number(r.resonanceShift)), m = v.reduce((a, b) => a + b, 0) / v.length;
+      const sd = Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / (v.length - 1));
+      setAnswer(`Synthetic shifts: mean ${m.toFixed(3)} Hz, std dev ${sd.toFixed(3)} Hz over ${v.length} records. This is a descriptive summary, not an inferential significance test or experimental evidence.`);
+    }
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-bold flex items-center gap-2"><BrainCircuit size={20} className="text-sky-300" /> AI Laboratory Copilot</h1>
+        <p className="mt-1 text-sm text-zinc-400">Rule-based assistant that reads live instrument state, ranks what to fix next and answers common questions. Runs locally with no network calls.</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Readiness</div>
+          <div className="mt-1 font-mono text-3xl text-sky-300">{score}%</div>
+          <div className="mt-2 h-2 rounded bg-zinc-900 overflow-hidden"><div className={`h-full ${score === 100 ? "bg-emerald-400" : score > 60 ? "bg-amber-400" : "bg-rose-500"}`} style={{ width: `${score}%` }} /></div>
+          <div className="mt-2 text-xs text-zinc-400">{passN}/{rules.length} validation rules passing · {validationResult.overall}</div>
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 md:col-span-2">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Ask the Copilot</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {[["why", "Why is my data not valid?"], ["unc", "What's my uncertainty?"], ["f0", "Current resonance?"], ["sig", "Is the effect significant?"]].map(([k, l]) => (
+              <button key={k} onClick={() => ask(k)} className="rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">{l}</button>
+            ))}
+          </div>
+          <div className="mt-3 min-h-[44px] rounded bg-black/40 p-3 text-xs leading-relaxed text-sky-100" aria-live="polite">{answer || "Pick a question above."}</div>
+        </div>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Suggested next steps</div>
+        {tips.length === 0 ? <div className="text-sm text-emerald-300">Nothing to fix. Carry on.</div> : (
+          <ol className="space-y-2">
+            {tips.map((t, i) => (
+              <li key={t.title} className="flex items-start gap-3 rounded border border-zinc-800 bg-zinc-900/60 p-3">
+                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-500/20 font-mono text-xs text-sky-300">{i + 1}</span>
+                <div className="min-w-0 flex-1"><div className="text-sm font-bold text-zinc-100">{t.title}</div><div className="text-xs text-zinc-400">{t.body}</div></div>
+                <button onClick={() => dispatch({ type: "SET_UI", patch: { active: t.tab } })} className="shrink-0 rounded border border-sky-500/40 px-2 py-1 text-[11px] font-bold text-sky-300 hover:bg-sky-500/10">Go →</button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FaultInjector({ state, dispatch }) {
+  const drill = state.faultDrill || {};
+  const blind = drill.hiddenKey && !drill.revealed;
+  const keys = Object.keys(FAULT_CATALOG);
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-bold flex items-center gap-2"><AlertTriangle size={20} className="text-amber-300" /> Fault Injector</h1>
+        <p className="mt-1 text-sm text-zinc-400">Inject realistic equipment failures to practise troubleshooting. Faults affect the physics model, validation and alarms.</p>
+      </div>
+      <div className="rounded-lg border border-amber-500/30 bg-amber-950/10 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="mr-auto"><div className="text-sm font-bold text-amber-200">Blind fault drill</div><div className="text-xs text-zinc-400">A random fault is injected without telling you which. Diagnose it from instrument symptoms.</div></div>
+          <button disabled={!state.facility.power} onClick={() => dispatch({ type: "START_FAULT_DRILL" })} className="rounded bg-amber-500 px-3 py-1.5 text-xs font-bold text-black disabled:opacity-40">Start drill</button>
+          {blind && <button onClick={() => dispatch({ type: "REVEAL_FAULT_DRILL" })} className="rounded border border-zinc-600 px-3 py-1.5 text-xs font-bold">Reveal answer</button>}
+          <button onClick={() => dispatch({ type: "CLEAR_FAILURES" })} className="rounded border border-emerald-500/50 px-3 py-1.5 text-xs font-bold text-emerald-300">Clear all faults</button>
+        </div>
+        {!state.facility.power && <div className="mt-2 text-xs text-zinc-500">Close the main breaker to run a drill.</div>}
+        {blind && <div className="mt-3 text-xs text-amber-200">Drill running. Check the Validation panel, scope, VNA and chamber for clues.</div>}
+        {drill.hiddenKey && drill.revealed && <div className="mt-3 rounded bg-black/40 p-3 text-xs text-zinc-200"><b>{FAULT_CATALOG[drill.hiddenKey].title}.</b> {FAULT_CATALOG[drill.hiddenKey].fix}</div>}
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {keys.map(k => {
+          const on = !!state.failures[k], hidden = blind && on;
+          return (
+            <div key={k} className={`rounded-lg border p-4 ${on ? "border-rose-500/40 bg-rose-950/20" : "border-zinc-800 bg-zinc-950"}`}>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-bold">{hidden ? "??? (hidden by drill)" : FAULT_CATALOG[k].title}</div>
+                <button disabled={blind} onClick={() => dispatch({ type: "SET_FAILURE", key: k, value: !on })} aria-pressed={on} className={`rounded px-2.5 py-1 text-[11px] font-bold disabled:opacity-40 ${on ? "bg-rose-500 text-black" : "border border-zinc-600 text-zinc-200"}`}>{on ? "ACTIVE · clear" : "Inject"}</button>
+              </div>
+              <div className="mt-2 text-xs text-zinc-400">{hidden ? "Symptoms hidden during a blind drill." : `Symptoms: ${FAULT_CATALOG[k].symptoms}`}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LabNotebook({ state, dispatch, validationResult, f0 }) {
+  const [text, setText] = useState("");
+  const [tag, setTag] = useState("observation");
+  const [filter, setFilter] = useState("all");
+  const tags = ["observation", "hypothesis", "anomaly", "result", "todo"];
+  const add = () => {
+    if (!text.trim()) return;
+    const c = state.chamber;
+    dispatch({ type: "NOTEBOOK_ADD", entry: {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, tag, text: text.trim(), time: now(), simTime: Math.floor(state.facility.simulationTime),
+      snapshot: { f0Hz: Number(f0.toFixed(3)), tempC: Number(c.temperature.toFixed(3)), pressure: fmtPressure(c.pressure), clockLocked: state.clock.locked, validation: validationResult.overall, stage: [state.stage.actualX ?? state.stage.x, state.stage.actualY ?? state.stage.y, state.stage.actualZ ?? state.stage.z].map(v => Number(v.toFixed(2))) }
+    } });
+    setText("");
+  };
+  const shown = state.notebook.filter(n => filter === "all" || n.tag === filter);
+  const exportMd = () => {
+    const md = ["# S.P.H.E.R.E. Lab Notebook", "", ...[...state.notebook].reverse().map(n => `## [${n.tag}] ${n.time} (sim t=${n.simTime}s)\n\n${n.text}\n\n- f0: ${n.snapshot.f0Hz} Hz\n- Temp: ${n.snapshot.tempC} °C\n- Pressure: ${n.snapshot.pressure}\n- Clock locked: ${n.snapshot.clockLocked}\n- Validation: ${n.snapshot.validation}\n- Stage XYZ: ${n.snapshot.stage.join(", ")} mm\n`)].join("\n");
+    downloadBlob(new Blob([md], { type: "text/markdown;charset=utf-8" }), "sphere-lab-notebook.md");
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-bold flex items-center gap-2"><FileText size={20} className="text-sky-300" /> Lab Notebook</h1>
+        <p className="mt-1 text-sm text-zinc-400">Each entry automatically records a snapshot of the instrument state. The notebook survives breaker cycles but is cleared on page reload.</p>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 space-y-2">
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={3} placeholder="Write an observation, hypothesis or note…" className="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-sm text-zinc-100" />
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={tag} onChange={e => setTag(e.target.value)} className="rounded border border-zinc-700 bg-zinc-900 p-1.5 text-xs">{tags.map(t => <option key={t}>{t}</option>)}</select>
+          <button onClick={add} disabled={!text.trim()} className="rounded bg-sky-500 px-3 py-1.5 text-xs font-bold text-black disabled:opacity-40">Add entry</button>
+          <div className="ml-auto flex items-center gap-2">
+            <select value={filter} onChange={e => setFilter(e.target.value)} className="rounded border border-zinc-700 bg-zinc-900 p-1.5 text-xs"><option value="all">all tags</option>{tags.map(t => <option key={t}>{t}</option>)}</select>
+            <button onClick={exportMd} disabled={!state.notebook.length} className="flex items-center gap-1 rounded border border-zinc-600 px-3 py-1.5 text-xs font-bold disabled:opacity-40"><Download size={12} /> Export .md</button>
+          </div>
+        </div>
+      </div>
+      {shown.length === 0 ? <div className="text-sm text-zinc-500">No entries yet.</div> : (
+        <ul className="space-y-2">
+          {shown.map(n => (
+            <li key={n.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="flex items-center gap-2 text-[11px] text-zinc-500"><span className="rounded bg-sky-500/20 px-1.5 py-0.5 font-bold text-sky-300">{n.tag}</span><span>{n.time}</span><span>sim t={n.simTime}s</span>
+                <button onClick={() => dispatch({ type: "NOTEBOOK_DELETE", id: n.id })} className="ml-auto text-zinc-500 hover:text-rose-400" aria-label="Delete entry"><X size={14} /></button></div>
+              <div className="mt-1 whitespace-pre-wrap text-sm text-zinc-100">{n.text}</div>
+              <div className="mt-2 font-mono text-[10px] text-zinc-500">f0 {n.snapshot.f0Hz} Hz · {n.snapshot.tempC} °C · {n.snapshot.pressure} · clock {n.snapshot.clockLocked ? "locked" : "unlocked"} · {n.snapshot.validation} · XYZ {n.snapshot.stage.join("/")}</div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -1547,8 +1956,10 @@ function SpectrumPlot({ data }) {
 
 function ChamberSVG({ state, mini = false, cv = null }) {
   const { stage, chamber, ldv, vna } = state;
-  const px = 300 + stage.x * 4, py = 190 - stage.z * 3;
-  const r = 24 + stage.y * 0.12;
+  const actual = { x: stage.actualX ?? stage.x, y: stage.actualY ?? stage.y, z: stage.actualZ ?? stage.z };
+  const px = 300 + actual.x * 4, py = 190 - actual.z * 3;
+  const r = 24 + actual.y * 0.12;
+  const ghostX = 300 + stage.x * 4, ghostY = 190 - stage.z * 3;
   const haze = clamp(Math.log10(Math.max(chamber.pressure, 0.01)) / 2.88, 0, 1);
   const dT = chamber.temperature - 20;
   const tint = dT > 0 ? "255,120,40" : "60,140,255";
@@ -1622,9 +2033,10 @@ function ChamberSVG({ state, mini = false, cv = null }) {
             <text x="508" y="158" fill="#94a3b8">RF</text>
             <text x="72" y="320" fill="#9fb3c8" fontSize="11">P {fmtPressure(chamber.pressure)}  ·  T {chamber.temperature.toFixed(2)} °C</text>
             <text x="72" y="304" fill={Math.abs(drift) < 0.03 ? "#86efac" : "#fdba74"} fontSize="11">{Math.abs(drift) < 0.03 ? "● stable" : drift > 0 ? "▲ +" + drift.toFixed(3) : "▼ " + drift.toFixed(3)} °C vs setpoint</text>
-            <text x="528" y="320" textAnchor="end" fill="#9fb3c8" fontSize="11">X {stage.x.toFixed(1)}  Y {stage.y.toFixed(1)}  Z {stage.z.toFixed(1)} mm</text>
+            <text x="528" y="320" textAnchor="end" fill="#9fb3c8" fontSize="11">X {actual.x.toFixed(1)}  Y {actual.y.toFixed(1)}  Z {actual.z.toFixed(1)} mm</text>
           </g>
         )}
+        {(stage.moving || stage.settling) && <g opacity=".75" aria-label="Commanded target position"><circle cx={ghostX} cy={ghostY} r={24 + stage.y * .12} fill="none" stroke="#fff" strokeWidth="1.5" strokeDasharray="5 4"/><line x1={px} y1={py} x2={ghostX} y2={ghostY} stroke="#7dd3fc" strokeDasharray="3 3"/><text x={ghostX+28} y={ghostY-8} fill="#e2e8f0" fontSize="9" style={mono}>TARGET</text></g>}
         {chamber.doorOpen && (
           <g>
             <rect x="60" y="50" width="480" height="280" rx="12" fill="#e11d48" opacity=".18" />
@@ -1740,28 +2152,46 @@ function SpatialMaps({ records, view, state }) {
 
 /* ───────── Visual system: status conventions + reusable parts ───────── */
 let FX = { reduced: false, hide: false };
-const ST = { offline: ["Offline", "○", "#64748b"], powered: ["Powered", "◐", "#cbd5e1"], ready: ["Ready", "●", "#22d3ee"], acquiring: ["Acquiring", "▶", "#38bdf8"], warning: ["Warning", "▲", "#f59e0b"], critical: ["Fault", "■", "#ef4444"] };
-function instStatus(s, k) {
-  const f = s.failures || {};
-  if (k === "clock") return !s.clock.power ? "offline" : (s.clock.cableFault || f.clockDrift) ? "critical" : s.clock.holdover ? "warning" : s.clock.locked ? "ready" : "powered";
-  if (k === "vna") return !s.vna.power ? "offline" : (!s.chamber.faraday || f.emiSpike) ? "warning" : s.vna.rf && s.vna.continuous ? "acquiring" : s.vna.rf ? "ready" : "powered";
-  if (k === "ldv") return !s.ldv.power ? "offline" : s.ldv.scanActive ? "acquiring" : s.ldv.shutter ? "ready" : "powered";
-  if (k === "scope") return !s.scope.power ? "offline" : s.scope.running ? "acquiring" : "powered";
-  if (k === "pumps") return !s.facility.power ? "offline" : s.chamber.turbo && s.chamber.pressure > 50 ? "critical" : s.chamber.turbo || s.chamber.roughing ? "acquiring" : "powered";
-  return !s.facility.power ? "offline" : f.vacuumLeak ? "critical" : s.chamber.doorOpen || !s.chamber.isolation ? "warning" : s.chamber.pressure < 1e-3 ? "ready" : "powered";
+const VISUAL_STATE = Object.freeze({
+  offline: { label:"Offline", symbol:"○", hex:"#64748b", border:"border-zinc-800", surface:"bg-zinc-950", text:"text-zinc-500", led:"bg-zinc-700", glow:"", motion:"none", webgl:{emissive:"#000000",emissiveIntensity:0,roughness:.82,metalness:.18} },
+  standby: { label:"Standby", symbol:"◐", hex:"#64748b", border:"border-slate-600", surface:"bg-slate-950/30", text:"text-slate-300", led:"bg-sky-700", glow:"", motion:"none", webgl:{emissive:"#0c4a6e",emissiveIntensity:.12,roughness:.7,metalness:.24} },
+  ready: { label:"Ready", symbol:"●", hex:"#22d3ee", border:"border-sky-500/40", surface:"bg-sky-950/20", text:"text-sky-200", led:"bg-sky-400", glow:"shadow-[0_0_20px_rgba(56,189,248,.12)]", motion:"slow", webgl:{emissive:"#0891b2",emissiveIntensity:.2,roughness:.62,metalness:.28} },
+  active: { label:"Active", symbol:"▶", hex:"#67e8f9", border:"border-cyan-400/70", surface:"bg-cyan-950/20", text:"text-cyan-100", led:"bg-cyan-300", glow:"shadow-[0_0_28px_rgba(34,211,238,.20)]", motion:"flow", webgl:{emissive:"#06b6d4",emissiveIntensity:.55,roughness:.48,metalness:.3} },
+  valid: { label:"Stable / Valid", symbol:"✓", hex:"#34d399", border:"border-emerald-500/45", surface:"bg-emerald-950/20", text:"text-emerald-200", led:"bg-emerald-400", glow:"shadow-[0_0_20px_rgba(16,185,129,.12)]", motion:"none", webgl:{emissive:"#059669",emissiveIntensity:.2,roughness:.6,metalness:.25} },
+  warning: { label:"Warning", symbol:"▲", hex:"#fbbf24", border:"border-amber-500/55", surface:"bg-amber-950/20", text:"text-amber-200", led:"bg-amber-400", glow:"shadow-[0_0_20px_rgba(245,158,11,.12)]", motion:"slow", webgl:{emissive:"#d97706",emissiveIntensity:.35,roughness:.58,metalness:.2} },
+  fault: { label:"Fault", symbol:"■", hex:"#fb7185", border:"border-rose-500/70", surface:"bg-rose-950/25", text:"text-rose-100", led:"bg-rose-400", glow:"shadow-[0_0_26px_rgba(244,63,94,.22)]", motion:"alarm", webgl:{emissive:"#e11d48",emissiveIntensity:.62,roughness:.5,metalness:.2} },
+  booting: { label:"Booting", symbol:"◔", hex:"#60a5fa", border:"border-blue-500/45", surface:"bg-blue-950/20", text:"text-blue-200", led:"bg-blue-400", glow:"shadow-[0_0_18px_rgba(59,130,246,.12)]", motion:"slow", webgl:{emissive:"#2563eb",emissiveIntensity:.22,roughness:.66,metalness:.24} },
+  settling: { label:"Settling", symbol:"≈", hex:"#a5b4fc", border:"border-indigo-400/45", surface:"bg-indigo-950/20", text:"text-indigo-200", led:"bg-indigo-300", glow:"shadow-[0_0_18px_rgba(129,140,248,.12)]", motion:"slow", webgl:{emissive:"#4f46e5",emissiveIntensity:.2,roughness:.65,metalness:.22} },
+  stable: { label:"Stable", symbol:"◆", hex:"#34d399", border:"border-emerald-500/45", surface:"bg-emerald-950/20", text:"text-emerald-200", led:"bg-emerald-400", glow:"shadow-[0_0_20px_rgba(16,185,129,.12)]", motion:"none", webgl:{emissive:"#059669",emissiveIntensity:.2,roughness:.6,metalness:.25} },
+  maintenance: { label:"Maintenance", symbol:"◇", hex:"#c084fc", border:"border-violet-500/50", surface:"bg-violet-950/20", text:"text-violet-200", led:"bg-violet-400", glow:"shadow-[0_0_18px_rgba(168,85,247,.12)]", motion:"none", webgl:{emissive:"#7e22ce",emissiveIntensity:.22,roughness:.68,metalness:.2} },
+  selected: { label:"Selected", symbol:"◎", hex:"#7dd3fc", border:"border-sky-300", surface:"bg-sky-950/15", text:"text-sky-100", led:"bg-sky-300", glow:"ring-2 ring-sky-400 shadow-[0_0_20px_rgba(56,189,248,.18)]", motion:"none", webgl:{emissive:"#0284c7",emissiveIntensity:.38,roughness:.52,metalness:.25} }
+});
+const VISUAL_ALIASES={powered:"standby",acquiring:"active",critical:"fault",stable:"valid"};
+const normalizeVisualState=v=>VISUAL_STATE[v]?v:(VISUAL_ALIASES[v]||"offline");
+const visualToken=v=>VISUAL_STATE[normalizeVisualState(v)];
+function visualClass(v,{selected=false}={}){const n=selected?"selected":normalizeVisualState(v),t=VISUAL_STATE[n];return `${t.border} ${t.surface} ${t.text} ${t.glow}`;}
+function getSubsystemVisualState(s,k){
+  const f=s.failures||{}, alarms=s.alarms||[];
+  const hasFault=alarms.some(a=>!a.acknowledged&&a.severity==="critical"&&new RegExp(k==="chamber"?"turbo|vacuum|pressure|door":k,"i").test(a.text||""));
+  if(!s.facility.power)return "offline";
+  if(hasFault)return "fault";
+  if(k==="facility")return s.alarms?.some(a=>!a.acknowledged)?"warning":"ready";
+  if(k==="clock")return !s.clock.power?"offline":(s.clock.cableFault||f.clockDrift)?"fault":s.clock.holdover?"warning":s.clock.locked?"stable":s.clock.warmup>0?"booting":"standby";
+  if(k==="vna")return !s.vna.power?"offline":(!s.chamber.faraday||f.emiSpike)?"warning":s.vna.sweeping||(s.vna.rf&&s.vna.continuous)?"active":!s.vna.rf?"standby":s.vna.calibrated?"ready":"warning";
+  if(k==="ldv")return !s.ldv.power?"offline":f.ldvMisalign?"warning":s.ldv.scanActive?"active":s.ldv.shutter?"ready":"standby";
+  if(k==="scope")return !s.scope.power?"offline":s.scope.running?"active":"standby";
+  if(k==="pumps")return s.chamber.turbo&&s.chamber.pressure>50?"fault":s.chamber.turbo||s.chamber.roughing?"active":s.chamber.pressure<1e-3?"valid":"standby";
+  if(k==="stage")return f.stageBacklash?"warning":s.stage.moving?"active":!s.stage.homed?"maintenance":s.stage.homed&&Math.abs(s.stage.x)+Math.abs(s.stage.y)+Math.abs(s.stage.z)>0?"settling":"ready";
+  if(k==="spatial")return !s.experiment.records.length?"standby":s.experiment.records.some(r=>!r.valid)?"warning":"valid";
+  if(k==="experiment")return s.experiment.active?"active":s.experiment.records.length?"valid":"standby";
+  if(k==="chamber")return f.vacuumLeak||s.chamber.turbo&&s.chamber.pressure>50?"fault":s.chamber.doorOpen||!s.chamber.isolation?"warning":s.chamber.roughing||s.chamber.turbo?"active":s.chamber.pressure<1e-3&&s.chamber.faraday&&s.chamber.isolation&&Math.abs(s.chamber.temperature-s.chamber.targetTemp)<.03?"stable":"ready";
+  return "standby";
 }
-function StatusLED({ status = "offline", label = true }) {
-  const [t, g, c] = ST[status];
-  return (
-    <span role="status" className="inline-flex items-center gap-1 font-mono text-[10px]" style={{ color: c }}>
-      <span aria-hidden="true" className={status === "critical" ? "lab-deco lab-alarm" : ""} style={{ textShadow: status === "offline" ? "none" : `0 0 6px ${c}` }}>{g}</span>
-      {label && <span>{t}</span>}
-    </span>
-  );
-}
-function LabChassis({ status = "offline", className = "", children }) {
-  return <div data-status={status} className={`relative rounded-xl border-4 border-zinc-700 p-4 ${className}`}>{children}</div>;
-}
+function getMeasurementVisualState(r,selected=false){if(selected)return "selected";if(r.excluded)return "offline";if(r.valid&&r.uncertaintyHz<=1)return "valid";if(r.uncertaintyHz>1||r.clockLocked===false)return "fault";return "warning";}
+function instStatus(s,k){return getSubsystemVisualState(s,k);}
+const ST=new Proxy({}, {get:(_,k)=>{const t=visualToken(k);return [t.label,t.symbol,t.hex];}});
+function StatusLED({status="offline",label=true,selected=false}){const n=selected?"selected":normalizeVisualState(status),t=VISUAL_STATE[n],animate=!FX.reduced&&(t.motion==="flow"||t.motion==="slow"||t.motion==="alarm");return <span role="status" aria-label={t.label} className={`inline-flex items-center gap-1 font-mono text-[10px] ${t.text}`}><span aria-hidden="true" className={`h-2 w-2 rounded-full ${t.led} ${animate?t.motion==="alarm"?"lab-alarm":"animate-pulse":""}`} style={{boxShadow:n==="offline"?"none":`0 0 7px ${t.hex}`}}/><span aria-hidden="true">{t.symbol}</span>{label&&<span>{t.label}</span>}</span>}
+function LabChassis({status="offline",selected=false,className="",children}){const n=selected?"selected":normalizeVisualState(status),t=VISUAL_STATE[n];return <div data-visual-state={n} aria-label={`Equipment state: ${t.label}`} className={`relative rounded-xl border-4 p-4 transition-colors duration-300 ${visualClass(n)} ${className}`}>{children}</div>}
 function InstrumentScreen({ children, className = "" }) {
   return <div className={`rounded border-2 border-zinc-600 bg-black p-3 ${className}`}>{children}</div>;
 }
@@ -1793,8 +2223,8 @@ function TelemetryReadout({ label, value, unit = "", sub = null, tone = "#7dd3fc
 function AnimatedScanCursor({ p }) {
   return <div aria-hidden="true" className="pointer-events-none absolute top-2 bottom-4 z-10" style={{ left: `calc(46px + (100% - 64px) * ${p})`, width: 2, background: "#22d3ee", boxShadow: "0 0 10px 2px rgba(34,211,238,.7)" }} />;
 }
-function SignalPath({ d, color, dash = undefined, active, label }) {
-  return <path d={d} fill="none" stroke={color} strokeWidth={active ? 2.5 : 1} strokeDasharray={dash} opacity={active ? 1 : 0.15} className={active ? "lab-deco sig-flow" : ""}><title>{label}{active ? " (active)" : " (idle)"}</title></path>;
+function SignalPath({ d, color = "#94a3b8", dash = undefined, active, label, fault = false }) {
+  return <path d={d} fill="none" stroke={fault ? "#fb7185" : color} strokeWidth={active || fault ? 2.5 : 1} strokeDasharray={dash} opacity={active || fault ? 1 : 0.15} className={active ? "lab-deco sig-flow" : ""}><title>{label}{fault ? " (fault)" : active ? " (active)" : " (idle)"}</title></path>;
 }
 
 function FxSettings({ fx, setFx }) {
@@ -1836,14 +2266,14 @@ function SpatialMarks({ p, records, stage, planned, o, sx, sy, colorOf, get, uni
       {tgt && <circle cx={sx(tgt[p.a])} cy={sy(tgt[p.b])} r="9" fill="none" stroke="#facc15" strokeWidth="2" className="lab-deco sig-pulse"><title>Active target</title></circle>}
       {seq.map(r => {
         const d = (r[dk] + 35) / 70, k = 0.75 + d * 0.6, cx = sx(r[p.a]), cy = sy(r[p.b]);
-        const bad = r.uncertaintyHz > 1 || r.clockLocked === false, sus = !r.valid && !bad;
-        const c = colorOf(r);
+        const pointState=getMeasurementVisualState(r), bad=pointState==="fault", sus=pointState==="warning";
+        const vt=visualToken(pointState), c=colorOf(r);
         return (
           <g key={r.id} opacity={0.55 + d * 0.45}>
             <ellipse cx={cx + 2} cy={cy + 4 + (1 - d) * 5} rx={4 * k} ry={1.6 * k} fill="#000" opacity=".6" />
             {o.unc && <circle cx={cx} cy={cy} r={4 * k + Math.min(14, (r.uncertaintyHz || 0) * 8)} fill={c} opacity=".18" />}
             {bad ? <g stroke="#ef4444" strokeWidth="2"><line x1={cx - 4} y1={cy - 4} x2={cx + 4} y2={cy + 4} /><line x1={cx - 4} y1={cy + 4} x2={cx + 4} y2={cy - 4} /></g>
-              : <circle cx={cx} cy={cy} r={4 * k} fill={c} stroke={o.quality && sus ? "#f59e0b" : "#0b1220"} strokeWidth={r.q > 3000 ? 2.5 : 1.2} strokeDasharray={o.quality && sus ? "2 2" : undefined} />}
+              : <circle cx={cx} cy={cy} r={4 * k} fill={c} stroke={o.quality ? vt.hex : "#0b1220"} strokeWidth={r.q > 3000 ? 2.5 : 1.2} strokeDasharray={o.quality && sus ? "2 2" : undefined} />}
             {o.labels && <text x={cx + 6} y={cy - 6} fontSize="8" fill="#cbd5e1">{o.order ? `#${r.sequence}` : get(r).toFixed(1)}</text>}
             <title>{`#${r.sequence} ${r.x.toFixed(1)}, ${r.y.toFixed(1)}, ${r.z.toFixed(1)} mm → ${get(r).toFixed(2)}${unit} · ${bad ? "invalid" : sus ? "suspect" : "valid"}`}</title>
           </g>
@@ -1854,81 +2284,48 @@ function SpatialMarks({ p, records, stage, planned, o, sx, sy, colorOf, get, uni
   );
 }
 
-function LabOverview({ state, dispatch }) {
-  const go = id => dispatch({ type: "SET_UI", patch: { active: id } });
-  const al = state.alarms.filter(a => !a.acknowledged), src: Record<string, string> = {};
-  const alarmSources: [RegExp, string][] = [[/turbo|vacuum|pressure|door/i, "chamber"], [/RF|VNA|sweep/i, "vna"], [/vibration|scope/i, "scope"], [/clock/i, "clock"], [/laser|LDV/i, "ldv"]];
-  al.forEach(a => alarmSources.forEach(([r, k]) => { if (r.test(a.text)) src[k] = a.severity; }));
-  const N = [
-    { k: "clock", l: "Rb Clock", pg: "clock", x: 60, y: 60, w: 120, h: 70 }, { k: "vna", l: "VNA", pg: "vna", x: 60, y: 200, w: 120, h: 70 },
-    { k: "scope", l: "Oscilloscope", pg: "scope", x: 60, y: 330, w: 120, h: 70 }, { k: "chamber", l: "Thermal-Vac Chamber", pg: "chamber", x: 330, y: 190, w: 170, h: 100 },
-    { k: "ldv", l: "LDV Head", pg: "ldv", x: 600, y: 70, w: 120, h: 70 }, { k: "pumps", l: "Pumps", pg: "chamber", x: 600, y: 300, w: 120, h: 70 }
+function LivingTelemetryBar({state,validationResult,unresolved}){
+  const prior=state.events?.find(e=>e.subsystem==="ENVIRONMENT"&&/pressure/i.test(e.text||""));
+  const pressureTrend=state.chamber.vent?"↑":state.chamber.roughing||state.chamber.turbo?"↓":"→";
+  const drift=state.chamber.temperature-state.chamber.targetTemp;
+  const cells=[
+    ["SIM",`${Math.floor(state.facility.simulationTime)} s`,"facility"], ["POWER",state.facility.power?"ON":"OFF","facility"],
+    ["CLOCK",state.clock.locked?"LOCKED":state.clock.power?`WARM ${Math.min(100,state.clock.warmup/WARMUP_SECONDS*100).toFixed(0)}%`:"OFF","clock"],
+    ["PRESS",`${pressureTrend} ${fmtPressure(state.chamber.pressure)}`,"chamber"], ["TEMP",`${state.chamber.temperature.toFixed(2)} °C (${drift>=0?"+":""}${drift.toFixed(2)})`,"chamber"],
+    ["XYZ",`${state.stage.x.toFixed(1)} / ${state.stage.y.toFixed(1)} / ${state.stage.z.toFixed(1)}`,"stage"], ["RUN",state.experiment.active?state.experiment.id||"ACTIVE":"IDLE","experiment"],
+    ["VNA RF",state.vna.rf?"ON":"OFF","vna"], ["LDV",state.ldv.shutter?"OPEN":"CLOSED","ldv"], ["QUALITY",validationResult.overall,"spatial"], ["ALARMS",String(unresolved),"facility"]
   ];
-  const on = { clock: state.clock.locked, rf: state.vna.power && state.vna.rf, laser: state.ldv.power && state.ldv.shutter, scope: state.scope.power && state.scope.running, ldv: state.ldv.power && (state.ldv.scanActive || state.ldv.shutter) };
-  return (
-    <div className="space-y-3">
-      <div><h1 className="text-xl font-bold">Lab Overview</h1><p className="mt-1 text-sm text-zinc-400">Select any instrument to open its page. Signal paths appear only while that system is active.</p></div>
-      <div className="grid gap-3 xl:grid-cols-3">
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 xl:col-span-2">
-          <svg viewBox="0 0 780 470" className="w-full" role="group" aria-label="Isometric laboratory layout">
-            <defs><pattern id="ov-g" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0H0V30" fill="none" stroke="#111b27" /></pattern></defs>
-            <rect width="780" height="470" fill="url(#ov-g)" />
-            <SignalPath d="M120 95 L120 235" color="#22d3ee" dash="6 4" active={on.clock && state.vna.power} label="Clock reference to VNA" />
-            <SignalPath d="M120 95 L30 95 L30 365 L120 365" color="#22d3ee" dash="6 4" active={on.clock && state.scope.power} label="Clock reference to scope" />
-            <SignalPath d="M120 95 L120 30 L660 30 L660 105" color="#22d3ee" dash="6 4" active={on.clock && state.ldv.power} label="Clock reference to LDV" />
-            <SignalPath d="M120 235 L415 235" color="#e879f9" dash="2 5" active={on.rf} label="RF path" />
-            <SignalPath d="M660 105 L415 105 L415 240" color="#facc15" active={on.laser} label="Laser path" />
-            <SignalPath d="M120 365 L415 365 L415 240" color="#3b82f6" dash="8 3 2 3" active={on.scope} label="Scope data path" />
-            <SignalPath d="M660 105 L750 105 L750 450 L120 450 L120 365" color="#3b82f6" dash="8 3 2 3" active={on.ldv} label="LDV data path" />
-            {N.map(n => {
-              const st = instStatus(state, n.k), [t, g, c] = ST[st], d = 14, a = src[n.k] || (n.k === "pumps" ? src.chamber : null);
-              return (
-                <g key={n.k} role="button" tabIndex={0} aria-label={`${n.l}: ${t}. Open page`} style={{ cursor: "pointer" }} onClick={() => go(n.pg)} onKeyDown={e => (e.key === "Enter" || e.key === " ") && go(n.pg)}>
-                  {a && <rect x={n.x - 6} y={n.y - 16} width={n.w + d + 12} height={n.h + 22} fill="none" stroke={a === "critical" ? "#ef4444" : "#f59e0b"} strokeWidth="2" strokeDasharray="5 3" rx="4" />}
-                  <path d={`M${n.x} ${n.y} L${n.x + d} ${n.y - d} L${n.x + n.w + d} ${n.y - d} L${n.x + n.w} ${n.y}Z`} fill="#243040" stroke={c} />
-                  <path d={`M${n.x + n.w} ${n.y} L${n.x + n.w + d} ${n.y - d} L${n.x + n.w + d} ${n.y + n.h - d} L${n.x + n.w} ${n.y + n.h}Z`} fill="#121a24" stroke={c} />
-                  <rect x={n.x} y={n.y} width={n.w} height={n.h} fill="#1a2330" stroke={c} strokeWidth={st === "offline" ? 1 : 2} opacity={st === "offline" ? 0.7 : 1} />
-                  <text x={n.x + 8} y={n.y + 22} fontSize="12" fill="#e2e8f0" fontWeight="600">{n.l}</text>
-                  <text x={n.x + 8} y={n.y + 42} fontSize="11" fill={c} fontFamily="monospace">{g} {t}</text>
-                  {a && <text x={n.x + 8} y={n.y + 60} fontSize="10" fill="#fca5a5" fontFamily="monospace">{a === "critical" ? "■ ALARM" : "▲ WARNING"}</text>}
-                </g>
-              );
-            })}
-          </svg>
-          <div className="flex flex-wrap gap-4 border-t border-zinc-800 px-2 pt-2 font-mono text-[10px] text-zinc-400">
-            {[["Clock ref", "#22d3ee", "6 4"], ["RF", "#e879f9", "2 5"], ["Laser", "#facc15", ""], ["Data", "#3b82f6", "8 3 2 3"]].map(([n, c, d]) => <span key={n} className="flex items-center gap-1"><svg width="30" height="6"><line x1="0" y1="3" x2="30" y2="3" stroke={c} strokeWidth="2" strokeDasharray={d} /></svg>{n}</span>)}
-          </div>
-        </div>
-        <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-          <TelemetryReadout label="Chamber pressure" value={fmtPressure(state.chamber.pressure)} />
-          <TelemetryReadout label="Chamber temperature" value={state.chamber.temperature.toFixed(3)} unit="°C" tone="#fdba74" sub={`Setpoint ${state.chamber.targetTemp.toFixed(1)} °C`} />
-          <TelemetryReadout label="Simulation time" value={state.facility.simulationTime.toFixed(0)} unit="s" />
-          <div className="flex justify-around pt-1"><RotaryKnob value={state.chamber.targetTemp} min={10} max={35} label="Setpoint" unit=" °C" /><RotaryKnob value={Math.log10(Math.max(state.chamber.pressure, 1e-6))} min={-6} max={3} label="Vacuum" /></div>
-          <div className="text-[11px] text-zinc-400">Open alarms: <span className="font-mono text-amber-300">{al.length}</span></div>
-        </div>
-      </div>
-    </div>
-  );
+  return <div className="shrink-0 overflow-x-auto border-b border-zinc-800 bg-[#070a0f] px-3 py-1.5" aria-label="Persistent live laboratory telemetry"><div className="flex min-w-max items-stretch gap-1.5">{cells.map(([label,value,sub])=>{const vs=getSubsystemVisualState(state,sub),t=visualToken(vs);return <div key={label} data-visual-state={vs} className={`min-w-[92px] rounded border px-2 py-1 ${t.border} ${t.surface}`}><div className="text-[8px] font-bold uppercase tracking-[.14em] text-zinc-500">{label}</div><div className={`mt-.5 flex items-center gap-1 font-mono text-[10px] ${t.text}`}><span className={`h-1.5 w-1.5 rounded-full ${t.led}`} aria-hidden="true"/>{value}</div></div>})}</div></div>;
+}
+function LabOverview({state,dispatch}){
+  const go=id=>dispatch({type:"SET_UI",patch:{active:id}}), alarms=state.alarms.filter(a=>!a.acknowledged);
+  const nodes=[
+    {k:"clock",l:"10 MHz Reference",pg:"clock",x:38,y:42,w:132,h:62},{k:"vna",l:"E5080B VNA",pg:"vna",x:38,y:150,w:132,h:72},{k:"scope",l:"Oscilloscope",pg:"scope",x:38,y:273,w:132,h:72},
+    {k:"chamber",l:"Thermal-Vac Chamber",pg:"chamber",x:300,y:148,w:190,h:118},{k:"stage",l:"XYZ Stage + Sample",pg:"chamber",x:325,y:177,w:140,h:60},
+    {k:"ldv",l:"LDV Optical Head",pg:"ldv",x:596,y:42,w:140,h:67},{k:"pumps",l:"Vacuum Pumps",pg:"chamber",x:596,y:250,w:140,h:72},{k:"experiment",l:"Acquisition Workstation",pg:"runs",x:300,y:365,w:190,h:68}
+  ];
+  const faultFor=k=>alarms.some(a=>new RegExp(k==="chamber"||k==="pumps"?"turbo|vacuum|pressure|door":k,"i").test(a.text||""));
+  const routes=[
+    {d:"M104 104 L104 186",kind:"clock",on:state.clock.locked&&state.vna.power,label:"10 MHz reference to VNA"},{d:"M104 104 L18 104 L18 309 L104 309",kind:"clock",on:state.clock.locked&&state.scope.power,label:"10 MHz reference to scope"},
+    {d:"M104 104 L104 20 L666 20 L666 76",kind:"clock",on:state.clock.locked&&state.ldv.power,label:"10 MHz reference to LDV"},{d:"M170 186 C230 186 250 195 325 205",kind:"rf",on:state.vna.power&&state.vna.rf,label:"RF stimulus and return"},
+    {d:"M666 76 C560 76 515 115 430 190",kind:"laser",on:state.ldv.power&&state.ldv.shutter,label:"LDV forward beam"},{d:"M430 195 C520 125 565 90 666 83",kind:"laserReturn",on:state.ldv.power&&state.ldv.shutter,label:"LDV reflected return"},
+    {d:"M395 266 L395 365",kind:"data",on:state.experiment.active||state.vna.trace.length>0,label:"Measurement data to workstation"},{d:"M596 286 C535 286 505 245 490 225",kind:"vacuum",on:state.chamber.roughing||state.chamber.turbo,label:"Vacuum flow to pumps"}
+  ];
+  const color={clock:"#22d3ee",rf:"#e879f9",laser:"#facc15",laserReturn:"#fde68a",data:"#3b82f6",vacuum:"#94a3b8"};
+  return <div className="space-y-3"><div><h1 className="text-xl font-bold">Living Lab Overview</h1><p className="mt-1 text-sm text-zinc-400">Physical equipment, operating state, signal flow, vacuum flow, and acquisition feedback share one live model.</p></div><div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2"><svg viewBox="0 0 780 455" className="w-full" role="group" aria-label="Living laboratory equipment and signal routing"><defs><pattern id="ll-grid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M28 0H0V28" fill="none" stroke="#111b27"/></pattern></defs><rect width="780" height="455" rx="12" fill="url(#ll-grid)"/>{routes.map((r,i)=><SignalPath key={i} d={r.d} color={faultFor(r.kind)?undefined:color[r.kind]} active={r.on} fault={faultFor(r.kind)} label={r.label}/>) }
+  {nodes.map(n=>{const vs=faultFor(n.k)?"fault":getSubsystemVisualState(state,n.k),t=visualToken(vs);return <g key={n.k} role="button" tabIndex={0} aria-label={`${n.l}, ${t.label}`} onClick={()=>go(n.pg)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go(n.pg)}}} className="cursor-pointer"><rect x={n.x} y={n.y} width={n.w} height={n.h} rx="9" fill="#0a1018" stroke={t.hex} strokeWidth={vs==="fault"?3:2} opacity={vs==="offline"?.58:1}/><rect x={n.x+7} y={n.y+7} width={n.w-14} height="10" rx="3" fill={t.hex} opacity=".18"/><circle cx={n.x+n.w-13} cy={n.y+13} r="4" fill={t.hex}/><text x={n.x+12} y={n.y+34} fill="#e2e8f0" fontSize="12" fontWeight="700">{n.l}</text><text x={n.x+12} y={n.y+51} fill={t.hex} fontSize="9" fontFamily="monospace">{t.symbol} {t.label.toUpperCase()}</text></g>})}</svg></div><div className="space-y-2">{nodes.filter(n=>n.k!=="stage").map(n=>{const vs=faultFor(n.k)?"fault":getSubsystemVisualState(state,n.k);return <button key={n.k} onClick={()=>go(n.pg)} className={`flex w-full items-center justify-between rounded border p-2 text-left ${visualClass(vs)}`}><span className="text-xs font-semibold">{n.l}</span><StatusLED status={vs}/></button>})}<div className="rounded border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400"><div className="mb-2 font-bold uppercase tracking-wider text-zinc-300">Live routes</div><div className="grid grid-cols-2 gap-1">{Object.entries({clock:"Clock",rf:"RF",laser:"Laser",data:"Data",vacuum:"Vacuum",fault:"Fault"}).map(([k,l])=><span key={k} style={{color:k==="fault"?"#fb7185":color[k]||"#fb7185"}}>● {l}</span>)}</div></div></div></div></div>;
 }
 
-
-/* ───────── Phase 1: dependency-free 3D laboratory digital twin (software-projected SVG) ───────── */
 const GRP = { outer: "Outer Faraday enclosure", inner: "Inner Faraday enclosure", table: "Optical table", chamber: "Thermal-vacuum chamber", sphere: "Test sphere", ldv: "LDV optical heads", rf: "RF coupling fixture", pumps: "Vacuum pumps", rack: "Instrument rack", probes: "Environmental probes", room: "Laboratory room (context)" };
 const EXPL = { outer: [0, 0, 1100], inner: [0, 0, 550], table: [0, 0, -250], chamber: [0, 0, 350], sphere: [0, 0, 800], ldv: [0, 0, 900], rf: [450, 0, 550], pumps: [-500, 0, 0], rack: [600, 0, 0], probes: [0, 350, 500], room: [0, 0, 0] };
 const CAM = { iso: { yaw: 0.6, pit: 0.5, dist: 6200, t: [200, 0, 1000] }, front: { yaw: 0, pit: 0.05, dist: 6500, t: [200, 0, 1000] }, top: { yaw: 0, pit: 1.5, dist: 6500, t: [200, 0, 1000] }, interior: { yaw: -0.5, pit: 0.35, dist: 1100, t: [0, 0, 1100] }, optical: { yaw: 1.57, pit: 0.05, dist: 1500, t: [0, 0, 1450] }, rf: { yaw: -1.0, pit: 0.3, dist: 1300, t: [200, 0, 1100] }, vacuum: { yaw: 0.7, pit: 0.3, dist: 1700, t: [-550, 0, 1000] }, rack: { yaw: 1.2, pit: 0.15, dist: 2600, t: [1800, 0, 1000] } };
 const BOXF = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [0, 3, 7, 4], [1, 2, 6, 5]], SHADE = [0.5, 1, 0.8, 0.6, 0.7, 0.9];
-
-
-/* ───────── Phase 2: materials, LOD, instrument screens ───────── */
 const MT = { steel: { c: "#9aa6b2", sp: 0.55, sh: 22, tx: "brush" }, anod: { sp: 0.3, sh: 10 }, black: { c: "#14181f", sp: 0.18, sh: 8 }, copper: { c: "#c8743a", sp: 0.7, sh: 30 }, silica: { c: "#cfe9f7", sp: 0.9, sh: 40, gl: 1 }, glass: { c: "#9fd0e8", sp: 0.9, sh: 40, gl: 1 }, mesh: { sp: 0, sh: 1, tx: "mesh" }, rubber: { c: "#1d1f23", sp: 0.02, sh: 2 }, emit: { emit: 1 } };
 const MATID = { outer: "mesh", inner: "mesh", top: "steel", shell: "steel", door: "steel", view: "silica", ftrf: "anod", ftse: "anod", m1: "steel", m2: "steel", rx: "anod", ry: "anod", car: "anod", pst: "anod", sph: "copper", ldvA: "anod", ldvB: "anod", fix: "anod", rough: "anod", turbo: "steel", rack: "black", uclk: "black", uvna: "black", uscp: "black", tprobe: "steel", pgauge: "steel", accel: "anod" };
 const LV = [0.406, -0.609, 0.711];
 const shadeHex = (h, f) => `rgb(${[1, 3, 5].map(i => { const v = parseInt(h.slice(i, i + 2), 16); return Math.round(Math.max(0, Math.min(255, f < 1 ? v * f : v + (255 - v) * (f - 1)))); }).join(",")})`;
 const nrm = (a, b, c) => { const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(n[0], n[1], n[2]) || 1; return [n[0] / l, n[1] / l, n[2] / l]; };
-function SignFace({ text, sub, col, lit }) {
-  const c = lit ? col : "#64748b";
-  return <g><rect width="200" height="70" rx="5" fill={lit ? "#0a0d12" : "#080a0e"} stroke={c} strokeWidth="3" /><rect x="6" y="6" width="188" height="58" rx="3" fill="none" stroke={c} strokeOpacity=".4" strokeDasharray="6 4" /><text x="100" y="35" textAnchor="middle" fontSize="19" fontWeight="700" fill={c} fontFamily="sans-serif" style={lit && !FX.hide ? { filter: `drop-shadow(0 0 4px ${col})` } : undefined}>{text}</text><text x="100" y="54" textAnchor="middle" fontSize="11" fill={c} fontFamily="monospace">{sub}</text></g>;
-}
+
 function TwDefs() {
   return (
     <defs>
@@ -1953,43 +2350,6 @@ function twinExtra(st, g, sz) {
   o.push({ id: "vring", g: "chamber", sub: "Quartz viewport", label: "Viewport retaining ring (detail)", k: "cyl", ax: "z", c: [0, 0, 1414], r: 96, len: 8, col: "#9aa6b2", mt: "steel", hi: 1, tbl: 1 });
   o.push({ id: "tfl", g: "pumps", label: "Turbo flange (detail)", k: "cyl", ax: "x", c: [-300, 0, 1100], r: 92, len: 14, col: "#9aa6b2", mt: "steel", hi: 1, tbl: 1 });
   if (!st.chamber.doorOpen) o.push({ id: "hnd", g: "chamber", sub: "Door", label: "Door handle (detail)", k: "box", c: [150, -335, 1100], s: [16, 16, 140], col: "#cbd5e1", mt: "steel", hi: 1, tbl: 1 });
-  const ch = st.chamber, cc = ch.faraday ? "#d99a2b" : "#ef4444", pump = ch.roughing || ch.turbo;
-  const B = (id, g, label, c, sz2, col, mt, x = {}) => o.push({ id, g, label, k: "box", c, s: sz2, col, mt, ...x });
-  const C = (id, g, label, c, ax, r, len, col, mt, x = {}) => o.push({ id, g, label, k: "cyl", ax, c, r, len, col, mt, ...x });
-  // double Faraday cage: posts and door frames
-  [[-1600, -1300], [1600, -1300], [-1600, 1300], [1600, 1300]].forEach(([x, y], i) => B("op" + i, "outer", "Outer cage post", [x, y, 1200], [50, 50, 2400], cc, "steel"));
-  [[-1100, -850], [1100, -850], [-1100, 850], [1100, 850]].forEach(([x, y], i) => B("ip" + i, "inner", "Inner cage post", [x, y, 950], [40, 40, 1800], cc, "steel"));
-  B("ofl", "outer", "Outer cage door frame", [-450, -1300, 1000], [40, 40, 2000], cc, "steel"); B("ofr", "outer", "Outer cage door frame", [450, -1300, 1000], [40, 40, 2000], cc, "steel"); B("oft", "outer", "Outer cage door frame", [0, -1300, 2020], [940, 40, 40], cc, "steel");
-  B("ifl", "inner", "Inner cage door frame", [-400, -850, 900], [30, 30, 1700], cc, "steel"); B("ifr", "inner", "Inner cage door frame", [400, -850, 900], [30, 30, 1700], cc, "steel"); B("ift", "inner", "Inner cage door frame", [0, -850, 1750], [830, 30, 30], cc, "steel");
-  // optical table skirt
-  B("skirt", "table", "Optical table skirt", [0, 0, 735], [1760, 1160, 30], "#3b4654", "anod");
-  // chamber hardware
-  B("lid", "chamber", "Chamber lid plate", [0, 0, 1406], [620, 620, 12], "#9aa6b2", "steel", { tbl: 1 });
-  C("fl1", "chamber", "RF port flange (detail)", [364, 0, 1100], "x", 45, 10, "#9aa6b2", "steel", { hi: 1, tbl: 1 });
-  C("fl2", "chamber", "Sensor port flange (detail)", [364, -130, 1100], "x", 36, 10, "#9aa6b2", "steel", { hi: 1, tbl: 1 });
-  C("hg1", "chamber", "Door hinge", [-300, -310, 1000], "z", 10, 120, "#cbd5e1", "steel", { hi: 1, tbl: 1 }); C("hg2", "chamber", "Door hinge", [-300, -310, 1200], "z", 10, 120, "#cbd5e1", "steel", { hi: 1, tbl: 1 });
-  for (let i = 0; i < 8; i++) C("vb" + i, "chamber", "Viewport bolt (detail)", [Math.cos(i * 0.7854) * 106, Math.sin(i * 0.7854) * 106, 1420], "z", 6, 10, "#cbd5e1", "steel", { hi: 1, tbl: 1, sub: "Quartz viewport" });
-  // stage details
-  B("plate", "chamber", "Stage base plate", [0, 0, 858], [200, 200, 8], "#64748b", "anod", { sub: "Internal XYZ stage", tbl: 1 });
-  B("brg1", "chamber", "Linear bearing block (detail)", [-70, 0, 880], [16, 30, 10], "#cbd5e1", "steel", { hi: 1, sub: "Internal XYZ stage", tbl: 1 }); B("brg2", "chamber", "Linear bearing block (detail)", [70, 0, 880], [16, 30, 10], "#cbd5e1", "steel", { hi: 1, sub: "Internal XYZ stage", tbl: 1 });
-  // LDV mount and fibre
-  C("arm", "ldv", "LDV ceiling mount arm (conceptual)", [0, 0, 2090], "z", 25, 500, "#9aa6b2", "steel");
-  // pumps
-  C("tfan", "pumps", "Turbo fan guard", [-475, 0, 1100], "x", 60, 12, "#334155", "anod", { tbl: 1 });
-  C("rmot", "pumps", "Roughing pump motor", [-900, -440, 230], "y", 90, 80, pump ? "#38bdf8" : "#475569", "anod");
-  C("rexh", "pumps", "Exhaust port (detail)", [-900, -250, 430], "z", 12, 60, "#cbd5e1", "steel", { hi: 1 });
-  B("fvalve", "pumps", "Foreline valve", [-900, 0, 500], [90, 90, 90], "#9aa6b2", "steel");
-  // rack rails and handles
-  B("rl1", "rack", "Rack rail", [1578, -290, 900], [20, 15, 1800], "#14181f", "black"); B("rl2", "rack", "Rack rail", [1578, 290, 900], [20, 15, 1800], "#14181f", "black");
-  [1600, 1350, 1100, 850, 600].forEach(z => [-230, 230].forEach(y => B(`hd${z}${y}`, "rack", "Rack handle (detail)", [1574, y, z], [8, 16, 50], "#cbd5e1", "steel", { hi: 1 })));
-  // laboratory room context
-  B("tray", "room", "Overhead cable tray (conceptual)", [300, 0, 2700], [4200, 300, 50], "#9aa6b2", "steel");
-  B("riser", "room", "Cable riser to rack", [2000, 0, 2250], [60, 300, 900], "#9aa6b2", "steel");
-  C("cond", "room", "Wall conduit", [0, 2350, 2500], "x", 25, 4400, "#9aa6b2", "steel");
-  B("duct", "room", "Floor cable duct", [1500, 0, 15], [1400, 200, 30], "#475569", "anod");
-  B("bench", "room", "Workbench (context)", [-2300, -1600, 450], [1400, 700, 900], "#334155", "black");
-  B("cab", "room", "Storage cabinet (context)", [-2500, 1900, 900], [600, 500, 1800], "#475569", "anod");
-  C("ext", "room", "Fire extinguisher", [2600, 2200, 300], "z", 80, 600, "#dc2626", "anod");
   return o;
 }
 function ScreenFace({ k, st }) {
@@ -2044,15 +2404,18 @@ function twinParts(st) {
 }
 
 function DigitalTwin({ state, dispatch }) {
+  const commandedStage = state.stage;
+  const actualStage = { ...commandedStage, x: commandedStage.actualX ?? commandedStage.x, y: commandedStage.actualY ?? commandedStage.y, z: commandedStage.actualZ ?? commandedStage.z };
+  const renderState = { ...state, stage: actualStage };
   const [cam, setCam] = useState(CAM.iso);
   const camRef = useRef(cam); camRef.current = cam;
   const raf = useRef(0), drag = useRef(null), svgRef = useRef(null);
   const [mode, setMode] = useState("lab");
   const [qual, setQual] = useState("bal");
   const [hid, setHid] = useState({}), [solo, setSolo] = useState(null), [ghost, setGhost] = useState({}), [sel, setSel] = useState(null), [tm, setTm] = useState(0);
-  const { stage: g, chamber: c } = state;
-  const parts = twinParts(state).map(p => ({ ...p, mt: p.mt || MATID[p.id] || (p.id.startsWith("leg") ? "anod" : null) }));
-  const pump = c.roughing || c.turbo, still = FX.reduced || FX.hide;
+  const { stage: g, chamber: c } = renderState;
+  const parts = twinParts(renderState).map(p => ({ ...p, mt: p.mt || MATID[p.id] || (p.id.startsWith("leg") ? "anod" : null) }));
+  const pump = (c.roughingRpm||0)>1 || (c.turboRpm||0)>1 || c.vent, still = FX.reduced || FX.hide;
   useEffect(() => { if (still || (!pump && c.isolation)) return; const i = setInterval(() => setTm(Date.now()), 80); return () => clearInterval(i); }, [still, pump, c.isolation]);
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
   useEffect(() => {
@@ -2079,7 +2442,7 @@ function DigitalTwin({ state, dispatch }) {
   const e = mode === "exploded" ? 1 : 0, jit = !c.isolation && !FX.reduced ? Math.sin(tm / 45) * 1.6 + Math.sin(tm / 17) * 0.8 : 0;
   const chain = new Set(["uclk", "uvna", "fix", "sph", "ldvA", "view", "ftrf"]);
   const { yaw, pit, dist, t } = cam;
-  const Q = { perf: [700, 3500], bal: [1600, 7000], qual: [3200, 12000] }[qual];
+  const Q = { perf: [700, 2500], bal: [1600, 4500], qual: [3200, 9000] }[qual];
   let tier = dist < Q[0] ? "high" : dist < Q[1] ? "normal" : "low";
   if (drag.current && drag.current.m > 4) tier = tier === "high" ? "normal" : "low";
   const TN = tier === "high" ? 20 : tier === "normal" ? 12 : 6;
@@ -2113,7 +2476,7 @@ function DigitalTwin({ state, dispatch }) {
       let fill = base, spec = 0;
       if (!(mat && mat.emit)) { const n = nrm(V[f[0]], V[f[1]], V[f[2]]); fill = shadeHex(base, 0.5 + 0.7 * Math.abs(n[0] * LV[0] + n[1] * LV[1] + n[2] * LV[2])); if (mat && mat.sp && tier === "high") spec = mat.sp * Math.pow(Math.abs((n[0] * hv[0] + n[1] * hv[1] + n[2] * hv[2]) / hl), mat.sh); }
       items.push({ d: pts.reduce((m, q) => m + q[2], 0) / pts.length, s: <g key={p.id + i}>
-        <polygon points={ps} fill={fill} fillOpacity={Math.min(1, a) * (FX.hide ? 1 : 1 - 0.4 * Math.max(0, Math.min(1, pts[0][2] / (dist * 0.9 + 1500))))} stroke={mat && mat.gl ? "#e0f2fe" : st.stroke} strokeOpacity={Math.min(1, a + 0.35)} strokeWidth={st.sw} strokeDasharray={p.id === "env" ? "4 3" : undefined} onClick={() => !(drag.current && drag.current.m > 4) && setSel(p.id)}><title>{p.label}</title></polygon>
+        <polygon points={ps} fill={fill} fillOpacity={Math.min(1, a)} stroke={mat && mat.gl ? "#e0f2fe" : st.stroke} strokeOpacity={Math.min(1, a + 0.35)} strokeWidth={st.sw} strokeDasharray={p.id === "env" ? "4 3" : undefined} onClick={() => !(drag.current && drag.current.m > 4) && setSel(p.id)}><title>{p.label}</title></polygon>
         {spec > 0.04 && <polygon points={ps} fill="#fff" fillOpacity={Math.min(0.55, spec * a)} pointerEvents="none" />}
         {tier === "high" && mat && mat.tx && <polygon points={ps} fill={mat.tx === "brush" ? "url(#tw-brush)" : "url(#tw-mesh)"} fillOpacity={mat.tx === "mesh" ? Math.min(1, a * 6) : a} pointerEvents="none" />}
       </g> });
@@ -2121,48 +2484,8 @@ function DigitalTwin({ state, dispatch }) {
   });
   const vis = k => !hid[k] && (!solo || solo === k);
   const cab = (key, pts, w, col, grp, lab) => { if (!vis(grp)) return; const q = pts.map(v => P(...v)), pp = q.map(v => v[0].toFixed(1) + "," + v[1].toFixed(1)).join(" "), lw = Math.max(1.2, w * q[0][3]); items.push({ d: q.reduce((m, v) => m + v[2], 0) / q.length, s: <g key={key} fill="none" strokeLinejoin="round"><polyline points={pp} stroke="#0b0b0d" strokeWidth={lw + 1.5}><title>{lab}</title></polyline><polyline points={pp} stroke={col} strokeWidth={lw} />{tier !== "low" && <polyline points={pp} stroke="#0b0b0d" strokeWidth={lw} strokeDasharray="1.5 2.5" opacity=".55" />}</g> }); };
-  if (vis("room")) {
-    const RX = 2800, RY = 2400, RZ = 3000, Vt = [-sy * cp, -cy * cp, sp], kk = 700 / dist;
-    const pp = a => a.map(v => { const q = P(...v); return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" ");
-    const lp = (a, b, u) => [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
-    let seams = "";
-    if (tier !== "low") { for (let x = -RX + 600; x < RX; x += 600) seams += `M${pp([[x, -RY, 0]])}L${pp([[x, RY, 0]])}`; for (let y = -RY + 600; y < RY; y += 600) seams += `M${pp([[-RX, y, 0]])}L${pp([[RX, y, 0]])}`; }
-    const tape = [[-1750, -1350, 0], [1750, -1350, 0], [1750, 1350, 0], [-1750, 1350, 0], [-1750, -1350, 0]];
-    items.push({ d: 3e6, s: <g key="floor"><polygon points={pp([[-RX, -RY, 0], [RX, -RY, 0], [RX, RY, 0], [-RX, RY, 0]])} fill="url(#tw-floor)" stroke="#1e2a38" />{seams && <path d={seams} fill="none" stroke="#1d2938" strokeWidth=".8" />}<polyline points={pp(tape)} fill="none" stroke="#0a0a0a" strokeWidth={Math.max(2, 70 * kk)} /><polyline points={pp(tape)} fill="none" stroke="#facc15" strokeWidth={Math.max(1.5, 50 * kk)} strokeDasharray="12 10" /></g> });
-    const W = [
-      { k: "wx", n: [-1, 0, 0], q: [[RX, -RY, 0], [RX, RY, 0], [RX, RY, RZ], [RX, -RY, RZ]], m: Math.round(2 * RY / 1000) },
-      { k: "wy", n: [0, -1, 0], q: [[-RX, RY, 0], [RX, RY, 0], [RX, RY, RZ], [-RX, RY, RZ]], m: Math.round(2 * RX / 1000) },
-      { k: "wl", n: [1, 0, 0], q: [[-RX, -RY, 0], [-RX, RY, 0], [-RX, RY, RZ], [-RX, -RY, RZ]], m: Math.round(2 * RY / 1000) },
-      { k: "wf", n: [0, 1, 0], q: [[-RX, -RY, 0], [RX, -RY, 0], [RX, -RY, RZ], [-RX, -RY, RZ]], m: Math.round(2 * RX / 1000) },
-      { k: "ce", n: [0, 0, -1], q: [[-RX, -RY, RZ], [RX, -RY, RZ], [RX, RY, RZ], [-RX, RY, RZ]], m: 0 }
-    ];
-    const shown: Record<string, number> = {};
-    W.forEach(w => {
-      if (w.n[0] * Vt[0] + w.n[1] * Vt[1] + w.n[2] * Vt[2] < 0.15) return;
-      shown[w.k] = 1; const [b0, b1, t1, t0] = w.q; let sm = "";
-      if (tier !== "low") for (let i = 1; i < w.m; i++) sm += `M${pp([lp(b0, b1, i / w.m)])}L${pp([lp(t0, t1, i / w.m)])}`;
-      items.push({ d: 2e6, s: <g key={w.k}><polygon points={pp(w.q)} fill={w.k === "ce" ? "#0b121b" : "url(#tw-wall)"} stroke="#1e2a38" />{sm && <path d={sm} fill="none" stroke="#17212d" strokeWidth=".8" />}{w.k !== "ce" && <polygon points={pp([b0, b1, [b1[0], b1[1], 130], [b0[0], b0[1], 130]])} fill="#06090e" />}</g> });
-    });
-    const sg = (key, text, sub, col, lit, pts) => { const p0 = P(...pts[0]), p1 = P(...pts[1]), p2 = P(...pts[2]); items.push({ d: 1.9e6, s: <g key={key} transform={`matrix(${(p1[0] - p0[0]) / 200} ${(p1[1] - p0[1]) / 200} ${(p2[0] - p0[0]) / 70} ${(p2[1] - p0[1]) / 70} ${p0[0]} ${p0[1]})`} style={{ pointerEvents: "none" }}><SignFace text={text} sub={sub} col={col} lit={lit} /></g> }); };
-    const SW = 560, SH = 196, yb = RY - 1, xr = RX - 1;
-    const back = (x, z) => [[x - SW / 2, yb, z + SH / 2], [x + SW / 2, yb, z + SH / 2], [x - SW / 2, yb, z - SH / 2]];
-    const right = (y, z) => [[xr, y + SW / 2, z + SH / 2], [xr, y - SW / 2, z + SH / 2], [xr, y + SW / 2, z - SH / 2]];
-    const ls = state.ldv.power && state.ldv.shutter, pm = state.chamber.roughing || state.chamber.turbo, rfo = state.vna.power && state.vna.rf;
-    if (shown.wy) {
-      sg("s1", ls ? "⚠ LASER ACTIVE" : "LASER OFF", ls ? "CLASS 3B · EYE HAZARD" : "shutter closed", "#facc15", ls, back(-700, 2000));
-      sg("s2", pm ? "PUMPS RUNNING" : "PUMPS OFF", pm ? "vacuum in progress" : "chamber idle", "#38bdf8", pm, back(0, 2000));
-      sg("s3", rfo ? "RF ACTIVE" : "RF OFF", rfo ? "keep shield closed" : "VNA output off", "#e879f9", rfo, back(700, 2000));
-      sg("s4", state.chamber.faraday ? "SHIELD OK" : "SHIELD BREACH", state.chamber.faraday ? "Faraday enclosed" : "close enclosure", state.chamber.faraday ? "#4ade80" : "#ef4444", true, back(1400, 2000));
-      sg("s5", "EXIT ➜", "emergency egress", "#4ade80", true, back(-1900, 2400));
-    }
-    if (shown.wx) {
-      sg("s6", "E-STOP", "main breaker panel", "#ef4444", true, right(-300, 1500));
-      sg("s7", state.chamber.doorOpen ? "DOOR OPEN" : "DOOR CLOSED", state.chamber.doorOpen ? "chamber unsealed" : "chamber sealed", "#f59e0b", state.chamber.doorOpen, right(700, 1500));
-    }
-  }
   cab("cabrf", [[1578, -200, 1350], [1450, -200, 1250], [1000, -100, 1100], [360, 0, 1100]], 8, "#cfd4da", "rf", "Braided RF coax (conceptual routing)");
   cab("cabrf2", [[300, 0, 1100], [70, 40, 1100]], 5, "#cfd4da", "rf", "Internal RF coax");
-  cab("cabfb", [[110, 0, 1760], [600, 0, 1950], [1580, 0, 1700]], 3, "#fde047", "ldv", "LDV fibre-optic cable (conceptual)");
   cab("cabse", [[-220, 220, 1000], [0, 250, 950], [300, -130, 1100]], 4, "#f59e0b", "probes", "Sensor cable");
   const rackScreens: [number, string][] = [[1600, "clk"], [1350, "vna"], [1100, "scp"], [850, "ldv"], [600, "env"]];
   if (tier !== "low" && vis("rack") && Math.sin(yaw) * cp > 0.05) rackScreens.forEach(([zc, kk]) => {
@@ -2179,7 +2502,7 @@ function DigitalTwin({ state, dispatch }) {
   const sp0 = parts.find(q => q.id === sel);
   const key = e2 => { const q = camRef.current; if (e2.key === "ArrowLeft") setCam({ ...q, yaw: q.yaw - 0.1 }); else if (e2.key === "ArrowRight") setCam({ ...q, yaw: q.yaw + 0.1 }); else if (e2.key === "ArrowUp") setCam({ ...q, pit: Math.min(1.5, q.pit + 0.08) }); else if (e2.key === "ArrowDown") setCam({ ...q, pit: Math.max(-0.2, q.pit - 0.08) }); else if (e2.key === "+" || e2.key === "=") setCam({ ...q, dist: q.dist * 0.85 }); else if (e2.key === "-") setCam({ ...q, dist: q.dist / 0.85 }); else if (e2.key === "Escape") setSel(null); };
   const B = ({ on = false, f, children }) => <button aria-pressed={on} onClick={f} className={`rounded border px-2 py-1 text-[10px] ${on ? "border-sky-500 text-sky-200" : "border-zinc-700 text-zinc-300"}`}>{children}</button>;
-  const rows = [["Door", c.doorOpen ? "▲ OPEN" : "● closed"], ["Stage mm", `${g.x.toFixed(1)}, ${g.y.toFixed(1)}, ${g.z.toFixed(1)} (±${LIMIT_MM})`], ["Faraday", c.faraday ? "● on" : "▲ OFF (panel open)"], ["Isolation", c.isolation ? "● active" : "▲ OFF (jitter)"], ["Roughing", c.roughing ? "▶ running" : "○ off"], ["Turbo", c.turbo ? "▶ running" : "○ off"], ["LDV shutter", state.ldv.shutter ? "▶ open (beam)" : "○ closed"], ["VNA RF", act.rf ? "▶ on" : "○ off"], ["Clock ref", state.clock.locked ? "● locked" : "○ unlocked"]];
+  const rows = [["Door", c.doorOpen ? "▲ OPEN" : "● closed"], ["Stage mm", `${g.x.toFixed(1)}, ${g.y.toFixed(1)}, ${g.z.toFixed(1)} (±${LIMIT_MM})`], ["Faraday", c.faraday ? "● on" : "▲ OFF (panel open)"], ["Isolation", c.isolation ? "● active" : "▲ OFF (jitter)"], ["Roughing", (c.roughingRpm||0)>1 ? `▶ ${(c.roughingRpm||0).toFixed(0)}%` : "○ off"], ["Turbo", (c.turboRpm||0)>1 ? `▶ ${(c.turboRpm||0).toFixed(0)}%` : "○ off"], ["LDV shutter", state.ldv.shutter ? "▶ open (beam)" : "○ closed"], ["VNA RF", act.rf ? "▶ on" : "○ off"], ["Clock ref", state.clock.locked ? "● locked" : "○ unlocked"]];
   return (
     <div className="space-y-2">
       <div className="rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[10px] text-amber-200">▲ Conceptual, simplified model. Dimensions are plausible approximations, not an exact replica of any instrument. Only the stage ±{LIMIT_MM} mm travel is taken from the simulator.</div>
@@ -2197,8 +2520,8 @@ function DigitalTwin({ state, dispatch }) {
             onPointerDown={e => { drag.current = { x: e.clientX, y: e.clientY, m: 0 }; e.currentTarget.setPointerCapture(e.pointerId); }}
             onPointerMove={e => { const d = drag.current; if (!d || !e.buttons) return; const dx = e.clientX - d.x, dy = e.clientY - d.y; d.x = e.clientX; d.y = e.clientY; d.m += Math.abs(dx) + Math.abs(dy); const q = camRef.current; if (e.shiftKey || e.buttons > 1) { const kk = q.dist / 700; setCam({ ...q, t: [q.t[0] - (dx * cy) * kk, q.t[1] + (dx * sy) * kk, q.t[2] + dy * kk] }); } else setCam({ ...q, yaw: q.yaw + dx * 0.008, pit: Math.max(-0.2, Math.min(1.5, q.pit + dy * 0.008)) }); }}
             onPointerUp={() => setTimeout(() => { drag.current = null; }, 0)} onContextMenu={e => e.preventDefault()}>
-            <rect width="800" height="480" fill="url(#tw-bg)" /><TwDefs />
-            
+            <rect width="800" height="480" fill="#04070b" /><TwDefs />
+            <polygon points={[[-1800, -1500], [1800, -1500], [1800, 1500], [-1800, 1500]].map(([x, y]) => P(x, y, 0).slice(0, 2).map(v => v.toFixed(1)).join(",")).join(" ")} fill="#0b121b" stroke="#1e2a38" />
             {line("vac", vac, "#7dd3fc", 3, "2 8", pump, "Vacuum path")}
             {line("clk1", [[1580, 0, 1600], [1580, 0, 1350]], "#22d3ee", 2, "6 4", act.clk && act.vna, "Clock reference to VNA")}
             {line("clk2", [[1580, 0, 1600], [1580, 0, 1950], [110, 0, 1950], [110, 0, 1720]], "#22d3ee", 2, "6 4", act.clk && act.ldv, "Clock reference to LDV")}
@@ -2250,7 +2573,7 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo }) {
           <button onClick={() => set("ui", { wizardOpen: true })} className="rounded border border-emerald-500 bg-emerald-950 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-900 flex items-center gap-1">
             <Wrench size={14} /> Startup Wizard
           </button>
-          <button onClick={sweep} disabled={!state.vna.power} className="rounded border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-40 flex items-center gap-1">
+          <button onClick={sweep} disabled={!state.vna.power || state.vna.sweeping} className="rounded border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-40 flex items-center gap-1">
             <Play size={14} /> Single Sweep
           </button>
           {state.experiment.active ? (
@@ -2340,10 +2663,33 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo }) {
   );
 }
 
+
+function getStageMotionState(state){const p=state.stage;const commanded={x:p.x,y:p.y,z:p.z};const actual={x:p.actualX??p.x,y:p.actualY??p.y,z:p.actualZ??p.z};const err=Math.abs(commanded.x-actual.x)+Math.abs(commanded.y-actual.y)+Math.abs(commanded.z-actual.z);if(p.moving&&!p.settling)return "active";if(p.settling||err>0.025)return "settling";return p.homed?"stable":"maintenance";}
+function getChamberLifecycle(state){
+  const c=state.chamber,f=state.failures||{};
+  if(!state.facility.power)return {id:"offline",visual:"offline",label:"Facility offline",detail:"Energize the facility before operating chamber hardware."};
+  if(f.vacuumLeak||c.turbo&&c.pressure>50)return {id:"fault",visual:"fault",label:"Vacuum interlock fault",detail:f.vacuumLeak?"Vacuum leak symptoms detected.":"Turbo operation is prohibited above 50 Torr."};
+  if(c.doorOpen)return {id:"door_open",visual:"warning",label:"Door open",detail:"Vacuum routes and pumping are unavailable until the chamber is closed."};
+  if(c.vent)return {id:"vented",visual:"standby",label:"Vented",detail:"Chamber is returning toward atmospheric pressure."};
+  if(c.turbo&&c.pressure>=1e-3)return {id:"turbo_spinup",visual:"active",label:"Turbo pumpdown",detail:"Turbo stage is reducing pressure toward high vacuum."};
+  if(c.roughing&&c.pressure>50)return {id:"roughing",visual:"active",label:"Roughing",detail:"Rough pump is evacuating the chamber toward the turbo crossover point."};
+  if((c.roughing||c.turbo)&&c.pressure>=1e-3)return {id:"pumpdown",visual:"active",label:"Pumpdown",detail:"Vacuum system remains active."};
+  if(Math.abs(c.temperature-c.targetTemp)>=.03)return {id:"thermal_stabilizing",visual:"settling",label:"Thermal stabilization",detail:`Temperature is ${(c.temperature-c.targetTemp).toFixed(2)} °C from setpoint.`};
+  if(c.pressure<1e-3&&c.faraday&&c.isolation)return {id:"stable",visual:"stable",label:"Measurement environment stable",detail:"Deep vacuum, shielding, isolation, and thermal criteria are satisfied."};
+  if(!c.faraday||!c.isolation)return {id:"environment_degraded",visual:"warning",label:"Environment degraded",detail:!c.faraday?"Faraday shielding is disabled.":"Vibration isolation is disabled."};
+  return {id:"ready",visual:"ready",label:"Chamber ready",detail:"Chamber is powered and available for configuration."};
+}
+function ChamberLifecyclePanel({state,cv,setCv}){
+  const life=getChamberLifecycle(state),t=visualToken(life.visual),c=state.chamber;
+  const issues=[c.doorOpen&&"Door open: vacuum disabled",c.turbo&&c.pressure>50&&"Turbo pressure interlock",!c.faraday&&"RF shielding disabled",!c.isolation&&"Isolation disabled",Math.abs(c.temperature-c.targetTemp)>=.03&&"Temperature drifting"].filter(Boolean);
+  const cams=["front","iso","top","interior","optical","rf","vacuum","rack"],modes=["standard","transparent","cutaway","blueprint"];
+  return <div className={`rounded-lg border p-3 ${visualClass(life.visual)}`} data-chamber-lifecycle={life.id}><div className="flex flex-wrap items-center gap-3"><StatusLED status={life.visual}/><div className="min-w-[220px] flex-1"><div className="text-xs font-bold uppercase tracking-wider">{life.label}</div><div className="mt-1 text-[11px] text-zinc-400">{life.detail}</div></div><div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px]"><span>P {fmtPressure(c.pressure)}</span><span>T {c.temperature.toFixed(2)} °C</span><span>Shield {c.faraday?"ON":"OFF"}</span><span>Isolation {c.isolation?"ON":"OFF"}</span></div></div>{issues.length>0&&<div className="mt-2 flex flex-wrap gap-1">{issues.map(x=><span key={x} className="rounded border border-amber-500/40 bg-amber-950/30 px-2 py-1 text-[9px] text-amber-200">▲ {x}</span>)}</div>}<div className="mt-3 grid gap-2 md:grid-cols-2"><div><div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Camera preset</div><div className="flex flex-wrap gap-1">{cams.map(x=><button key={x} onClick={()=>setCv({...cv,cam:x})} aria-pressed={cv.cam===x} className={`rounded border px-2 py-1 text-[9px] uppercase ${cv.cam===x?"border-sky-400 bg-sky-950 text-sky-200":"border-zinc-700 bg-zinc-900 text-zinc-400"}`}>{x}</button>)}</div></div><div><div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Viewing mode</div><div className="flex flex-wrap gap-1">{modes.map(x=><button key={x} onClick={()=>setCv({...cv,mode:x,shell:x==="transparent"?true:cv.shell,cut:x==="cutaway"})} aria-pressed={cv.mode===x} className={`rounded border px-2 py-1 text-[9px] uppercase ${cv.mode===x?"border-cyan-400 bg-cyan-950 text-cyan-200":"border-zinc-700 bg-zinc-900 text-zinc-400"}`}>{x}</button>)}</div></div></div></div>;}
+function PumpLifecyclePanel({state}){const p=getPumpLifecycle(state),t=visualToken(p.visual),c=state.chamber;const gauge=clamp((Math.log10(Math.max(c.pressure,1e-6))+6)/8.88,0,1);return <div className={`rounded-lg border p-3 ${visualClass(p.visual)}`} data-pump-phase={p.id}><div className="flex flex-wrap items-center gap-3"><div className="relative h-16 w-16 rounded-full border-4 border-zinc-700 bg-black"><div className="absolute left-1/2 top-1/2 h-6 w-0.5 origin-bottom bg-sky-300" style={{transform:`translate(-50%,-100%) rotate(${-130+gauge*260}deg)`}}/><div className="absolute inset-0 grid place-items-end pb-2 font-mono text-[8px] text-zinc-400">PRESS</div></div><div className="min-w-[190px] flex-1"><div className="flex items-center gap-2"><StatusLED status={p.visual}/><span className="text-xs font-bold uppercase">{p.label}</span></div><div className="mt-1 text-[11px] text-zinc-400">{p.detail}</div><div className="mt-2 font-mono text-[10px] text-sky-200">{fmtPressure(c.pressure)} · {c.pressureRate>0?"↑":"↓"} {Math.abs(c.pressureRate||0).toExponential(1)} Torr/s</div></div><div className="grid min-w-[180px] gap-2"><div><div className="flex justify-between text-[9px] text-zinc-400"><span>ROUGHING</span><span>{(c.roughingRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-slate-400 transition-[width]" style={{width:`${c.roughingRpm||0}%`}}/></div></div><div><div className="flex justify-between text-[9px] text-zinc-400"><span>TURBO</span><span>{(c.turboRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-cyan-400 transition-[width]" style={{width:`${c.turboRpm||0}%`}}/></div></div></div></div></div>}
+function StageMotionPanel({state}){const sm=getStageMotionState(state),t=visualToken(sm),p=state.stage;const ax=p.actualX??p.x,ay=p.actualY??p.y,az=p.actualZ??p.z;return <div className={`rounded-lg border p-3 ${visualClass(sm)}`}><div className="flex items-center justify-between"><div><div className="text-xs font-bold uppercase">XYZ Motion State</div><div className="text-[11px] text-zinc-400">Commanded versus actual position and settling indication.</div></div><StatusLED status={sm}/></div><div className="mt-2 grid grid-cols-2 gap-3 font-mono text-xs"><div>CMD {p.x.toFixed(1)} / {p.y.toFixed(1)} / {p.z.toFixed(1)}</div><div>ACT {ax.toFixed(1)} / {ay.toFixed(1)} / {az.toFixed(1)}</div></div><div className="mt-2 h-2 rounded bg-zinc-900 overflow-hidden"><div className="h-full bg-cyan-400" style={{width:`${Math.min(100,100-(Math.abs(p.x-ax)+Math.abs(p.y-ay)+Math.abs(p.z-az))*10)}%`}}/></div></div>;}
 function Chamber({ state, dispatch, HelpInfo }) {
-  const [cv, setCv] = useState({ shell: true, cut: false, cam: "front" });
+  const [cv, setCv] = useState({ shell: true, cut: false, cam: "front", mode: "standard" });
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
-  
+
   const move = (axis, d) => {
     if (state.stage.clampActive) {
       dispatch({ type: "ALARM", text: "Stage move blocked: mechanical stage clamp is currently engaged.", severity: "critical" });
@@ -2353,6 +2699,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
   };
 
   const handleTurboClick = () => {
+    if (state.chamber.doorOpen) { dispatch({ type: "ALARM", text: "Turbo activation rejected: chamber door is open.", severity: "critical" }); return; }
     if (state.chamber.pressure > 50) {
       dispatch({ type: "ALARM", text: "Turbo activation rejected: chamber pressure exceeds 50 Torr safety interlock.", severity: "critical" });
       return;
@@ -2362,12 +2709,12 @@ function Chamber({ state, dispatch, HelpInfo }) {
 
   const handleVentClick = () => {
     if (state.chamber.pressure < 1) {
-      set("ui", { 
-        confirmModal: { 
-          title: "Vent Chamber Under Deep Vacuum?", 
-          desc: "The chamber is currently under deep vacuum (< 1 Torr). Venting now will cause rapid gas rush and potential turbulence shock.", 
-          onConfirm: () => { set("chamber", { vent: true, roughing: false, turbo: false }); set("ui", { confirmModal: null }); } 
-        } 
+      set("ui", {
+        confirmModal: {
+          title: "Vent Chamber Under Deep Vacuum?",
+          desc: "The chamber is currently under deep vacuum (< 1 Torr). Venting now will cause rapid gas rush and potential turbulence shock.",
+          onConfirm: () => { set("chamber", { vent: true, roughing: false, turbo: false }); set("ui", { confirmModal: null }); }
+        }
       });
     } else {
       set("chamber", { vent: true, roughing: false, turbo: false });
@@ -2395,14 +2742,21 @@ function Chamber({ state, dispatch, HelpInfo }) {
         <p className="mt-1 text-sm text-zinc-400">Interactive 3D Hardware Simulation with rendered stainless enclosure, optical window, vacuum fittings, and motorized stage.</p>
       </div>
 
+      <ChamberLifecyclePanel state={state} cv={cv} setCv={setCv} />
+      <PumpLifecyclePanel state={state} />
+      <StageMotionPanel state={state} />
+
       <div className="grid gap-4 xl:grid-cols-[1.35fr_.9fr]">
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3 flex items-center justify-between">
             <span className="flex items-center">Thermal-Vacuum Chamber (Hardware View) <HelpInfo termKey="chamber" /></span>
-            <span className="text-[10px] font-mono text-emerald-400">STATUS: SEALED & ISOLATED</span>
+            <StatusLED status={getChamberLifecycle(state).visual} />
           </div>
 
-          <DigitalTwin state={state} dispatch={dispatch} />
+          <div className={`relative chamber-phase4 ${cv.mode === "blueprint" ? "chamber-blueprint" : ""} ${cv.mode === "transparent" ? "chamber-transparent" : ""} ${cv.mode === "cutaway" ? "chamber-cutaway" : ""}`} data-camera={cv.cam} data-view-mode={cv.mode}>
+            <DigitalTwin state={state} dispatch={dispatch} />
+            {cv.mode === "blueprint" && <div className="pointer-events-none absolute inset-0 rounded border border-cyan-400/30 bg-cyan-950/10 mix-blend-screen" aria-hidden="true"/>}
+          </div>
 
           <div className="mt-3 flex gap-2 items-center justify-between">
             <div className="flex gap-2">
@@ -2454,8 +2808,8 @@ function Chamber({ state, dispatch, HelpInfo }) {
             <div className="text-xs">Pressure: <span className="font-mono text-sky-300">{fmtPressure(state.chamber.pressure)}</span></div>
             <div className="grid grid-cols-3 gap-2 pt-2">
               <button onClick={handleVentClick} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">Vent</button>
-              <button onClick={() => set("chamber", { vent: false, roughing: true })} disabled={state.chamber.vent} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Rough Pump <HelpInfo termKey="roughing_pump" /></button>
-              <button onClick={handleTurboClick} disabled={state.chamber.pressure > 50} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40" title={state.chamber.pressure > 50 ? "Interlock active: pressure must be below 50 Torr" : ""}>Turbo Pump <HelpInfo termKey="turbo_pump" /></button>
+              <button onClick={() => set("chamber", { vent: false, roughing: true })} disabled={state.chamber.doorOpen} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Rough Pump <HelpInfo termKey="roughing_pump" /></button>
+              <button onClick={handleTurboClick} disabled={state.chamber.pressure > 50 || state.chamber.doorOpen} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40" title={state.chamber.pressure > 50 ? "Interlock active: pressure must be below 50 Torr" : ""}>Turbo Pump <HelpInfo termKey="turbo_pump" /></button>
             </div>
           </div>
         </div>
@@ -2501,7 +2855,7 @@ function SpatialField({ state, dispatch, HelpInfo }) {
             <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center">
               <span>Interpolation & Layers</span> <HelpInfo termKey="interpolation" />
             </div>
-            
+
             <label className="block text-xs text-zinc-400">Interpolation Mode <HelpInfo termKey="interpolation" />
               <select value={view.interpolation} onChange={e => setView({ interpolation: e.target.value })} className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-xs text-zinc-200">
                 <option value="none">No Interpolation (Measured Only)</option>
@@ -2529,6 +2883,24 @@ function SpatialField({ state, dispatch, HelpInfo }) {
   );
 }
 
+function LDVScopePanel({state}){return <div className="rounded-lg border border-zinc-700 p-3"><div className="grid md:grid-cols-2 gap-3"><div><div className="text-xs font-bold uppercase">LDV Optical Path</div><div className="mt-2 h-2 rounded bg-zinc-900"><div className="h-full bg-yellow-400" style={{width:`${state.ldv.opticalQuality||0}%`}}/></div><div className="mt-1 text-[11px]">Optical Quality: {(state.ldv.opticalQuality||0).toFixed(0)}% · Return {(100*(state.ldv.laserReturn||0)).toFixed(0)}%</div><div className="mt-2 relative h-8 bg-black rounded overflow-hidden"><div className="absolute left-0 top-1/2 h-0.5 w-full bg-yellow-700"/><div className="absolute top-1/2 h-1 w-1 rounded-full bg-yellow-300" style={{left:`${(state.ldv.scanPhase||0)*100}%`}}/></div></div><div><div className="text-xs font-bold uppercase">Oscilloscope</div><div className="mt-1 text-[11px]">Trigger: {state.scope.triggerState} · Persistence {(100*(state.scope.persistence||0)).toFixed(0)}%</div><div className="mt-2 h-2 rounded bg-zinc-900"><div className="h-full bg-cyan-400" style={{width:`${100*(state.scope.persistence||0)}%`}}/></div></div></div></div>}
+function ScanAutomationPanel({state,dispatch}){
+  const e=state.experiment,pts=e.records||[],plan=e.scanPath?.length?e.scanPath:createSerpentineScanPlan();
+  const qualityByPoint=e.qualityResults||{},rescan=e.rescanCounts||{};
+  const recordByCoordinate=new Map<string, { valid: boolean }>([...pts].reverse().map(r=>[`${r.x}|${r.y}|${r.z}`,r]));
+  const colors={command:"bg-sky-400",moving:"bg-indigo-400",acquiring:"bg-fuchsia-400",quality_check:"bg-amber-400",rescan_prepare:"bg-violet-400",complete:"bg-emerald-400",fault:"bg-rose-400",idle:"bg-zinc-600"};
+  const summary=buildQualitySummary(e);
+  return <div className="rounded-lg border border-emerald-700/50 p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><div className="text-xs font-bold uppercase">Stage → VNA Automated Scan</div><div className="text-[10px] text-zinc-400">{e.scanMessage||"Ready"} · {e.scanStep||"idle"}</div></div><div className="flex gap-1">{!e.scanActive&&<button onClick={()=>dispatch({type:"START_SCAN"})} className="rounded border border-emerald-500 px-2 py-1 text-[10px] text-emerald-200">Start 5×5 Scan</button>}{e.scanActive&&!e.scanPaused&&<button onClick={()=>dispatch({type:"PAUSE_SCAN"})} className="rounded border border-amber-500 px-2 py-1 text-[10px] text-amber-200">Pause</button>}{e.scanActive&&e.scanPaused&&<button onClick={()=>dispatch({type:"RESUME_SCAN"})} className="rounded border border-cyan-500 px-2 py-1 text-[10px] text-cyan-200">Resume</button>}{e.scanActive&&<button onClick={()=>dispatch({type:"ABORT_SCAN"})} className="rounded border border-rose-500 px-2 py-1 text-[10px] text-rose-200">Abort</button>}</div></div>
+    <div className="mt-2 grid grid-cols-4 gap-2 text-[9px]"><span className="text-emerald-300">Accepted {summary.accepted}</span><span className="text-amber-300">Suspect {summary.suspect}</span><span className="text-rose-300">Failed {summary.failed}</span><label className="flex items-center gap-1"><input type="checkbox" checked={e.adaptiveRescan!==false} onChange={x=>dispatch({type:"SET_SCAN_STEP",patch:{adaptiveRescan:x.target.checked}})}/> Adaptive rescan</label></div>
+    <div className="mt-1 text-[9px] text-zinc-400">{e.adaptiveMessage} · Acceptance {summary.acceptanceRate}%</div>
+    <div className="mt-2 h-2 rounded bg-zinc-900"><div className="h-full bg-emerald-400 transition-[width]" style={{width:`${100*(e.scanProgress||0)}%`}}/></div>
+    <div className="mt-3 grid grid-cols-5 gap-1">{plan.map((q,i)=>{const current=e.currentScanIndex===i&&e.scanActive,done=i<e.currentScanIndex||(!e.scanActive&&e.scanProgress===1),record=recordByCoordinate.get(`${q.x}|${q.y}|${q.z}`),quality=qualityByPoint[String(i)],retry=rescan[String(i)]||0;const cell=quality?(quality.status==="accepted"?"bg-emerald-400 border-emerald-200":quality.status==="suspect"?"bg-amber-400 border-amber-200":"bg-rose-500 border-rose-200"):record?(record.valid?"bg-emerald-400 border-emerald-200":"bg-amber-400 border-amber-200"):done?"bg-cyan-700 border-cyan-400":"bg-zinc-800 border-zinc-700";return <div key={i} title={`#${i+1} X${q.x} Y${q.y} Z${q.z} · ${quality?.status||"planned"} · retries ${retry}`} className={`aspect-square rounded border ${cell} ${current?`ring-2 ring-cyan-200 ${colors[e.scanStep]||""}`:""}`}/>})}</div>
+    <div className="mt-2 flex justify-between text-[10px]"><span>Point {Math.min(plan.length,(e.currentScanIndex||0)+1)} of {plan.length}</span><span>Stage {getStageMotionState(state)} · VNA {state.vna.acquisitionPhase||"idle"}</span></div>
+    <div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>exportQualityJson(e)} disabled={!summary.total} className="rounded border border-cyan-500 px-2 py-1 text-[10px] text-cyan-200 disabled:opacity-40">Export Quality JSON</button><button onClick={()=>exportQualityCsv(e)} disabled={!summary.total} className="rounded border border-emerald-500 px-2 py-1 text-[10px] text-emerald-200 disabled:opacity-40">Export Quality CSV</button></div>
+  </div>;
+}
+
 function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
   const trace = state.vna.trace;
@@ -2537,22 +2909,31 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
   const raf = useRef(0);
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
   const startSweep = () => {
+    if (!state.vna.power || !state.vna.rf || state.vna.sweeping) { sweep(); return; }
     sweep();
-    if (!state.vna.power || !state.vna.rf || FX.reduced) return;
-    const t0 = performance.now();
-    const step = n => { const q = Math.min(1, (n - t0) / 1400); setProg(q >= 1 ? null : q); if (q < 1) raf.current = requestAnimationFrame(step); };
+    if (FX.reduced) { setProg(null); return; }
+    const t0 = performance.now(), duration = 1650;
+    const step = n => {
+      const raw = Math.min(1, (n - t0) / duration);
+      const q = raw > .68 && raw < .78 ? .72 : raw < .68 ? raw / .68 * .72 : .72 + (raw - .78) / .22 * .28;
+      const p = clamp(q,0,1); setProg(raw >= 1 ? null : p);
+      dispatch({ type: "PATCH", domain: "vna", patch: { sweepProgress: p } });
+      if (raw < 1) raf.current = requestAnimationFrame(step);
+    };
     raf.current = requestAnimationFrame(step);
   };
 
+  const acqState = state.vna.sweeping ? "active" : state.vna.acquisitionPhase === "complete" ? "stable" : state.vna.power && state.vna.rf ? "ready" : "standby";
   return (
     <div className="space-y-4">
+      <div className={`rounded-lg border p-3 ${visualClass(acqState)}`}><div className="flex flex-wrap items-center gap-3"><StatusLED status={acqState}/><div className="flex-1"><div className="text-xs font-bold uppercase">VNA Acquisition · {(state.vna.acquisitionPhase || "idle").replaceAll("_"," ")}</div><div className="mt-1 h-1.5 overflow-hidden rounded bg-black/60"><div className="h-full bg-cyan-300 transition-[width]" style={{width:`${Math.round((state.vna.sweepProgress||0)*100)}%`}}/></div></div>{state.vna.lastMetrics && <div className="grid grid-cols-4 gap-2 font-mono text-[9px]"><span>f₀ {state.vna.lastMetrics.f0.toFixed(2)} Hz</span><span>MIN {state.vna.lastMetrics.minS11.toFixed(2)} dB</span><span>Q {state.vna.lastMetrics.q}</span><span>{state.vna.lastMetrics.quality}</span></div>}</div></div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold flex items-center">Keysight E5080B VNA Hardware Front Panel <HelpInfo termKey="vna" /></h1>
           <p className="mt-1 text-sm text-zinc-400">Photorealistic vector network analyzer simulation featuring touchscreen display, softkeys, and physical port connectors.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={startSweep} disabled={!state.vna.power} className="rounded border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-40">Trigger Sweep</button>
+          <button onClick={startSweep} disabled={!state.vna.power} className="rounded border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-40">{state.vna.sweeping ? "Acquiring…" : "Trigger Sweep"}</button>
           <button onClick={() => dispatch({ type: "CAPTURE_REFERENCE" })} disabled={!trace.length} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-100 hover:bg-zinc-700">Capture Ref</button>
           <button onClick={() => set("ui", { calModalOpen: true })} disabled={!state.vna.power} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-100 hover:bg-zinc-700">Calibrate Wizard</button>
         </div>
@@ -2573,7 +2954,7 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
               <span className="flex items-center text-sky-400"><Radio className="h-4 w-4 mr-2" /> S11 Log Magnitude (CH1) <HelpInfo termKey="s11" /></span>
               <span className={`text-[10px] ${state.vna.calibrated ? "text-emerald-400" : "text-amber-400"}`}>{state.vna.calibrated ? `CAL VALID (${state.vna.calibrationType})` : "UNCAL"}</span>
             </div>
-            <div className="relative h-[320px]"><S11Plot trace={trace} progress={prog} />{prog != null && <AnimatedScanCursor p={prog} />}{prog == null && min && <div className="absolute right-3 top-2 z-10"><TelemetryReadout label="Fit f₀" value={min.freq.toFixed(2)} unit="Hz" sub={`${min.s11.toFixed(1)} dB`} /></div>}</div>
+            <div className="relative h-[320px] overflow-hidden"><S11Plot trace={trace} progress={prog} />{prog != null && <AnimatedScanCursor p={prog} />}{state.vna.resonanceHold && <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-400/50 bg-amber-950/85 px-2 py-1 font-mono text-[9px] text-amber-200">RESONANCE HOLD</div>}{state.vna.fitVisible && min && <div className="absolute right-3 top-2 z-10"><TelemetryReadout label="Fit f₀" value={min.freq.toFixed(2)} unit="Hz" sub={`${min.s11.toFixed(1)} dB`} /></div>}{state.vna.recordPacket && <div className="absolute bottom-3 right-3 rounded border border-blue-400/50 bg-blue-950/90 px-3 py-2 text-[10px] text-blue-200 animate-pulse">DATA PACKET → RUN RECORD</div>}{state.vna.spatialCommitPulse && <div className="absolute bottom-3 left-3 rounded-full border-2 border-cyan-300 bg-cyan-400/20 px-3 py-1 text-[9px] text-cyan-100">SPATIAL POINT COMMITTED</div>}</div>
           </div>
 
           <div className="mt-4 flex justify-between items-center pt-3 border-t border-zinc-700">
@@ -2606,7 +2987,7 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
             </div>
             <div className="flex items-center justify-between text-xs py-1"><span>VNA Power</span><input type="checkbox" checked={state.vna.power} disabled={!state.facility.power} onChange={v => set("vna", { power: v.target.checked, rf: v.target.checked ? state.vna.rf : false })} /></div>
             <div className="flex items-center justify-between text-xs py-1"><span>RF Output</span><input type="checkbox" checked={state.vna.rf} disabled={!state.vna.power} onChange={v => set("vna", { rf: v.target.checked })} /></div>
-            
+
             <label className="block text-xs text-zinc-400">Sweep Mode
               <select value={state.vna.sweepMode} onChange={e => set("vna", { sweepMode: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-zinc-200">
                 <option value="continuous">Linear Frequency Sweep</option>
@@ -2903,7 +3284,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
             <input type="number" value={state.experiment.step} onChange={e => set("experiment", { step: Math.max(.1, Number(e.target.value)) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs font-mono text-sky-200" />
           </label>
           <div className="flex items-center justify-between text-xs pt-2"><span>Randomized Plan</span><input type="checkbox" checked={state.experiment.randomized} onChange={v => set("experiment", { randomized: v.target.checked })} /></div>
-          
+
           <div className="rounded border border-zinc-800 bg-zinc-900 p-3 text-xs mt-4">
             <div className="text-zinc-500">Run ID: <span className="font-mono text-sky-300">{state.experiment.id || "None"}</span></div>
             <div className="mt-2 text-zinc-500">Repeatability: <span className="font-mono text-zinc-200">{records.length > 1 ? `σ = ${sd.toFixed(3)} Hz` : "Awaiting repeats"}</span></div>
@@ -2952,11 +3333,11 @@ function EventLog({ events, journalFilter, setJournalFilter, journalSearch, setJ
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-2">
-      <input 
-        value={journalSearch} 
-        onChange={e => setJournalSearch(e.target.value)} 
-        placeholder="Search instrument journal…" 
-        className="w-full rounded border border-zinc-700 bg-black p-2 text-xs text-zinc-200 placeholder:text-zinc-600 shrink-0 font-mono" 
+      <input
+        value={journalSearch}
+        onChange={e => setJournalSearch(e.target.value)}
+        placeholder="Search instrument journal…"
+        className="w-full rounded border border-zinc-700 bg-black p-2 text-xs text-zinc-200 placeholder:text-zinc-600 shrink-0 font-mono"
       />
 
       <div className="flex flex-wrap gap-1 shrink-0">

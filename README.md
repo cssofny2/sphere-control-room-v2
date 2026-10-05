@@ -50,6 +50,23 @@ The repository's `vercel.json` selects Vite, installs the committed lockfile wit
 - Verify an empty Experiment Runs ledger renders without crashing.
 - Check desktop and mobile layouts and confirm there are no uncaught browser errors.
 
+## Updated simulator features
+
+- **Living Lab Overview:** persistent telemetry and subsystem-state indicators.
+- **Training & Checklist:** automated 5×5 serpentine scan with stage settling, quality gates, bounded adaptive retries, pause/resume/abort, and quality CSV/JSON exports.
+- **AI Copilot:** a local, rule-based assistant, not a hosted AI model or an experimental significance test.
+- **Fault Injector:** individual equipment faults plus blind troubleshooting drills.
+- **Lab Notebook:** tagged notes with instrument snapshots and Markdown export. Notes survive breaker cycles but not a page reload.
+- **Pump and stage simulation:** roughing/turbo lifecycle and commanded-versus-actual stage motion.
+
+## Regression tests
+
+```bash
+npm test
+```
+
+The tests execute the simulator's actual helper functions using Vite's bundled parser. They cover high vacuum, stage settling, fault effects, adaptive retry limits, interlock resume/abort, notebook retention, and validation.
+
 ## Notes
 
 - Simulator output is illustrative and is not experimental evidence.
