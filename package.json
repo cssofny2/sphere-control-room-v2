@@ -7,9 +7,9 @@
     "node": "24.x"
   },
   "scripts": {
-    "test": "node scripts/simulator-regression.mjs",
+    "test": "node scripts/plan-contract.test.mjs && node scripts/simulator-regression.mjs",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -p tsconfig.domain.json && tsc -b && vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist"
   },

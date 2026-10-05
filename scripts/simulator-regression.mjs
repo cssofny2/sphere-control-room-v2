@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { parseSync, transformSync } from 'rolldown/utils';
+import { loadTypeScript } from './load-typescript.mjs';
+const planModule = await loadTypeScript(new URL('../src/simulation/plan.ts', import.meta.url));
+const runModule = await loadTypeScript(new URL('../src/domain/run.ts', import.meta.url));
 
 // Exercise the actual simulator helpers, not a duplicated physics model.
 const source = fs.readFileSync(new URL('../src/MetrologyLabV3.tsx', import.meta.url), 'utf8');
@@ -12,6 +15,7 @@ const names = new Set([
   'addEvent', 'addAlarm', 'getMeasurementValidation', 'evaluateScanRecord',
   'createSerpentineScanPlan', 'reducer', 'noise', 'trueFrequency', 'buildSweep',
   'buildScope', 'getPumpLifecycle', 'tick', 'buildQualitySummary',
+  'getAxisPlanInput',
 ]);
 const selected = ast.body.filter(node => {
   if (node.type === 'FunctionDeclaration') return names.has(node.id?.name);
@@ -19,7 +23,7 @@ const selected = ast.body.filter(node => {
   return false;
 }).map(node => source.slice(node.start, node.end)).join('\n');
 const js = transformSync('simulator.ts', selected).code;
-const sandbox = {};
+const sandbox = { ...planModule, ...runModule };
 vm.runInNewContext(`${js}\nglobalThis.logic={initialState,reducer,tick,getMeasurementValidation,evaluateScanRecord,buildSweep,trueFrequency,buildQualitySummary};`, sandbox);
 const L = sandbox.logic;
 const fresh = () => JSON.parse(JSON.stringify(L.initialState));
@@ -111,3 +115,44 @@ const center = L.trueFrequency(s);
 s.stage.actualX = 20;
 assert.ok(L.trueFrequency(s) > center, 'resonance must follow actual stage coordinates');
 console.log('PASS validation and resonance use instrument state');
+
+s = fresh();
+s.facility.power = true;
+s.vna.power = true;
+s.vna.rf = true;
+s.chamber.vent = false;
+const before = JSON.parse(JSON.stringify(s));
+s.experiment.step = 0;
+const denied = L.reducer(s, { type: 'START_SCAN', kind: 'axis' });
+assert.equal(denied.experiment.id, null);
+assert.equal(denied.experiment.active, false);
+assert.equal(denied.experiment.contract, null);
+assert.deepEqual(denied.stage, before.stage);
+assert.ok(denied.experiment.planErrors.some(issue => issue.field === 'step'));
+s.experiment.step = 5;
+s.experiment.randomized = false;
+s = L.reducer(s, { type: 'START_SCAN', kind: 'axis' });
+assert.equal(s.experiment.scanPath.length, 27);
+assert.equal(s.experiment.contract.plan.orderedPoints.length, 9);
+assert.equal(s.experiment.contract.initialSettings.seed, s.facility.seed);
+assert.deepEqual(Array.from(s.experiment.scanPath.slice(0, 3), p => p.repeatIndex), [1, 2, 3]);
+const owned = s.experiment;
+const duplicate = L.reducer(s, { type: 'START_SCAN', kind: 'axis' });
+assert.equal(duplicate.experiment, owned, 'duplicate start must not replace owner/plan/records');
+const duplicateManual = L.reducer(s, { type: 'START_RUN' });
+assert.equal(duplicateManual.experiment, owned);
+console.log('PASS reducer rejection and accepted typed custom plan ownership');
+
+const record = { id: 'acquisition-test', runId: s.experiment.id, contract: { id: 'acquisition-test', runId: s.experiment.id }, x: 0, y: 0, z: 0 };
+assert.equal(L.reducer(s, { type: 'RECORD' }), s);
+assert.equal(L.reducer(s, { type: 'RECORD', record: { ...record, id: '' } }), s);
+const wrong = L.reducer(s, { type: 'RECORD', record: { ...record, runId: 'wrong-run' } });
+assert.equal(wrong, s);
+s = L.reducer(s, { type: 'RECORD', record });
+assert.equal(s.experiment.captureCount, 1);
+assert.equal(L.reducer(s, { type: 'RECORD', record }), s);
+s = L.reducer(s, { type: 'STOP_RUN' });
+assert.equal(s.experiment.contract.status, 'cancelled');
+assert.equal(L.reducer(s, { type: 'RECORD', record: { ...record, id: 'late-acquisition', contract: { id: 'late-acquisition', runId: s.experiment.id } } }), s);
+assert.equal(s.experiment.records.length, 1);
+console.log('PASS run-bound identity/deduplication guard without claiming full runner cancellation');
