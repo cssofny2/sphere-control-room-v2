@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useReducer, useRef, useMemo, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
+import WorkspaceHeader from './WorkspaceHeader';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
@@ -582,6 +583,60 @@ export default function MetrologyLab() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [journalFilter, setJournalFilter] = useState("all");
   const [journalSearch, setJournalSearch] = useState("");
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [journalWidth, setJournalWidth] = useState(320);
+  const [journalHeight, setJournalHeight] = useState(240);
+  const [focusMode, setFocusMode] = useState(false);
+  const [navDrawerOpen, setNavDrawerOpen] = useState(false);
+  const [navCompact, setNavCompact] = useState(() => window.matchMedia('(max-width: 1439px)').matches);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreenNotice, setFullscreenNotice] = useState("");
+  const [wideDock, setWideDock] = useState(() => window.matchMedia('(min-width: 1100px)').matches);
+  const labRootRef = useRef<HTMLDivElement>(null);
+  const resizeStart = useRef<{ coordinate: number; size: number } | null>(null);
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1100px)');
+    const change = () => { setWideDock(media.matches); setNavDrawerOpen(false); };
+    media.addEventListener('change', change);
+    const fs = () => {
+      const activeFullscreen = document.fullscreenElement === labRootRef.current;
+      setFullscreen(activeFullscreen);
+      if (!activeFullscreen) setFocusMode(false);
+    };
+    document.addEventListener('fullscreenchange', fs);
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setFocusMode(false); setNavDrawerOpen(false);
+        if (document.fullscreenElement === labRootRef.current) document.exitFullscreen?.().catch(() => {});
+      } else if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.target as Element)?.closest('input, textarea, select, button, [contenteditable="true"]')) {
+        e.preventDefault(); setFocusMode(v => !v);
+      }
+    };
+    window.addEventListener('keydown', escape);
+    return () => {
+      media.removeEventListener('change', change);
+      document.removeEventListener('fullscreenchange', fs);
+      window.removeEventListener('keydown', escape);
+    };
+  }, []);
+  const toggleFullscreen = async () => {
+    setFullscreenNotice("");
+    if (document.fullscreenElement === labRootRef.current) {
+      await document.exitFullscreen?.(); setFocusMode(false); return;
+    }
+    setFocusMode(true);
+    try {
+      if (!labRootRef.current?.requestFullscreen) throw new Error('Unavailable');
+      await labRootRef.current.requestFullscreen();
+    } catch {
+      setFullscreenNotice("Browser fullscreen is unavailable here. Instrument focus mode is active.");
+    }
+  };
+  const resizeJournal = (value: number) => {
+    if (wideDock) setJournalWidth(clamp(value, 240, Math.min(480, window.innerWidth * 0.4)));
+    else setJournalHeight(clamp(value, 160, Math.min(420, window.innerHeight * 0.55)));
+  };
   const timer = useRef(null);
   const sweepTimers = useRef<ReturnType<typeof window.setTimeout>[]>([]);
   const clearSweepTimers = () => {
@@ -606,7 +661,7 @@ export default function MetrologyLab() {
         dispatch({ type: "SET_UI", patch: { cmdPaletteOpen: !state.ui.cmdPaletteOpen } });
         return;
       }
-      if (['input', 'textarea', 'select'].includes(document.activeElement.tagName.toLowerCase())) return;
+      if (document.activeElement?.closest('input, textarea, select, button, [role="button"], [role="separator"], [contenteditable="true"]')) return;
 
       if (e.key === ' ') {
         e.preventDefault();
@@ -623,6 +678,7 @@ export default function MetrologyLab() {
         dispatch({ type: "HOME_STAGE" });
       } else if (e.key.toLowerCase() === 'a') {
         e.preventDefault();
+        setJournalOpen(true);
         dispatch({ type: "SET_UI", patch: { alarmsOpen: !state.ui.alarmsOpen } });
       } else if (e.key === '?') {
         e.preventDefault();
@@ -821,67 +877,39 @@ export default function MetrologyLab() {
     }
   ];
 
-  const collapsed = state.ui.navCollapsed;
+  const collapsed = navCompact && !navDrawerOpen;
+  const navigate = (id: string) => { set("ui", { active: id }); setNavDrawerOpen(false); };
+  const toggleJournal = () => {
+    if (focusMode) { setFocusMode(false); setJournalOpen(true); }
+    else setJournalOpen(v => !v);
+  };
+  const toggleNavigation = () => {
+    if (window.innerWidth < 1100) { setFocusMode(false); setNavDrawerOpen(v => !v); }
+    else { setFocusMode(false); setNavCompact(v => !v); }
+  };
 
   return (
-    <div className={`lab-root ${fx.reduced ? "fx-reduced" : ""} ${fx.hide ? "fx-hide" : ""} min-h-screen bg-[#06080d] font-sans text-zinc-100 selection:bg-sky-500/40 flex flex-col h-screen overflow-hidden`}>
-      <FxSettings fx={fx} setFx={setFx} />
+    <div ref={labRootRef} className={`lab-root workspace-shell ${focusMode ? "workspace-focus" : ""} ${fx.reduced ? "fx-reduced" : ""} ${fx.hide ? "fx-hide" : ""} bg-[#06080d] font-sans text-zinc-100 selection:bg-sky-500/40`}>
       <style>{TW_FALLBACK}</style>
-      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-[#090c13]/95 px-4 py-3 backdrop-blur shrink-0">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded border border-sky-500/50 bg-sky-500/10"><Target className="h-5 w-5 text-sky-300" /></div>
-            <div>
-              <div className="text-sm font-black tracking-[.25em] text-sky-200 flex items-center">
-                S.P.H.E.R.E. <HelpInfo termKey="sphere" />
-              </div>
-              <a href="https://spheredesci.org/demo" target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:underline">spheredesci.org/demo</a>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => set("ui", { cmdPaletteOpen: true })} className="rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 flex items-center gap-1.5 font-mono">
-              <Command size={13} /> Cmd+K <span className="text-[10px] text-zinc-500">Search</span>
-            </button>
-            <button onClick={() => set("ui", { wizardOpen: true })} className="rounded border border-emerald-600/50 bg-emerald-950/60 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900 flex items-center gap-1">
-              <Wrench size={14} /> Startup Wizard
-            </button>
-            <select
-              value={state.facility.mode}
-              onChange={e => dispatch({ type: "SET_MODE", mode: e.target.value })}
-              className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-sky-300 font-semibold"
-            >
-              <option value="training">Training Mode</option>
-              <option value="free">Free-Lab Mode</option>
-              <option value="challenge">Challenge Mode</option>
-              <option value="peer">Peer-Review Mode</option>
-            </select>
-
-            <button onClick={() => set("ui", { videoModal: true })} className="rounded border border-sky-600/50 bg-sky-950/60 px-3 py-1.5 text-xs font-semibold text-sky-200 hover:bg-sky-900 flex items-center gap-1">
-              <Video size={14} /> Videos
-            </button>
-            <button onClick={() => set("ui", { manualOpen: true })} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 flex items-center gap-1">
-              <BookOpen size={14} /> Procedure
-            </button>
-            <button onClick={() => set("ui", { glossaryOpen: true })} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 flex items-center gap-1">
-              <Book size={14} /> Glossary
-            </button>
-            <button
-              onClick={() => {
-                if (state.facility.power) {
-                  set("ui", { confirmModal: { title: "Open Main Breaker?", desc: "Opening the main breaker will cut AC power to all instruments and reset session state.", onConfirm: () => { dispatch({ type: "POWER", value: false }); set("ui", { confirmModal: null }); } } });
-                } else {
-                  dispatch({ type: "POWER", value: true });
-                }
-              }}
-              className={`rounded border px-3 py-1.5 text-xs font-semibold flex items-center gap-1 ${state.facility.power ? "border-emerald-500 bg-emerald-700 text-white" : "border-rose-700 bg-rose-900 text-white"}`}
-            >
-              <Power size={14} /> MAIN BREAKER {state.facility.power ? "ON" : "OFF"}
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-2.5 text-[10px] font-mono">
+      <WorkspaceHeader state={state} navOptions={navGroups.flatMap(group => group.items.map(([id, label]) => ({ id, label })))} focus={focusMode} fullscreen={fullscreen} journalOpen={journalOpen && !focusMode} alarms={unresolved}
+        onNavigate={navigate} onNavigation={toggleNavigation} onJournal={toggleJournal} onFocus={() => { setFocusMode(v => !v); setNavDrawerOpen(false); }} onFullscreen={toggleFullscreen}
+        onSearch={() => set("ui", { cmdPaletteOpen: true })} onTool={tool => set("ui", { [({ wizard: "wizardOpen", videos: "videoModal", procedure: "manualOpen", glossary: "glossaryOpen" })[tool]]: true })}
+        onMode={mode => dispatch({ type: "SET_MODE", mode })} onSpeed={speed => set("facility", { speed })} detailsOpen={detailsOpen} onDetails={() => setDetailsOpen(v => !v)} settings={<FxSettings fx={fx} setFx={setFx} />}
+        onPower={() => {
+          if (state.facility.power) set("ui", { confirmModal: { title: "Open Main Breaker?", desc: "Opening the main breaker will cut AC power to all instruments and reset session state.", onConfirm: () => { dispatch({ type: "POWER", value: false }); set("ui", { confirmModal: null }); } } });
+          else dispatch({ type: "POWER", value: true });
+        }}
+      />
+      <div className="workspace-status" aria-label="Essential laboratory status">
+        <span className="status-chip"><span>Clock</span><strong>{clockStatus}</strong></span>
+        <span className="status-chip"><span>Pressure</span><strong>{fmtPressure(state.chamber.pressure)}</strong></span>
+        <span className={`status-chip ${tempStable ? "" : "status-warning"}`}><span>Temp</span><strong>{state.chamber.temperature.toFixed(2)} °C</strong></span>
+        <button className="status-chip" aria-label="Inspect measurement quality" onClick={() => set("ui", { validatorModalOpen: true })}><span>Quality</span><strong>{recordQuality}</strong></button>
+        <span className="status-chip status-run" title={state.experiment.id || "No active run"}><span>Run</span><strong>{state.experiment.active ? "RECORDING" : recordingState}</strong></span>
+        <button className={`status-chip ${unresolved ? "status-warning" : ""}`} aria-label={`Open alarms: ${unresolved}`} onClick={() => { setFocusMode(false); setJournalOpen(true); set("ui", { alarmsOpen: true }); }}><AlertTriangle size={13} /><span>Alarms</span><strong>{unresolved}</strong></button>
+      </div>
+      {detailsOpen && !focusMode && <div className="workspace-details">
+        <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
           <div className={`flex items-center gap-1.5 rounded px-2 py-1 border ${
             powerState === "ONLINE" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" :
             powerState === "STARTING" ? "border-sky-500/40 bg-sky-500/10 text-sky-300 animate-pulse" :
@@ -955,15 +983,17 @@ export default function MetrologyLab() {
             <span>REC: <strong>{recordingState}</strong></span>
           </div>
         </div>
-      </header>
-      <LivingTelemetryBar state={state} validationResult={validationResult} unresolved={unresolved} />
+        <LivingTelemetryBar state={state} validationResult={validationResult} unresolved={unresolved} />
+      </div>}
+      <div className="sr-only" role="status">{fullscreenNotice}</div>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto] md:overflow-hidden xl:grid-cols-[auto_minmax(0,1fr)_310px] xl:grid-rows-1">
-        <aside className={`border-r border-zinc-800 bg-zinc-950/60 p-2.5 flex flex-col gap-3 transition-all duration-300 shrink-0 relative max-h-52 md:max-h-none ${collapsed ? "w-full md:w-16" : "w-full md:w-60"}`}>
+      <main className={`workspace-main ${journalOpen && !focusMode ? "journal-open" : ""} ${navDrawerOpen ? "nav-drawer-open" : ""}`} style={{ '--journal-width': `${journalWidth}px`, '--journal-height': `${journalHeight}px` } as React.CSSProperties}>
+        {navDrawerOpen && !focusMode && <button className="workspace-nav-backdrop" aria-label="Close navigation" onClick={() => setNavDrawerOpen(false)} />}
+        <aside className={`workspace-nav ${collapsed ? "nav-collapsed" : ""} border-r border-zinc-800 p-2 flex flex-col gap-3`}>
           <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
             {!collapsed && <span className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500">Lab Navigation</span>}
             <button
-              onClick={() => set("ui", { navCollapsed: !collapsed })}
+              onClick={() => setNavCompact(v => !v)}
               className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition mx-auto"
               title={collapsed ? "Expand navigation" : "Collapse navigation"}
             >
@@ -983,7 +1013,8 @@ export default function MetrologyLab() {
                   return (
                     <button
                       key={id}
-                      onClick={() => set("ui", { active: id })}
+                      onClick={() => navigate(id)}
+                      aria-label={label}
                       title={collapsed ? label : ""}
                       data-visual-state={active === id ? "selected" : navState}
                       className={`flex w-full items-center gap-2 rounded border px-2.5 py-2 text-left text-xs transition relative ${active === id ? `${visualClass("selected")} font-bold` : `${navToken.border} text-zinc-400 hover:bg-zinc-900`}`}
@@ -1012,7 +1043,7 @@ export default function MetrologyLab() {
           )}
         </aside>
 
-        <section className="min-w-0 p-4 md:overflow-y-auto bg-zinc-950 flex flex-col">
+        <section className="workspace-instrument min-w-0 bg-zinc-950 flex flex-col" aria-label="Active instrument workspace" tabIndex={-1}>
           {active === "dashboard" && <Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} />}
           {active === "overview" && <LabOverview state={state} dispatch={dispatch} />}
           {active === "chamber" && <Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
@@ -1029,18 +1060,26 @@ export default function MetrologyLab() {
           {active === "challenges" && <ChallengeMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
         </section>
 
-        <aside className="flex flex-col overflow-hidden border-t border-zinc-800 bg-zinc-950/60 p-3 max-h-64 md:col-span-2 xl:col-span-1 xl:max-h-none xl:border-l xl:border-t-0">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-[10px] font-bold uppercase tracking-[.2em] text-zinc-500">Operations Journal</div>
-            <div className="flex gap-1">
-              <button onClick={exportJournalCsv} title="Export Journal CSV" className="rounded border border-zinc-700 bg-zinc-900 p-1 text-xs text-zinc-300 hover:bg-zinc-800"><Download size={12}/></button>
-              <button onClick={() => set("ui", { alarmsOpen: !state.ui.alarmsOpen })} className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-xs text-amber-400 flex items-center gap-1 font-mono">
-                <AlertTriangle size={12} /> {unresolved}
-              </button>
-            </div>
+        {journalOpen && !focusMode && <aside id="operations-journal" className="workspace-journal" aria-label="Operations journal">
+          <div className="journal-resizer" role="separator" tabIndex={0} aria-label="Resize operations journal" aria-controls="operations-journal" aria-orientation={wideDock ? "vertical" : "horizontal"} aria-valuemin={wideDock ? 240 : 160} aria-valuemax={wideDock ? Math.min(480, window.innerWidth * 0.4) : Math.min(420, window.innerHeight * 0.55)} aria-valuenow={wideDock ? journalWidth : journalHeight} aria-valuetext={`${wideDock ? 'Width' : 'Height'} ${wideDock ? journalWidth : journalHeight} pixels`}
+            onDoubleClick={() => { setJournalWidth(320); setJournalHeight(240); }}
+            onPointerDown={e => { e.preventDefault(); resizeStart.current = { coordinate: wideDock ? e.clientX : e.clientY, size: wideDock ? journalWidth : journalHeight }; e.currentTarget.setPointerCapture(e.pointerId); }}
+            onPointerMove={e => { if (resizeStart.current) resizeJournal(resizeStart.current.size + resizeStart.current.coordinate - (wideDock ? e.clientX : e.clientY)); }}
+            onPointerUp={e => { resizeStart.current = null; e.currentTarget.releasePointerCapture(e.pointerId); }}
+            onPointerCancel={() => { resizeStart.current = null; }}
+            onKeyDown={e => { const keys = wideDock ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown']; if (keys.includes(e.key)) { e.preventDefault(); resizeJournal((wideDock ? journalWidth : journalHeight) + (e.key === keys[0] ? 24 : -24)); } else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); resizeJournal(e.key === 'Home' ? 0 : 1000); } }}
+          />
+          <div className="journal-toolbar">
+            <strong>Operations journal</strong>
+            <button className="chrome-button icon-button" aria-label="Export Journal CSV" title="Export CSV" onClick={exportJournalCsv}><Download size={15} /></button>
+            <button className="chrome-button icon-button" aria-label="Collapse operations journal" title="Collapse journal" onClick={() => setJournalOpen(false)}><X size={16} /></button>
+          </div>
+          <div className="journal-tabs">
+            <button aria-pressed={!state.ui.alarmsOpen} onClick={() => set("ui", { alarmsOpen: false })}>Journal {state.events.length}</button>
+            <button aria-pressed={state.ui.alarmsOpen} onClick={() => set("ui", { alarmsOpen: true })}>Alarms {unresolved}</button>
           </div>
           {state.ui.alarmsOpen ? <AlarmList state={state} dispatch={dispatch} /> : <EventLog events={state.events} journalFilter={journalFilter} setJournalFilter={setJournalFilter} journalSearch={journalSearch} setJournalSearch={setJournalSearch} />}
-        </aside>
+        </aside>}
       </main>
 
       {state.ui.cmdPaletteOpen && (
@@ -2229,7 +2268,7 @@ function SignalPath({ d, color = "#94a3b8", dash = undefined, active, label, fau
 
 function FxSettings({ fx, setFx }) {
   return (
-    <div className="fixed bottom-2 left-2 z-40 flex gap-3 rounded border border-zinc-700 bg-black/80 px-2 py-1 text-[10px] text-zinc-300">
+    <div className="workspace-fx-settings">
       <label className="flex items-center gap-1"><input type="checkbox" checked={fx.reduced} onChange={e => setFx({ ...fx, reduced: e.target.checked })} /> Reduce motion</label>
       <label className="flex items-center gap-1"><input type="checkbox" checked={fx.hide} onChange={e => setFx({ ...fx, hide: e.target.checked })} /> Hide decorative effects</label>
     </div>
@@ -3328,7 +3367,7 @@ function EventLog({ events, journalFilter, setJournalFilter, journalSearch, setJ
     if (journalFilter === "warning" && e.level === "warning") return true;
     if (journalFilter === "alarm" && e.level === "critical") return true;
     if (journalFilter === "scan" && e.subsystem === "RESEARCH") return true;
-    return true;
+    return false;
   });
 
   return (

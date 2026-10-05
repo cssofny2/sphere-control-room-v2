@@ -67,6 +67,16 @@ npm test
 
 The tests execute the simulator's actual helper functions using Vite's bundled parser. They cover high vacuum, stage settling, fault effects, adaptive retry limits, interlock resume/abort, notebook retention, and validation.
 
+## Compact workspace
+
+- The header and essential status strip remain visible while only the instrument workspace scrolls.
+- The operations journal starts collapsed. Open it from the header; drag its left edge on laptops/desktops or its top edge on tablets to resize it. A focused resize handle supports arrow keys, Home/End, and double-click reset.
+- Journal filters and dimensions survive collapse/expand and instrument focus mode within the current session.
+- **Focus** hides navigation and the journal without resetting instruments. Press **F** to toggle focus or **Escape** to restore the workspace.
+- **Fullscreen** uses the browser fullscreen API. If fullscreen is unavailable in an embedded preview, the app falls back to instrument focus.
+- On tablets, navigation opens as a drawer rather than pushing the instrument below a fixed panel. The workspace picker also provides direct navigation.
+- Startup Wizard, operating mode, simulation speed, reference material, detailed telemetry, and visual-effect settings are available in **Workspace tools**.
+
 ## Notes
 
 - Simulator output is illustrative and is not experimental evidence.
