@@ -10,11 +10,12 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
-    "recharts": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "recharts": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
