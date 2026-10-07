@@ -668,20 +668,25 @@ export default function MetrologyLab() {
   };
   const timer = useRef(null);
   const sweepTimers = useRef<ReturnType<typeof window.setTimeout>[]>([]);
+  const sweepRunId = useRef<string | null>(null);
   const clearSweepTimers = () => {
     sweepTimers.current.forEach(id => window.clearTimeout(id));
     sweepTimers.current = [];
+    sweepRunId.current = null;
   };
   useEffect(() => {
     if (!state.facility.power) clearSweepTimers();
     return clearSweepTimers;
   }, [state.facility.power]);
   useEffect(() => {
-    if (!state.experiment.active && state.vna.sweeping) {
+    // A completed sweep can still own its delayed idle callback after Stop.
+    const cancelled = state.experiment.contract?.status === "cancelled";
+    const ownerChanged = sweepRunId.current !== null && sweepRunId.current !== state.experiment.id;
+    if (ownerChanged || (!state.experiment.active && (state.vna.sweeping || cancelled))) {
       clearSweepTimers();
-      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "idle", recordPacket: false, spatialCommitPulse: false } });
+      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "idle", resonanceHold: false, recordPacket: false, spatialCommitPulse: false } });
     }
-  }, [state.experiment.active]);
+  }, [state.experiment.active, state.experiment.contract?.status, state.experiment.id]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -796,6 +801,7 @@ export default function MetrologyLab() {
       return;
     }
     clearSweepTimers();
+    sweepRunId.current = state.experiment.active ? state.experiment.id : null;
     const trace = buildSweep(state);
     dispatch({ type: "PATCH", domain: "vna", patch: { trace, sweeping: true, acquisitionPhase: "sweeping", sweepProgress: 0, sweepId: (state.vna.sweepId || 0) + 1, resonanceHold: false, fitVisible: false, recordPacket: false, spatialCommitPulse: false } });
     const min = trace.reduce((a, b) => a.s11 < b.s11 ? a : b);

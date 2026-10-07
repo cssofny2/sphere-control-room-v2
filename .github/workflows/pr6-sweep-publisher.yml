@@ -1,0 +1,113 @@
+name: PR 6 restricted sweep publisher
+
+on:
+  push:
+    branches: [feature/cr-102-cancellable-runner]
+    paths:
+      - .github/workflows/pr6-sweep-publisher.yml
+      - scripts/apply-pr6-sweep-ownership.mjs
+      - src/MetrologyLabV3.tsx
+      - scripts/sweep-race.test.mjs
+      - package.json
+      - package-lock.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr6-restricted-sweep-publisher
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.repository == 'cssofny2/sphere-control-room-v2' && github.ref == 'refs/heads/feature/cr-102-cancellable-runner'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      patch_sha: ${{ steps.patch.outputs.sha }}
+      changed: ${{ steps.patch.outputs.changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify PR target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api repos/cssofny2/sphere-control-room-v2/pulls/6 --jq '{state, merged, head: .head.ref, owner: .head.repo.full_name, sha: .head.sha, base: .base.ref}' > /tmp/pr6.json
+          node -e 'const p=require("/tmp/pr6.json"); if(p.state!=="open" || p.merged || p.head!=="feature/cr-102-cancellable-runner" || p.owner!=="cssofny2/sphere-control-room-v2" || p.sha!==process.env.EXPECTED_SHA || p.base!=="feature/cr-101-validated-plans") process.exit(1);'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install locked dependencies and check baseline
+        run: npm ci && npm test
+      - name: Apply only the reviewed sweep ownership fix
+        run: node scripts/apply-pr6-sweep-ownership.mjs
+      - name: Validate patched source
+        run: npm test && npm run build && git diff --check
+      - name: Export allowlisted patch
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet -- package.json package-lock.json
+          git diff --binary -- src/MetrologyLabV3.tsx scripts/sweep-race.test.mjs > /tmp/pr6-owned-sweep.patch
+          echo "sha=$(sha256sum /tmp/pr6-owned-sweep.patch | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          if test -s /tmp/pr6-owned-sweep.patch; then echo 'changed=true' >> "$GITHUB_OUTPUT"; else echo 'changed=false' >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.patch.outputs.changed == 'true'
+        with:
+          name: pr6-sweep-patch
+          path: /tmp/pr6-owned-sweep.patch
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: validate
+    if: needs.validate.outputs.changed == 'true' && github.repository == 'cssofny2/sphere-control-room-v2' && github.ref == 'refs/heads/feature/cr-102-cancellable-runner'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: pr6-sweep-patch
+          path: /tmp/pr6-patch
+      - name: Verify and publish only to PR 6 head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+          PATCH_SHA: ${{ needs.validate.outputs.patch_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PATCH_SHA" =~ ^[a-f0-9]{64}$ ]]
+          printf '%s  %s\n' "$PATCH_SHA" /tmp/pr6-patch/pr6-owned-sweep.patch | sha256sum --check -
+          test "$(gh api repos/cssofny2/sphere-control-room-v2/pulls/6 --jq '.state + "|" + (.merged|tostring) + "|" + .head.repo.full_name + "|" + .head.ref + "|" + .head.sha + "|" + .base.ref')" = "open|false|cssofny2/sphere-control-room-v2|feature/cr-102-cancellable-runner|$EXPECTED_SHA|feature/cr-101-validated-plans"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          while IFS=$'\t' read -r added removed path; do
+            case "$path" in src/MetrologyLabV3.tsx|scripts/sweep-race.test.mjs) ;; *) echo "Rejected patch path: $path"; exit 1 ;; esac
+          done < <(git apply --numstat /tmp/pr6-patch/pr6-owned-sweep.patch)
+          git apply --check /tmp/pr6-patch/pr6-owned-sweep.patch
+          git apply /tmp/pr6-patch/pr6-owned-sweep.patch
+          git diff --check
+          git add -- src/MetrologyLabV3.tsx scripts/sweep-race.test.mjs
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix(cr-102): isolate sweep timers across batched run restarts'
+          test "$(git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ls-remote https://github.com/cssofny2/sphere-control-room-v2.git refs/heads/feature/cr-102-cancellable-runner | cut -f1)" = "$EXPECTED_SHA"
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push https://github.com/cssofny2/sphere-control-room-v2.git HEAD:refs/heads/feature/cr-102-cancellable-runner
+          echo "Published $(git rev-parse HEAD) to PR 6 head" >> "$GITHUB_STEP_SUMMARY"
