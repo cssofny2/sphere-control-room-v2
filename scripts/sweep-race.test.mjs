@@ -63,6 +63,7 @@ function fixture(reduced) {
       clearTimeout(id) { timers.delete(id); },
     },
     sweepTimers: { current: [] },
+    sweepRunId: { current: null },
     FX: { reduced },
     BASE_FREQUENCY: 230500,
     MODEL_VERSION: 'test-model',
@@ -85,6 +86,12 @@ function fixture(reduced) {
     stop(status = 'cancelled') {
       current = { ...current, experiment: { ...current.experiment, active: false,
         contract: { ...current.experiment.contract, status } } };
+      context.runStopEffect(current);
+    },
+    restart() {
+      current = { ...current, experiment: { ...current.experiment, active: true,
+        id: 'run-B', records: [], captureCount: 0,
+        contract: { ...current.experiment.contract, id: 'run-B', status: 'running' } } };
       context.runStopEffect(current);
     },
     advance(target) {
@@ -140,3 +147,20 @@ for (const reduced of [false, true]) {
   }
 }
 console.log('PASS actual sweep Stop race, partial-sweep cancellation, retained records, and natural completion at normal/reduced-motion durations');
+
+// Regression for a final active state after batched Stop/Start: ownership must change.
+for (const reduced of [false, true]) {
+  const f = fixture(reduced);
+  f.sweep();
+  assert.equal(f.pending, 4);
+  f.restart();
+  assert.equal(f.pending, 0, 'Changed run owner must cancel old sweep timers');
+  assert.equal(f.state.vna.sweeping, false);
+  assert.equal(f.state.vna.acquisitionPhase, 'idle');
+  const actionCount = f.actions.length;
+  f.advance((reduced ? 40 : 1650) + 1000);
+  assert.equal(f.actions.length, actionCount, 'Previous owner must not dispatch into the new run');
+  assert.equal(f.state.experiment.id, 'run-B');
+  assert.equal(f.state.experiment.records.length, 0);
+}
+console.log('PASS sweep ownership change cancels old timers at normal/reduced-motion durations');
