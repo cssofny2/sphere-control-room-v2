@@ -29,6 +29,8 @@ jobs:
         run: npm ci
       - name: Run regression suites
         run: npm test
+      - name: Run mounted sweep lifecycle tests
+        run: npm ci --prefix tests/mounted --ignore-scripts && node scripts/mounted-sweep-lifecycle.test.mjs
       - name: Check types and production build
         run: npm run build
       - name: Check patch whitespace
