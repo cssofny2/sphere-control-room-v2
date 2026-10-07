@@ -677,11 +677,13 @@ export default function MetrologyLab() {
     return clearSweepTimers;
   }, [state.facility.power]);
   useEffect(() => {
-    if (!state.experiment.active && state.vna.sweeping) {
+    // A completed sweep can still own its delayed idle callback after Stop.
+    const cancelled = state.experiment.contract?.status === "cancelled";
+    if (!state.experiment.active && (state.vna.sweeping || cancelled)) {
       clearSweepTimers();
-      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "idle", recordPacket: false, spatialCommitPulse: false } });
+      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "idle", resonanceHold: false, recordPacket: false, spatialCommitPulse: false } });
     }
-  }, [state.experiment.active]);
+  }, [state.experiment.active, state.experiment.contract?.status]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
