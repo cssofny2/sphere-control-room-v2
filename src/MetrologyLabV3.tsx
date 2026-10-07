@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useReducer, useRef, useMemo, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import WorkspaceHeader from './WorkspaceHeader';
+import PlanBuilder from './PlanBuilder';
+import { createIdentifier, createRunContract, captureSettings, MODEL_VERSION, type RunContract, type SimulationEvent } from './domain/run';
+import type { AcquisitionContract } from './domain/acquisition';
+import { buildAxisPlan, buildPointPlan, validateAxisSettings, type PlanIssue } from './simulation/plan';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
@@ -119,6 +123,7 @@ const initialState = {
   },
   failures: { clockDrift: false, ldvMisalign: false, vacuumLeak: false, emiSpike: false, stageBacklash: false },
   experiment: { scanActive:false, scanPaused:false, scanProgress:0, scanPath:[], currentScanIndex:0, scanStep:"idle", scanRecordBaseline:0, heatmapPulse:false, scanMessage:"Ready", adaptiveRescan:true, maxRescans:2, rescanCounts:{}, qualityResults:{}, acceptedPoints:0, suspectPoints:0, failedPoints:0, adaptiveMessage:"Quality gate ready",
+    contract: null as RunContract | null, planErrors: [] as readonly PlanIssue[], scanRecordIdBeforeAcquire: null as string | null, captureCount: 0, planSeed: 73421,
     id: null, active: false, axis: "x", start: -20, stop: 20,
     step: 5, repeats: 3, randomized: true, records: []
   },
@@ -134,13 +139,13 @@ const initialState = {
 };
 
 const clamp = (val, min, max) => Math.min(max, Math.max(min, val));
-const uid = () => `RUN-${Date.now().toString().slice(-6)}`;
+const uid = () => createIdentifier('run');
 const now = () => new Date().toLocaleTimeString();
 const fmtPressure = p => p >= 10 ? `${p.toFixed(1)} Torr` : `${p.toExponential(1)} Torr`;
 
-function addEvent(state, text, level = "info", subsystem = "SYSTEM", x = null, y = null, z = null, runId = null) {
-  const ev = {
-    id: Math.random(),
+function addEvent(state, text, level: SimulationEvent['level'] = "info", subsystem = "SYSTEM", x = null, y = null, z = null, runId = null) {
+  const ev: SimulationEvent = {
+    id: createIdentifier('event'),
     time: now(),
     simulationTime: Math.floor(state.facility.simulationTime),
     subsystem,
@@ -237,6 +242,15 @@ function exportQualityCsv(experiment){const q=buildQualitySummary(experiment),ro
 
 function createSerpentineScanPlan(){const v=[-20,-10,0,10,20],out=[];v.forEach((y,row)=>{const xs=row%2?[...v].reverse():v;xs.forEach(x=>out.push({x,y,z:0,kind:(x===0&&y===0)?"reference":"measurement"}))});return out;}
 
+function getAxisPlanInput(state) {
+  return {
+    axis: state.experiment.axis, start: state.experiment.start, stop: state.experiment.stop,
+    step: state.experiment.step, repeats: state.experiment.repeats, randomized: state.experiment.randomized,
+    seed: state.experiment.planSeed ?? state.facility.seed,
+    anchor: { x: state.stage.actualX ?? state.stage.x, y: state.stage.actualY ?? state.stage.y, z: state.stage.actualZ ?? state.stage.z },
+  };
+}
+
 const FAULT_CATALOG = {
   clockDrift: { title: "Rubidium clock drift", symptoms: "Reference reports unlocked, VNA peak wanders, clock-noise term rises.", fix: "Check the Frequency Reference panel and Validation rules; clear the drift fault and confirm lock before measuring." },
   ldvMisalign: { title: "LDV misalignment", symptoms: "Optical return and signal quality drop; scan data becomes patchy.", fix: "Re-align LDV X/Y and refocus; verify optical quality recovers." },
@@ -286,6 +300,7 @@ function reducer(state, action) {
     }
     case "PATCH": {
       const next = { ...state, [action.domain]: { ...state[action.domain], ...action.patch } };
+      if (action.domain === "experiment" && ["axis", "start", "stop", "step", "repeats", "randomized", "planSeed"].some(key => key in action.patch)) next.experiment.planErrors = [];
       if (action.domain === "vna" && state.vna.calibrated) {
         if (action.patch.center !== undefined || action.patch.span !== undefined || action.patch.startFrequency !== undefined || action.patch.stopFrequency !== undefined) {
           next.vna.calibrated = false;
@@ -331,15 +346,22 @@ function reducer(state, action) {
     }
     case "CAPTURE_REFERENCE": return addEvent({ ...state, vna: { ...state.vna, reference: state.vna.trace } }, "Reference trace captured.", "info", "VNA");
     case "START_SCAN": {
+      if (state.experiment.active || state.experiment.scanActive) return addAlarm(state, "A run already owns the instruments. Stop it before starting another scan.", "warning");
+      const result = action.kind === "axis" ? buildAxisPlan(getAxisPlanInput(state)) : buildPointPlan({
+        kind: "serpentine", positions: action.plan ?? createSerpentineScanPlan(), repeats: 1,
+        seed: state.facility.seed, randomized: false,
+      });
+      if (result.ok === false) return addAlarm({ ...state, experiment: { ...state.experiment, planErrors: result.issues } }, `Scan plan rejected: ${result.issues.map(i => i.message).join(" ")}`, "warning");
       if (!state.facility.power || !state.vna.power || !state.vna.rf) return addAlarm(state, "Automated scan requires facility power, VNA power, and RF output.", "warning");
       if (state.stage.clampActive || state.chamber.doorOpen || state.chamber.vent) return addAlarm(state, "Automated scan blocked by stage or chamber interlock.", "critical");
-      const plan = action.plan?.length ? action.plan : createSerpentineScanPlan();
-      const experiment = { ...state.experiment, active:true, id:uid(), records:[], scanActive:true, scanPaused:false, scanPath:plan, currentScanIndex:0, scanProgress:0, scanStep:"command", scanRecordBaseline:0, scanMessage:"Commanding point 1", rescanCounts:{}, qualityResults:{}, acceptedPoints:0, suspectPoints:0, failedPoints:0, adaptiveMessage:"Awaiting first acquisition" };
-      return addEvent({ ...state, experiment }, `Automated scan started with ${plan.length} planned points.`, "info", "RESEARCH");
+      const plan = result.plan, runState = { ...state, facility: { ...state.facility, seed: plan.settings.seed } }, contract = createRunContract(plan, runState, state.facility.simulationTime);
+      const path = plan.acquisitions.map(a => ({ ...a.position, pointId: a.pointId, repeatIndex: a.repeatIndex, plannedAcquisitionId: a.id }));
+      const experiment = { ...state.experiment, contract, planErrors: [], active:true, id:contract.id, records:[], captureCount:0, scanActive:true, scanPaused:false, scanPath:path, currentScanIndex:0, scanProgress:0, scanStep:"command", scanRecordBaseline:0, scanRecordIdBeforeAcquire:null, scanMessage:"Commanding acquisition 1", rescanCounts:{}, qualityResults:{}, acceptedPoints:0, suspectPoints:0, failedPoints:0, adaptiveMessage:"Awaiting first acquisition" };
+      return addEvent({ ...runState, experiment }, `Validated ${plan.settings.kind} scan started: ${plan.orderedPoints.length} positions, ${path.length} planned acquisitions, seed ${plan.settings.seed}.`, "info", "RESEARCH");
     }
-    case "PAUSE_SCAN": return addEvent({ ...state, experiment:{...state.experiment,scanPaused:true,scanMessage:"Paused by operator"} }, "Automated scan paused.", "warning", "RESEARCH");
-    case "RESUME_SCAN": return addEvent({ ...state, experiment:{...state.experiment,scanPaused:false,scanStep:state.experiment.scanStep==="fault"?"command":state.experiment.scanStep,scanMessage:"Resuming sequence"} }, "Automated scan resumed.", "info", "RESEARCH");
-    case "ABORT_SCAN": return addEvent({ ...state, experiment:{...state.experiment,active:false,scanActive:false,scanPaused:false,scanStep:"idle",scanMessage:"Aborted"} }, "Automated scan aborted.", "warning", "RESEARCH");
+    case "PAUSE_SCAN": return addEvent({ ...state, experiment:{...state.experiment,contract:state.experiment.contract?{...state.experiment.contract,status:"paused"}:null,scanPaused:true,scanMessage:"Paused by operator"} }, "Automated scan paused.", "warning", "RESEARCH");
+    case "RESUME_SCAN": return addEvent({ ...state, experiment:{...state.experiment,contract:state.experiment.contract?{...state.experiment.contract,status:"running"}:null,scanPaused:false,scanStep:state.experiment.scanStep==="fault"?"command":state.experiment.scanStep,scanMessage:"Resuming sequence"} }, "Automated scan resumed.", "info", "RESEARCH");
+    case "ABORT_SCAN": return addEvent({ ...state, experiment:{...state.experiment,contract:state.experiment.contract?{...state.experiment.contract,status:"cancelled"}:null,active:false,scanActive:false,scanPaused:false,scanStep:"idle",scanMessage:"Aborted"} }, "Automated scan aborted.", "warning", "RESEARCH");
     case "QUALITY_DECISION": {
       const i=state.experiment.currentScanIndex,key=String(i),q=action.quality,retries=state.experiment.rescanCounts[key]||0;
       const qualityResults={...state.experiment.qualityResults,[key]:q};
@@ -359,22 +381,29 @@ function reducer(state, action) {
     }
     case "ADVANCE_SCAN": {
       const nextIndex=state.experiment.currentScanIndex+1, done=nextIndex>=state.experiment.scanPath.length;
-      const experiment={...state.experiment,currentScanIndex:done?state.experiment.currentScanIndex:nextIndex,scanProgress:done?1:nextIndex/state.experiment.scanPath.length,scanStep:done?"complete":"command",scanActive:!done,active:!done,heatmapPulse:true,scanMessage:done?"Scan complete":`Commanding point ${nextIndex+1}`};
+      const experiment={...state.experiment,contract:state.experiment.contract?{...state.experiment.contract,status:done?"completed":"running"}:null,currentScanIndex:done?state.experiment.currentScanIndex:nextIndex,scanProgress:done?1:nextIndex/state.experiment.scanPath.length,scanStep:done?"complete":"command",scanActive:!done,active:!done,heatmapPulse:true,scanMessage:done?"Scan complete":`Commanding acquisition ${nextIndex+1}`};
       return addEvent({...state,experiment},done?"Automated scan completed.":`Advancing to scan point ${nextIndex+1}.`,"info","RESEARCH");
     }
-    case "SET_SCAN_STEP": return { ...state, experiment:{...state.experiment,...action.patch} };
+    case "SET_SCAN_STEP": return { ...state, experiment:{...state.experiment,...action.patch,contract:action.patch.scanPaused&&state.experiment.contract?{...state.experiment.contract,status:"paused"}:state.experiment.contract} };
     case "START_RUN": {
-      const id = uid();
-      return addEvent({ ...state, experiment: { ...state.experiment, active: true, id, records: [] } }, `Experiment ${id} started.`, "info", "RESEARCH", null, null, null, id);
+      if (state.experiment.active || state.experiment.scanActive) return addAlarm(state, "A run is already active. Stop it before starting another.", "warning");
+      const result = buildPointPlan({ kind: "manual", positions: [getAxisPlanInput(state).anchor], seed: state.facility.seed, repeats: 1 });
+      if (result.ok === false) return addAlarm({ ...state, experiment: { ...state.experiment, planErrors: result.issues } }, `Run rejected: ${result.issues.map(i => i.message).join(" ")}`, "warning");
+      const contract = createRunContract(result.plan, state, state.facility.simulationTime), id = contract.id;
+      return addEvent({ ...state, experiment: { ...state.experiment, contract, planErrors: [], active: true, id, records: [], captureCount: 0 } }, `Manual recording run ${id} started.`, "info", "RESEARCH", null, null, null, id);
     }
     case "STOP_RUN": {
-      const nextState = addEvent({ ...state, experiment: { ...state.experiment, active: false, scanActive: false, scanPaused: false, scanStep: "idle" } }, `Experiment run stopped.`, "warning", "RESEARCH");
+      const nextState = addEvent({ ...state, experiment: { ...state.experiment, contract:state.experiment.contract?{...state.experiment.contract,status:"cancelled"}:null,active: false, scanActive: false, scanPaused: false, scanStep: "idle" } }, `Experiment run stopped.`, "warning", "RESEARCH");
       if (state.facility.mode === "peer") {
         return { ...nextState, ui: { ...nextState.ui, peerModal: true } };
       }
       return nextState;
     }
-    case "RECORD": return { ...state, experiment: { ...state.experiment, records: [action.record, ...state.experiment.records].slice(0, 200) } };
+    case "RECORD": {
+      const record = action.record;
+      if (!record || typeof record.id !== "string" || !record.id || !state.experiment.active || record.runId !== state.experiment.id || record.contract?.runId !== state.experiment.id || record.contract?.id !== record.id || state.experiment.records.some(r => r.id === record.id)) return state;
+      return { ...state, experiment: { ...state.experiment, captureCount: (state.experiment.captureCount || 0) + 1, records: [record, ...state.experiment.records].slice(0, 200) } };
+    }
     case "SET_FAILURE": {
       const label = FAULT_CATALOG[action.key]?.title || action.key;
       const next = { ...state, failures: { ...state.failures, [action.key]: action.value } };
@@ -639,20 +668,25 @@ export default function MetrologyLab() {
   };
   const timer = useRef(null);
   const sweepTimers = useRef<ReturnType<typeof window.setTimeout>[]>([]);
+  const sweepRunId = useRef<string | null>(null);
   const clearSweepTimers = () => {
     sweepTimers.current.forEach(id => window.clearTimeout(id));
     sweepTimers.current = [];
+    sweepRunId.current = null;
   };
   useEffect(() => {
     if (!state.facility.power) clearSweepTimers();
     return clearSweepTimers;
   }, [state.facility.power]);
   useEffect(() => {
-    if (!state.experiment.active && state.vna.sweeping) {
+    // A completed sweep can still own its delayed idle callback after Stop.
+    const cancelled = state.experiment.contract?.status === "cancelled";
+    const ownerChanged = sweepRunId.current !== null && sweepRunId.current !== state.experiment.id;
+    if (ownerChanged || (!state.experiment.active && (state.vna.sweeping || cancelled))) {
       clearSweepTimers();
-      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "idle", recordPacket: false, spatialCommitPulse: false } });
+      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "idle", resonanceHold: false, recordPacket: false, spatialCommitPulse: false } });
     }
-  }, [state.experiment.active]);
+  }, [state.experiment.active, state.experiment.contract?.status, state.experiment.id]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -706,19 +740,19 @@ export default function MetrologyLab() {
       dispatch({type:"MOVE_STAGE",position:{x:target.x,y:target.y,z:target.z}});
       dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"moving",scanMessage:`Moving to point ${e.currentScanIndex+1}`}});
     }else if(e.scanStep==="moving"&&!state.stage.moving&&!state.stage.settling&&(state.stage.positionError??0)<.075){
-      dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"acquiring",scanRecordBaseline:e.records.length,scanMessage:"Stage stable · VNA acquiring"}});
+      dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"acquiring",scanRecordBaseline:e.records.length,scanRecordIdBeforeAcquire:e.records[0]?.id??null,scanMessage:"Stage stable · VNA acquiring"}});
       performSweep();
     }else if(e.scanStep==="acquiring"&&!state.vna.sweeping&&state.vna.acquisitionPhase==="complete"){
-      const committed=e.records.length>e.scanRecordBaseline;
+      const committed=!!e.records[0]&&e.records[0].id!==e.scanRecordIdBeforeAcquire&&e.records[0].runId===e.id;
       if(committed){const newest=e.records[0],quality=evaluateScanRecord(newest,state);dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"quality_check",scanMessage:"Evaluating measurement quality"}});dispatch({type:"QUALITY_DECISION",quality});}
       else dispatch({type:"SET_SCAN_STEP",patch:{scanPaused:true,scanStep:"fault",scanMessage:"No record committed · inspect quality"}});
     }else if(e.scanStep==="quality_check"){
       return;
     }else if(e.scanStep==="rescan_prepare"){
-      dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"acquiring",scanRecordBaseline:e.records.length,scanMessage:"Adaptive rescan acquiring"}});performSweep();
+      dispatch({type:"SET_SCAN_STEP",patch:{scanStep:"acquiring",scanRecordBaseline:e.records.length,scanRecordIdBeforeAcquire:e.records[0]?.id??null,scanMessage:"Adaptive rescan acquiring"}});performSweep();
     }else if(e.scanStep==="quality_complete"){
       dispatch({type:"ADVANCE_SCAN"});
-    }else if(e.scanStep==="acquiring"&&!state.vna.sweeping&&state.vna.acquisitionPhase==="idle"&&e.records.length>e.scanRecordBaseline){
+    }else if(e.scanStep==="acquiring"&&!state.vna.sweeping&&state.vna.acquisitionPhase==="idle"&&e.records[0]&&e.records[0].id!==e.scanRecordIdBeforeAcquire&&e.records[0].runId===e.id){
       const newest=e.records[0],quality=evaluateScanRecord(newest,state);dispatch({type:"QUALITY_DECISION",quality});
     }
   },[state.experiment.scanActive,state.experiment.scanPaused,state.experiment.scanStep,state.experiment.currentScanIndex,state.experiment.records.length,state.stage.moving,state.stage.settling,state.stage.positionError,state.vna.sweeping,state.vna.acquisitionPhase,state.facility.power,state.chamber.doorOpen,state.chamber.vent,state.stage.clampActive,state.vna.power,state.vna.rf,state.experiment.adaptiveRescan,state.experiment.maxRescans]);
@@ -767,16 +801,32 @@ export default function MetrologyLab() {
       return;
     }
     clearSweepTimers();
+    sweepRunId.current = state.experiment.active ? state.experiment.id : null;
     const trace = buildSweep(state);
     dispatch({ type: "PATCH", domain: "vna", patch: { trace, sweeping: true, acquisitionPhase: "sweeping", sweepProgress: 0, sweepId: (state.vna.sweepId || 0) + 1, resonanceHold: false, fitVisible: false, recordPacket: false, spatialCommitPulse: false } });
     const min = trace.reduce((a, b) => a.s11 < b.s11 ? a : b);
     const isVal = validationResult.overall === "VALID";
+    const planned = state.experiment.scanActive ? state.experiment.contract?.plan.acquisitions[state.experiment.currentScanIndex] : null;
+    const acquisitionId = createIdentifier('acquisition'), timestamp = new Date().toISOString();
+    const acquisitionContract: AcquisitionContract | null = state.experiment.contract ? {
+      id: acquisitionId, runId: state.experiment.contract.id, pointId: planned?.pointId ?? null,
+      plannedAcquisitionId: planned?.id ?? null, acquisitionIndex: planned?.acquisitionIndex ?? state.experiment.captureCount,
+      repeatIndex: planned?.repeatIndex ?? 1,
+      attemptIndex: (state.experiment.rescanCounts[String(state.experiment.currentScanIndex)] || 0) + 1,
+      dataOrigin: 'simulation', modelVersion: MODEL_VERSION, simulationTime: state.facility.simulationTime, timestamp,
+      position: { x: state.stage.actualX ?? state.stage.x, y: state.stage.actualY ?? state.stage.y, z: state.stage.actualZ ?? state.stage.z },
+      settings: captureSettings(state),
+    } : null;
     const record = {
-      id: Math.random(),
-      runId: state.experiment.id || "RUN-DEFAULT",
-      sequence: state.experiment.records.length + 1,
-      repeatIndex: 1,
-      timestamp: new Date().toISOString(),
+      id: acquisitionId,
+      runId: state.experiment.id || "UNRECORDED",
+      pointId: acquisitionContract?.pointId ?? null,
+      plannedAcquisitionId: acquisitionContract?.plannedAcquisitionId ?? null,
+      acquisitionIndex: acquisitionContract?.acquisitionIndex ?? 0,
+      contract: acquisitionContract, dataOrigin: "simulation", modelVersion: MODEL_VERSION,
+      sequence: (state.experiment.captureCount || 0) + 1,
+      repeatIndex: acquisitionContract?.repeatIndex ?? 1,
+      timestamp,
       x: state.stage.actualX ?? state.stage.x,
       y: state.stage.actualY ?? state.stage.y,
       z: state.stage.actualZ ?? state.stage.z,
@@ -3254,24 +3304,12 @@ function Lamp({ label, on }) {
 function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
   const records = state.experiment.records;
+  const validation = validateAxisSettings(getAxisPlanInput(state));
   const mean = records.length ? records.reduce((n,r)=>n+r.resonance,0)/records.length : 0;
   const sd = records.length > 1 ? Math.sqrt(records.reduce((n,r)=>n+(r.resonance-mean)**2,0)/(records.length-1)) : 0;
 
   const launchPlan = () => {
-    if (state.experiment.active) {
-      dispatch({ type: "ALARM", text: "Scan plan start warning: a scan is already active.", severity: "warning" });
-    }
-    if(!state.experiment.active) dispatch({ type: "START_RUN" });
-    const axis = state.experiment.axis;
-    let pos = [];
-    for(let v = state.experiment.start; v <= state.experiment.stop + .001; v += state.experiment.step) pos.push(v);
-    if(state.experiment.randomized) pos.sort(() => Math.random() - .5);
-    pos.forEach((v,i) => {
-      setTimeout(() => {
-        dispatch({ type: "MOVE_STAGE", position: { [axis]: v } });
-        setTimeout(sweep, 150);
-      }, i * 500);
-    });
+    dispatch({ type: "START_SCAN", kind: "axis" });
   };
 
   const handleClearRecords = () => {
@@ -3296,37 +3334,23 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
           <p className="mt-1 text-sm text-zinc-400">Traceable measurements, randomized scan plans, reference logic, data-quality labels, and local exports.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={launchPlan} className="rounded border border-emerald-600 bg-emerald-900 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 flex items-center gap-1"><Play size={14}/> Run Scan Plan</button>
+          <button onClick={launchPlan} disabled={state.experiment.active || validation.ok === false} className="rounded border border-emerald-600 bg-emerald-900 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 flex items-center gap-1 disabled:opacity-50"><Play size={14}/> Run Scan Plan</button>
+          {state.experiment.active && <button onClick={() => dispatch({ type: "STOP_RUN" })} className="rounded border border-rose-600 bg-rose-900 px-3 py-2 text-xs font-semibold">Stop Run</button>}
           <button onClick={exportCsv} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-700 flex items-center gap-1"><Download size={14}/> CSV</button>
           <button onClick={exportJson} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-700 flex items-center gap-1"><Archive size={14}/> JSON</button>
-          <button onClick={handleClearRecords} className="rounded border border-rose-600 bg-rose-900 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-800">Clear Data</button>
+          <button onClick={handleClearRecords} disabled={state.experiment.active} className="rounded border border-rose-600 bg-rose-900 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-800 disabled:opacity-50">Clear Data</button>
         </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[.85fr_1.5fr]">
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl space-y-3">
-          <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center justify-between">
-            <span>Plan Builder</span> <HelpInfo termKey="location_variable" />
-          </div>
-          <label className="block text-xs text-zinc-400">Scan Axis
-            <select value={state.experiment.axis} onChange={e => set("experiment", { axis: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs">
-              <option value="x">X Axis</option><option value="y">Y Axis</option><option value="z">Z Axis</option>
-            </select>
-          </label>
-          <label className="block text-xs text-zinc-400">Start (mm)
-            <input type="number" value={state.experiment.start} onChange={e => set("experiment", { start: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs font-mono text-sky-200" />
-          </label>
-          <label className="block text-xs text-zinc-400">Stop (mm)
-            <input type="number" value={state.experiment.stop} onChange={e => set("experiment", { stop: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs font-mono text-sky-200" />
-          </label>
-          <label className="block text-xs text-zinc-400">Step (mm)
-            <input type="number" value={state.experiment.step} onChange={e => set("experiment", { step: Math.max(.1, Number(e.target.value)) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs font-mono text-sky-200" />
-          </label>
-          <div className="flex items-center justify-between text-xs pt-2"><span>Randomized Plan</span><input type="checkbox" checked={state.experiment.randomized} onChange={v => set("experiment", { randomized: v.target.checked })} /></div>
+        <div className="space-y-3">
+          <PlanBuilder draft={getAxisPlanInput(state)} active={state.experiment.active} contract={state.experiment.contract}
+            onChange={patch => { const { seed, anchor, ...settings } = patch; set("experiment", { ...settings, ...("seed" in patch ? { planSeed: seed } : {}) }); }} />
 
           <div className="rounded border border-zinc-800 bg-zinc-900 p-3 text-xs mt-4">
             <div className="text-zinc-500">Run ID: <span className="font-mono text-sky-300">{state.experiment.id || "None"}</span></div>
-            <div className="mt-2 text-zinc-500">Repeatability: <span className="font-mono text-zinc-200">{records.length > 1 ? `σ = ${sd.toFixed(3)} Hz` : "Awaiting repeats"}</span></div>
+            <div className="mt-2 text-zinc-500">All-record spread: <span className="font-mono text-zinc-200">{records.length > 1 ? `σ = ${sd.toFixed(3)} Hz` : "Awaiting captures"}</span><span className="block text-xs">(Not per-position repeatability.)</span></div>
+            {state.experiment.planErrors.length > 0 && <div className="mt-2 text-rose-200" role="alert">{state.experiment.planErrors.map(issue => issue.message).join(" ")}</div>}
           </div>
         </div>
 

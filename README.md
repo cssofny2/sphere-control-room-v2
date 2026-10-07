@@ -77,6 +77,20 @@ The tests execute the simulator's actual helper functions using Vite's bundled p
 - On tablets, navigation opens as a drawer rather than pushing the instrument below a fixed panel. The workspace picker also provides direct navigation.
 - Startup Wizard, operating mode, simulation speed, reference material, detailed telemetry, and visual-effect settings are available in **Workspace tools**.
 
+## CR-101: Validated plans and typed contracts
+
+- `src/domain/run.ts` defines branded run/plan/point/event IDs, model/schema versions, units, the run contract, and copied capture settings.
+- `src/domain/acquisition.ts` separates planned acquisition slots from actual capture attempts, including run/point links, repeat index, attempt index, simulation time, and actual coordinates.
+- `src/simulation/plan.ts` validates before allocating point arrays. Defaults are ±35 mm travel, 1–100 repeats, and at most 1,000 planned acquisitions (including repeats but excluding adaptive retry attempts).
+- Axis plans reject non-finite values, zero/negative steps, reversed ranges, invalid axes/seeds/repeats, and excessive counts. Non-divisible ranges omit the upper endpoint and show that policy in the preview.
+- Fisher-Yates randomization uses the supplied seed. Ordered coordinates and execution order are shown separately; identities remain unique between runs.
+- The Experiment Runs custom plan now hands its validated acquisitions to the existing scan sequencer instead of scheduling a nested timer queue. A 5×5 training scan retains its one-acquisition-per-position behavior.
+- Accepted plans are locked while active. Duplicate starts, wrong-run records, and repeated capture IDs are rejected at the reducer boundary.
+- JSON session exports include the run and acquisition contracts. The run's initial settings are copied separately from each acquisition's actual capture settings.
+- A strict TypeScript build checks the domain modules and negative type fixtures without claiming that the whole legacy UI has been migrated to strict types.
+
+CR-101 does not deliver the dedicated CR-102 runner, its complete cancellation/fresh-state audit, autosave, archival retention, validated import, computed uncertainty, per-position statistical summaries, or complete deterministic execution replay. The in-memory ledger still retains only 200 records; larger accepted plans show a warning. Existing fixed uncertainty/repeat-summary placeholders remain for subsequent interpretation/analysis tickets, and the all-record spread is not a repeatability estimate.
+
 ## Notes
 
 - Simulator output is illustrative and is not experimental evidence.
