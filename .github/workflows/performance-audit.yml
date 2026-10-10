@@ -1,0 +1,110 @@
+name: Performance audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/performance-audit.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install, test, and rebuild
+        run: npm ci && npm test && npm run build
+      - name: Measure generated assets
+        run: |
+          mkdir -p performance-results
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { gzipSync, brotliCompressSync } from 'node:zlib';
+          function walk(dir) { return fs.readdirSync(dir, {withFileTypes:true}).flatMap(e => e.isDirectory() ? walk(path.join(dir,e.name)) : [path.join(dir,e.name)]); }
+          const rows = walk('dist').filter(p => /\.(js|css|html)$/.test(p)).map(p => { const b=fs.readFileSync(p); return {asset:p,raw_bytes:b.length,gzip_bytes:gzipSync(b).length,brotli_bytes:brotliCompressSync(b).length}; });
+          const total=rows.reduce((a,r)=>({raw_bytes:a.raw_bytes+r.raw_bytes,gzip_bytes:a.gzip_bytes+r.gzip_bytes,brotli_bytes:a.brotli_bytes+r.brotli_bytes}),{raw_bytes:0,gzip_bytes:0,brotli_bytes:0});
+          fs.writeFileSync('performance-results/bundle.json',JSON.stringify({commit:process.env.GITHUB_SHA,rows,total},null,2));
+          fs.writeFileSync('performance-results/bundle.csv','asset,raw_bytes,gzip_bytes,brotli_bytes\n'+rows.map(r=>[r.asset,r.raw_bytes,r.gzip_bytes,r.brotli_bytes].join(',')).join('\n')+'\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`## Bundle sizes\nCommit: ${process.env.GITHUB_SHA}\n\n| Asset | Raw bytes | Gzip bytes | Brotli bytes |\n|---|---:|---:|---:|\n`+rows.map(r=>`| ${r.asset} | ${r.raw_bytes} | ${r.gzip_bytes} | ${r.brotli_bytes} |`).join('\n')+`\n| TOTAL | ${total.raw_bytes} | ${total.gzip_bytes} | ${total.brotli_bytes} |\n\nSource maps excluded. Compression sizes are estimates, not measured CDN transfer sizes.\n`);
+          NODE
+      - name: Install isolated audit tooling
+        run: |
+          npm install --prefix "$RUNNER_TEMP/lighthouse" --no-audit --no-fund lighthouse@12
+          command -v google-chrome
+          google-chrome --version > performance-results/chrome-version.txt
+          "$RUNNER_TEMP/lighthouse/node_modules/.bin/lighthouse" --version > performance-results/lighthouse-version.txt
+      - name: Run local and production browser audits
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          set -euo pipefail
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory dist > performance-results/local-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ > /dev/null
+          failures=0
+          for target in local production; do
+            if [ "$target" = local ]; then url=http://127.0.0.1:4173/; else url=https://lab.spheredesci.org/; fi
+            for device in mobile desktop; do
+              flags=()
+              if [ "$device" = desktop ]; then flags+=(--preset=desktop); fi
+              for sample in 1 2 3; do
+                "$RUNNER_TEMP/lighthouse/node_modules/.bin/lighthouse" "$url" \
+                  --only-categories=performance --output=json --output=html \
+                  --output-path="performance-results/${target}-${device}-${sample}" \
+                  --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" \
+                  "${flags[@]}" || failures=$((failures+1))
+              done
+            done
+          done
+          echo "Failed Lighthouse invocations: $failures" >> "$GITHUB_STEP_SUMMARY"
+          test "$failures" -eq 0
+      - name: Summarize browser measurements
+        if: always()
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const dir='performance-results';
+          if (!fs.existsSync(dir)) process.exit(0);
+          const groups=new Map();
+          for (const file of fs.readdirSync(dir).filter(f=>/^(local|production)-(mobile|desktop)-[123]\.report\.json$/.test(f))) {
+            const r=JSON.parse(fs.readFileSync(`${dir}/${file}`,'utf8'));
+            const key=file.replace(/-[123]\.report\.json$/,'');
+            if (!groups.has(key)) groups.set(key,[]);
+            groups.get(key).push({file,finalUrl:r.finalDisplayedUrl||r.finalUrl,runtimeError:r.runtimeError||null,score:r.categories?.performance?.score,FCP:r.audits?.['first-contentful-paint']?.numericValue,LCP:r.audits?.['largest-contentful-paint']?.numericValue,TBT:r.audits?.['total-blocking-time']?.numericValue,CLS:r.audits?.['cumulative-layout-shift']?.numericValue});
+          }
+          function median(values) { const a=values.filter(Number.isFinite).sort((a,b)=>a-b); if (!a.length) return 'N/A'; const m=Math.floor(a.length/2); return (a.length%2?a[m]:(a[m-1]+a[m])/2).toFixed(2); }
+          let summary='\n## Lighthouse medians\n\n| Target/device | Valid samples | Score /100 | FCP ms | LCP ms | TBT ms | CLS |\n|---|---:|---:|---:|---:|---:|---:|\n';
+          let invalid=false;
+          for (const [key,runs] of groups) { const valid=runs.filter(r=>!r.runtimeError&&Number.isFinite(r.score)); if (valid.length!==3) invalid=true; summary+=`| ${key} | ${valid.length}/3 | ${median(valid.map(r=>r.score*100))} | ${median(valid.map(r=>r.FCP))} | ${median(valid.map(r=>r.LCP))} | ${median(valid.map(r=>r.TBT))} | ${median(valid.map(r=>r.CLS))} |\n`; }
+          if(groups.size!==4) invalid=true;
+          summary+='\nLab measurements only: TBT is not real-user INP. Local measurements correspond to the workflow commit; production measurements correspond to whatever the public domain serves at audit time. Check final URLs and raw reports for redirects or access pages. No performance thresholds are enforced in this baseline audit.\n';
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,summary);
+          fs.writeFileSync(`${dir}/browser-summary.json`,JSON.stringify(Object.fromEntries(groups),null,2));
+          if (invalid) { console.error('Incomplete browser measurements; inspect artifacts.'); process.exitCode=1; }
+          NODE
+      - name: Retain audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-audit-${{ github.sha }}
+          path: performance-results/
+          retention-days: 14
+          if-no-files-found: warn
