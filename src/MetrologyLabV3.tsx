@@ -2629,7 +2629,7 @@ function DigitalTwin({ state, dispatch }) {
             {Object.keys(GRP).map(k => (
               <div key={k} className="border-b border-zinc-900 py-1">
                 <div className="flex items-center justify-between gap-1"><span className={hid[k] ? "text-zinc-600 line-through" : "text-zinc-200"}>{GRP[k]}</span>
-                  <span className="flex gap-1"><B on={!!hid[k]} f={() => setHid({ ...hid, [k]: !hid[k] })}>Hide</B><B on={solo === k} f={() => setSolo(solo === k ? null : k)}>Isolate</B><B on={!!ghost[k]} f={() => setGhost({ ...ghost, [k]: !ghost[k] })}>Ghost</B></span></div>
+                  <span className="flex gap-1"><B on={!!hid[k]} f={() => setHid(prev => ({ ...prev, [k]: !prev[k] }))}>Hide</B><B on={solo === k} f={() => { const nextSolo = solo === k ? null : k; setSolo(nextSolo); if (nextSolo) setHid(prev => ({ ...prev, [k]: false })); }}>Isolate</B><B on={!!ghost[k]} f={() => setGhost(prev => ({ ...prev, [k]: !prev[k] }))}>Ghost</B></span></div>
                 {k === "chamber" && <div className="mt-1 flex flex-wrap gap-1">{["Chamber body", "Door", "Quartz viewport", "Feedthroughs", "Vacuum manifold", "Internal XYZ stage"].map(n => { const p = parts.find(q => q.sub === n); return <button key={n} onClick={() => p && focus(p)} className="rounded bg-zinc-900 px-1.5 py-0.5 text-[9px] text-zinc-400 hover:text-sky-300">{n}</button>; })}</div>}
               </div>
             ))}
