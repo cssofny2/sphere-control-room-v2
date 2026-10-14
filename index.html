@@ -5,10 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#06080d" />
     <meta name="description" content="S.P.H.E.R.E. location-variable metrology laboratory simulator" />
-    <title>S.P.H.E.R.E. Metrology Lab</title>
+    <title>S.P.H.E.R.E. Metrology Lab: Educational Simulator</title>
+    <link rel="canonical" href="https://lab.spheredesci.org/" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Static content for crawlers and no-JavaScript visitors; React replaces it on load. -->
+      <main style="max-width:48rem;margin:0 auto;padding:2rem 1rem;font-family:system-ui,sans-serif;line-height:1.6;color:#e2e8f0;background:#06080d">
+        <h1>S.P.H.E.R.E. Metrology Lab</h1>
+        <p>
+          The S.P.H.E.R.E. Metrology Lab is an interactive, educational simulator of the
+          measurement laboratory proposed by Project S.P.H.E.R.E. (Spatial Positioning
+          Harmonic Empirical Resonance Experiment). It lets you explore how a copper
+          sphere resonance measurement could be set up, run, checked and troubleshot.
+        </p>
+        <p>
+          This is a simulation for learning and review. It does not produce measurements,
+          datasets or scientific validation, and nothing in it is a research result. The
+          project is at proposal stage.
+        </p>
+        <h2>What you can do in the lab</h2>
+        <ul>
+          <li>Follow a training mode with an interactive checklist for a location-variable measurement.</li>
+          <li>Work through challenge mode, where simulated faults must be found and corrected.</li>
+          <li>Watch an operator dashboard and adjust an environmental chamber and XYZ stage.</li>
+          <li>Inspect simulated instrument channels such as the RF monitor, scaling, offset and coupling.</li>
+        </ul>
+        <h2>Requires JavaScript</h2>
+        <p>
+          The lab runs in your browser and needs JavaScript. If you can read this text, the
+          interactive lab has not loaded yet, or scripts are disabled in your browser.
+        </p>
+        <h2>Related pages</h2>
+        <ul>
+          <li><a href="/sitemap.xml">Lab sitemap</a></li>
+          <li><a href="https://spheredesci.org/vl/">SPHEREVL visual lab overview</a></li>
+          <li><a href="https://spheredesci.org/protocol/">LOC-1 draft protocol</a></li>
+          <li><a href="https://spheredesci.org/">Project S.P.H.E.R.E. home</a></li>
+        </ul>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
