@@ -14,6 +14,7 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             { name: 'charts', test: /node_modules[\/](recharts|d3-[^\/]+|victory-vendor)[\/]/, priority: 20 },
+            { name: 'three', test: /node_modules[\/]three[\/]/, priority: 20 },
             { name: 'react', test: /node_modules[\/](react|react-dom|scheduler)[\/]/, priority: 10 }
           ]
         }
