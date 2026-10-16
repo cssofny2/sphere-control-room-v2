@@ -10,6 +10,7 @@ import PlanBuilder from './PlanBuilder';
 import { createIdentifier, createRunContract, captureSettings, MODEL_VERSION, type RunContract, type SimulationEvent } from './domain/run';
 import type { AcquisitionContract } from './domain/acquisition';
 import { buildAxisPlan, buildPointPlan, validateAxisSettings, type PlanIssue } from './simulation/plan';
+import { paletteEntries, execute as executeAction } from './technician/actions';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
@@ -1503,48 +1504,17 @@ function CommandPalette({ state, dispatch, close, performSweep, exportCsv, expor
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const commands = [
-    { label: "Navigate: Operator Console", action: () => dispatch({ type: "SET_UI", patch: { active: "dashboard" } }), category: "Navigation" },
-    { label: "Navigate: 3D Chamber & Stage", action: () => dispatch({ type: "SET_UI", patch: { active: "chamber" } }), category: "Navigation" },
-    { label: "Navigate: Spatial Field Explorer", action: () => dispatch({ type: "SET_UI", patch: { active: "spatial" } }), category: "Navigation" },
-    { label: "Navigate: VNA Analysis", action: () => dispatch({ type: "SET_UI", patch: { active: "vna" } }), category: "Navigation" },
-    { label: "Navigate: LDV Scanner", action: () => dispatch({ type: "SET_UI", patch: { active: "ldv" } }), category: "Navigation" },
-    { label: "Navigate: Oscilloscope", action: () => dispatch({ type: "SET_UI", patch: { active: "scope" } }), category: "Navigation" },
-    { label: "Navigate: Frequency Reference", action: () => dispatch({ type: "SET_UI", patch: { active: "clock" } }), category: "Navigation" },
-    { label: "Navigate: Experiment Runs", action: () => dispatch({ type: "SET_UI", patch: { active: "runs" } }), category: "Navigation" },
-    { label: "Navigate: Training & Checklist", action: () => dispatch({ type: "SET_UI", patch: { active: "training" } }), category: "Navigation" },
-    { label: "Navigate: Challenge Mode", action: () => dispatch({ type: "SET_UI", patch: { active: "challenges" } }), category: "Navigation" },
-
-    { label: "Start Standard Experiment Run", action: () => dispatch({ type: "START_RUN" }), category: "Experiment" },
-    { label: "Stop Active Experiment Run", action: () => dispatch({ type: "STOP_RUN" }), category: "Experiment" },
-    { label: "Capture Single VNA Sweep", action: performSweep, category: "Instruments", disabled: !state.vna.power, reason: "VNA must be powered on" },
-    { label: "Capture VNA Reference Trace", action: () => dispatch({ type: "CAPTURE_REFERENCE" }), category: "Instruments" },
-    { label: "Open VNA Calibration Wizard", action: () => dispatch({ type: "SET_UI", patch: { calModalOpen: true } }), category: "Instruments" },
-    { label: "Home XYZ Stage (0,0,0)", action: () => dispatch({ type: "HOME_STAGE" }), category: "Hardware" },
-
-    { label: "Start Roughing Vacuum Pump", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { vent: false, roughing: true } }), category: "Chamber" },
-    { label:
-      state.chamber.pressure <= 50 ? "Start Turbomolecular Pump" : "Start Turbomolecular Pump — unavailable until pressure is below 50 Torr",
-      action: () => {
-        if (state.chamber.pressure <= 50) dispatch({ type: "PATCH", domain: "chamber", patch: { vent: false, roughing: true, turbo: true } });
-        else dispatch({ type: "ALARM", text: "Turbo interlock active: pressure must be below 50 Torr.", severity: "critical" });
-      },
-      category: "Chamber",
-      disabled: state.chamber.pressure > 50,
-      reason: "Pressure must be < 50 Torr"
+  const ctx = { getState: () => state, dispatch, helpers: { performSweep, exportCsv, exportJson } };
+  const commands = paletteEntries(state).map(e => ({
+    label: e.disabled ? `${e.label} — ${e.reason}` : e.label,
+    category: e.category, disabled: e.disabled, reason: e.reason,
+    action: () => {
+      const r = executeAction(ctx, e.id);
+      if (r.status === "needs-confirmation") {
+        dispatch({ type: "SET_UI", patch: { confirmModal: { title: `Confirm: ${e.label}`, desc: r.text, onConfirm: () => { executeAction(ctx, e.id, {}, { confirmed: true }); dispatch({ type: "SET_UI", patch: { confirmModal: null } }); } } } });
+      } else if (r.status !== "started") dispatch({ type: "ALARM", text: `${e.label}: ${r.reason}`, severity: "warning" });
     },
-    { label: "Toggle Faraday Cage Shielding", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { faraday: !state.chamber.faraday } }), category: "Chamber" },
-    { label: "Toggle Active Vibration Isolation", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { isolation: !state.chamber.isolation } }), category: "Chamber" },
-
-    { label: "Open Startup Wizard", action: () => dispatch({ type: "SET_UI", patch: { wizardOpen: true } }), category: "Help" },
-    { label: "Open Procedure Manual", action: () => dispatch({ type: "SET_UI", patch: { manualOpen: true } }), category: "Help" },
-    { label: "Open Glossary of Terms", action: () => dispatch({ type: "SET_UI", patch: { glossaryOpen: true } }), category: "Help" },
-    { label: "Open Video Tutorial Laptop", action: () => dispatch({ type: "SET_UI", patch: { videoModal: true } }), category: "Help" },
-
-    { label: "Acknowledge All Alarms", action: () => state.alarms.forEach(a => dispatch({ type: "ACK_ALARM", id: a.id })), category: "System" },
-    { label: "Export Experiment Run CSV", action: exportCsv, category: "Data" },
-    { label: "Export Experiment Run JSON", action: exportJson, category: "Data" },
-  ];
+  }));
 
   const filtered = commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase()));
 
