@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useReducer, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useReducer, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import WorkspaceHeader from './WorkspaceHeader';
 import LabOverview from './overview/LabOverview';
 import HelpDialog from './overview/HelpDialog';
+// The realistic WebGL lab loads on demand so three.js stays out of the main bundle.
+const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
 import PlanBuilder from './PlanBuilder';
 import { createIdentifier, createRunContract, captureSettings, MODEL_VERSION, type RunContract, type SimulationEvent } from './domain/run';
@@ -2773,6 +2775,8 @@ function PumpLifecyclePanel({state}){const p=getPumpLifecycle(state),t=visualTok
 function StageMotionPanel({state}){const sm=getStageMotionState(state),t=visualToken(sm),p=state.stage;const ax=p.actualX??p.x,ay=p.actualY??p.y,az=p.actualZ??p.z;return <div className={`rounded-lg border p-3 ${visualClass(sm)}`}><div className="flex items-center justify-between"><div><div className="text-xs font-bold uppercase">XYZ Motion State</div><div className="text-[11px] text-zinc-400">Commanded versus actual position and settling indication.</div></div><StatusLED status={sm}/></div><div className="mt-2 grid grid-cols-2 gap-3 font-mono text-xs"><div>CMD {p.x.toFixed(1)} / {p.y.toFixed(1)} / {p.z.toFixed(1)}</div><div>ACT {ax.toFixed(1)} / {ay.toFixed(1)} / {az.toFixed(1)}</div></div><div className="mt-2 h-2 rounded bg-zinc-900 overflow-hidden"><div className="h-full bg-cyan-400" style={{width:`${Math.min(100,100-(Math.abs(p.x-ax)+Math.abs(p.y-ay)+Math.abs(p.z-az))*10)}%`}}/></div></div>;}
 function Chamber({ state, dispatch, HelpInfo }) {
   const [cv, setCv] = useState({ shell: true, cut: false, cam: "front", mode: "standard" });
+  const [sceneView, setSceneView] = useState("lab");
+  const labStateRef = useRef(state); labStateRef.current = state;
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
 
   const move = (axis, d) => {
@@ -2838,10 +2842,21 @@ function Chamber({ state, dispatch, HelpInfo }) {
             <StatusLED status={getChamberLifecycle(state).visual} />
           </div>
 
+          <div className="mb-2 flex flex-wrap items-center gap-2" role="group" aria-label="Chamber view">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">View</span>
+            {[["lab", "Realistic lab"], ["engineering", "Engineering model"]].map(([k, l]) => <button key={k} type="button" aria-pressed={sceneView === k} onClick={() => setSceneView(k)} className={`rounded border px-3 py-1.5 text-xs font-semibold ${sceneView === k ? "border-sky-500 bg-sky-950/40 text-sky-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"}`}>{l}</button>)}
+          </div>
+          {sceneView === "lab" && (
+            <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the 3D lab…</div>}>
+              <LabScene3D stateRef={labStateRef} reduced={FX.reduced || FX.hide} />
+            </Suspense>
+          )}
+          {sceneView === "engineering" && (
           <div className={`relative chamber-phase4 ${cv.mode === "blueprint" ? "chamber-blueprint" : ""} ${cv.mode === "transparent" ? "chamber-transparent" : ""} ${cv.mode === "cutaway" ? "chamber-cutaway" : ""}`} data-camera={cv.cam} data-view-mode={cv.mode}>
             <DigitalTwin state={state} dispatch={dispatch} />
             {cv.mode === "blueprint" && <div className="pointer-events-none absolute inset-0 rounded border border-cyan-400/30 bg-cyan-950/10 mix-blend-screen" aria-hidden="true"/>}
           </div>
+          )}
 
           <div className="mt-3 flex gap-2 items-center justify-between">
             <div className="flex gap-2">
