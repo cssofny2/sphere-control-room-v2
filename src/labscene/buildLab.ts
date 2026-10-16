@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { canvasTex, glowTex, roughnessMapTex, type CanvasTex, type Quality } from './labUtil';
+import { buildDetail, type PhoneRig, type Pickable } from './labDetail';
 
 // A bright, realistic-looking laboratory: stainless thermal-vacuum chamber with door and
 // viewports, an XYZ stage and sphere inside, vacuum pumps, a laser vibrometer on a gantry, an
@@ -9,15 +11,6 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 export const STAGE_SCALE = 0.003;       // metres of scene per mm of stage travel (35 mm -> 0.105 m, exaggerated)
 const CH_Y = 1.1;                        // chamber axis height
 
-type CanvasTex = { tex: THREE.CanvasTexture; redraw: (fn: (c: CanvasRenderingContext2D, w: number, h: number) => void) => void };
-function canvasTex(w: number, h: number, draw: (c: CanvasRenderingContext2D, w: number, h: number) => void): CanvasTex {
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d') as CanvasRenderingContext2D;
-  draw(ctx, w, h);
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
-  return { tex, redraw: fn => { fn(ctx, w, h); tex.needsUpdate = true; } };
-}
-
 export type Lab = {
   scene: THREE.Scene;
   update: (state: any, dt: number, t: number) => void;
@@ -25,6 +18,7 @@ export type Lab = {
   dispose: () => void;
   spherePos: THREE.Vector3;
   anchors: Record<string, THREE.Vector3>;
+  phone: PhoneRig; pickables: Pickable[]; setQuality: (q: Quality) => void; turnKnob: (panel: string, delta: number) => void;
 };
 
 export function buildLab(renderer: THREE.WebGLRenderer): Lab {
@@ -49,9 +43,9 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
 
   // ── materials ──
   const M = {
-    steel: track(new THREE.MeshStandardMaterial({ color: 0xcfd4da, metalness: 1, roughness: 0.3 })),
+    steel: track(new THREE.MeshStandardMaterial({ color: 0xcfd4da, metalness: 1, roughness: 0.38, roughnessMap: roughnessMapTex(23) })),
     liner: track(new THREE.MeshStandardMaterial({ color: 0xe6ebf0, metalness: 1, roughness: 0.14, side: THREE.DoubleSide })),
-    shell: track(new THREE.MeshStandardMaterial({ color: 0xc4cad1, metalness: 1, roughness: 0.34, side: THREE.DoubleSide })),
+    shell: track(new THREE.MeshPhysicalMaterial({ color: 0xdde2e8, metalness: 1, roughness: 0.55, roughnessMap: roughnessMapTex(11), anisotropy: 0.3, anisotropyRotation: Math.PI / 2, side: THREE.DoubleSide })),
     alu: track(new THREE.MeshStandardMaterial({ color: 0xdfe3e8, metalness: 0.9, roughness: 0.38 })),
     dark: track(new THREE.MeshStandardMaterial({ color: 0x22262b, metalness: 0.5, roughness: 0.5 })),
     black: track(new THREE.MeshStandardMaterial({ color: 0x111316, metalness: 0.2, roughness: 0.7 })),
@@ -209,6 +203,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   const laser = new THREE.Mesh(track(new THREE.CylinderGeometry(0.0035, 0.0035, 1, 8)), laserMat); const laserGlow = new THREE.Mesh(track(new THREE.CylinderGeometry(0.014, 0.014, 1, 12)), laserGlowMat);
   scene.add(laser, laserGlow);
   const dotMat = track(new THREE.MeshBasicMaterial({ color: 0xff4458 })); const dot = new THREE.Mesh(track(new THREE.SphereGeometry(0.011, 12, 8)), dotMat); scene.add(dot);
+  const haloTex = glowTex(); const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex, color: 0xff4d5e, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false })); halo.scale.set(0.14, 0.14, 1); scene.add(halo);
 
   // ── pumps (below / beside the chamber) ──
   const pumpG = new THREE.Group(); bench.add(pumpG);
@@ -237,12 +232,12 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   add(box(0.62, 1.88, 0.02), M.paint, rack, 0, 0.95, -0.41);
   for (const x of [-0.31, 0.31]) add(box(0.02, 1.88, 0.8), M.paint, rack, x, 0.95, 0);
   type Panel = { name: string; y: number; h: number; tex: CanvasTex; led: THREE.Mesh };
-  const panels: Panel[] = [];
+  const panels: Panel[] = []; const knobs: { panel: string; mesh: THREE.Mesh }[] = [];
   const mkPanel = (name: string, y: number, h: number) => {
     add(box(0.58, h, 0.5), M.alu, rack, 0, y, 0.0); add(box(0.6, h - 0.01, 0.03), M.black, rack, 0, y, 0.255); 
-    const tex = canvasTex(256, Math.round(256 * (0.34 / Math.max(0.06, h - 0.04))) > 180 ? 128 : 96, () => {});
+    const tex = canvasTex(512, Math.round(256 * (0.34 / Math.max(0.06, h - 0.04))) > 180 ? 256 : 192, () => {});
     const scr = new THREE.Mesh(track(new THREE.PlaneGeometry(0.34, Math.min(h - 0.04, 0.16))), track(new THREE.MeshBasicMaterial({ map: tex.tex }))); scr.position.set(-0.07, y, 0.272); rack.add(scr);
-    for (let k = 0; k < 3; k++) add(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 16), M.alu, rack, 0.13 + k * 0.05, y, 0.275).rotation.x = Math.PI / 2;
+    for (let k = 0; k < 3; k++) { const kn = add(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 16), M.alu, rack, 0.13 + k * 0.05, y, 0.275); kn.rotation.x = Math.PI / 2; const ind = add(box(0.003, 0.005, 0.021), M.dark, kn, 0, 0, 0.008, false); void ind; kn.rotation.order = 'XYZ'; knobs.push({ panel: name, mesh: kn }); }
     const led = new THREE.Mesh(track(new THREE.SphereGeometry(0.008, 10, 8)), track(new THREE.MeshBasicMaterial({ color: 0x334155 }))); led.position.set(0.24, y + h / 2 - 0.03, 0.272); rack.add(led);
     panels.push({ name, y, h, tex, led });
   };
@@ -268,21 +263,23 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   add(new THREE.PlaneGeometry(0.58, 0.34), track(new THREE.MeshBasicMaterial({ map: monTex.tex })), wsG, -0.2, 1.22, -0.103, false);
   add(box(0.4, 0.015, 0.13), M.dark, wsG, -0.2, 0.93, 0.18); add(box(0.5, 0.35, 0.3), M.alu, wsG, 0.55, 1.1, -0.1);
   add(new THREE.CylinderGeometry(0.04, 0.035, 0.09, 16), M.white, wsG, 0.5, 0.97, 0.25);
-  const chair = new THREE.Group(); chair.position.set(2.9, 0, -0.9); scene.add(chair); add(box(0.45, 0.06, 0.45), M.dark, chair, 0, 0.5, 0); add(box(0.45, 0.45, 0.06), M.dark, chair, 0, 0.78, -0.2); add(new THREE.CylinderGeometry(0.03, 0.03, 0.45, 12), M.alu, chair, 0, 0.25, 0); for (let i = 0; i < 5; i++) { const a = i * 1.2566; add(box(0.28, 0.025, 0.04), M.dark, chair, Math.cos(a) * 0.14, 0.03, Math.sin(a) * 0.14).rotation.y = -a; }
+  const chair = new THREE.Group(); chair.position.set(2.9, 0, -1.15); scene.add(chair); add(box(0.45, 0.06, 0.45), M.dark, chair, 0, 0.5, 0); add(box(0.45, 0.45, 0.06), M.dark, chair, 0, 0.78, 0.2); add(new THREE.CylinderGeometry(0.03, 0.03, 0.45, 12), M.alu, chair, 0, 0.25, 0); for (let i = 0; i < 5; i++) { const a = i * 1.2566; add(box(0.28, 0.025, 0.04), M.dark, chair, Math.cos(a) * 0.14, 0.03, Math.sin(a) * 0.14).rotation.y = -a; }
 
   // ── redraw helpers for live screens ──
   const mono = (c: CanvasRenderingContext2D, s: number) => { c.font = `700 ${s}px ui-monospace,Menlo,monospace`; };
   const drawScreen = (p: Panel, s: any) => {
     const on = p.name === 'clock' ? s.clock.power : p.name === 'vna' ? s.vna.power : p.name === 'scope' ? s.scope.power : p.name === 'ldv' ? s.ldv.power : s.facility.power;
     (p.led.material as THREE.MeshBasicMaterial).color.set(on && s.facility.power ? 0x22c55e : 0x334155);
-    p.tex.redraw((c, w, h) => {
+    p.tex.redraw((c, w0, h0) => {
+      const k = w0 / 256, w = 256, h = h0 / k; c.setTransform(k, 0, 0, k, 0, 0);
       c.fillStyle = on && s.facility.power ? '#06131f' : '#0a0d10'; c.fillRect(0, 0, w, h); if (!(on && s.facility.power)) return;
       c.fillStyle = '#7dd3fc'; mono(c, 15); const t = p.name === 'clock' ? 'SRS FS725 Rb' : p.name === 'vna' ? 'E5080B  S11 (dB)' : p.name === 'scope' ? 'SCOPE  CH1 CH2' : p.name === 'ldv' ? 'PSV-500 LDV' : 'DAQ'; c.fillText(t, 8, 18);
       if (p.name === 'clock') { c.fillStyle = s.clock.locked ? '#4ade80' : '#fbbf24'; mono(c, 22); c.fillText(s.clock.locked ? 'LOCKED 10 MHz' : `WARM ${Math.min(100, Math.round(s.clock.warmup / 15 * 100))}%`, 8, h - 10); }
       if (p.name === 'vna' || p.name === 'scope') {
         const tr = p.name === 'vna' ? (s.vna.trace || []).map((q: any) => q.s11) : (s.scope.trace || []).map((q: any) => q.value);
-        c.strokeStyle = '#1e3a52'; c.lineWidth = 1; for (let i = 1; i < 5; i++) { c.beginPath(); c.moveTo(0, (h * i) / 5); c.lineTo(w, (h * i) / 5); c.stroke(); }
-        if (tr.length > 1) { const lo = Math.min(...tr), hi = Math.max(...tr), sp = hi - lo || 1; c.strokeStyle = p.name === 'vna' ? '#38bdf8' : '#facc15'; c.lineWidth = 2; c.beginPath(); tr.forEach((v: number, i: number) => { const x = (i / (tr.length - 1)) * w, y = h - 8 - ((v - lo) / sp) * (h - 34); i ? c.lineTo(x, y) : c.moveTo(x, y); }); c.stroke(); }
+        c.strokeStyle = '#1e3a52'; c.lineWidth = 0.7; for (let i = 1; i < 5; i++) { c.beginPath(); c.moveTo(0, (h * i) / 5); c.lineTo(w, (h * i) / 5); c.stroke(); } for (let i = 1; i < 8; i++) { c.beginPath(); c.moveTo((w * i) / 8, 0); c.lineTo((w * i) / 8, h); c.stroke(); }
+        if (tr.length > 1) { const lo = Math.min(...tr), hi = Math.max(...tr), sp = hi - lo || 1; c.strokeStyle = p.name === 'vna' ? '#38bdf8' : '#facc15'; c.lineWidth = 2; c.beginPath(); tr.forEach((v: number, i: number) => { const x = (i / (tr.length - 1)) * w, y = h - 8 - ((v - lo) / sp) * (h - 34); i ? c.lineTo(x, y) : c.moveTo(x, y); }); c.stroke();
+          if (p.name === 'vna') { const mi = tr.indexOf(lo), mx = (mi / (tr.length - 1)) * w, my = h - 8 - ((lo - lo) / sp) * (h - 34); c.strokeStyle = '#f472b6'; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(mx, 22); c.lineTo(mx, h); c.stroke(); c.setLineDash([]); c.fillStyle = '#f472b6'; c.beginPath(); c.arc(mx, my, 3, 0, 7); c.fill(); c.font = '700 11px ui-monospace,monospace'; c.fillText(`f0 ${(((s.vna.startFrequency ?? 228000) + (mi / (tr.length - 1)) * ((s.vna.stopFrequency ?? 233000) - (s.vna.startFrequency ?? 228000))) / 1000).toFixed(3)} MHz`, Math.min(w - 96, Math.max(4, mx + 5)), 34); } }
         else { c.fillStyle = '#64748b'; mono(c, 14); c.fillText(p.name === 'vna' ? (s.vna.rf ? 'sweeping…' : 'RF OFF') : (s.scope.running ? 'running' : 'stopped'), 8, h / 2 + 6); }
       }
       if (p.name === 'ldv') { c.fillStyle = s.ldv.shutter ? '#4ade80' : '#94a3b8'; mono(c, 18); c.fillText(s.ldv.shutter ? `RETURN ${Math.round((s.ldv.laserReturn || 0) * 100)}%` : 'SHUTTER CLOSED', 8, h - 12); }
@@ -305,13 +302,15 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   let acc = 0;
   const target = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
-  let doorAng = 0, jitter = 0;
+  let doorAng = 0, jitter = 0; let detailUpdate: (s: any, dt: number, t: number) => void = () => {};
   const update = (s: any, dt: number, t: number) => {
+    detailUpdate(s, dt, t);
     const c = s.chamber, st = s.stage;
     const ax = st.actualX ?? st.x, ay = st.actualY ?? st.y, az = st.actualZ ?? st.z;
     // sphere + stage axes (X lateral, Y depth, Z vertical)
     yCar.position.z = ay * STAGE_SCALE; xCar.position.x = ax * STAGE_SCALE;
-    spherePos.set(ax * STAGE_SCALE, CH_Y + az * STAGE_SCALE, ay * STAGE_SCALE); sphere.position.copy(spherePos); sphereGlow.position.copy(spherePos);
+    const wob = st.settling ? Math.exp(-(st.settleTime || 0) * 1.2) * (s.failures?.stageBacklash ? 0.006 : 0.0018) * Math.sin(t * 46) : 0;
+    spherePos.set(ax * STAGE_SCALE + wob, CH_Y + az * STAGE_SCALE, ay * STAGE_SCALE); sphere.position.copy(spherePos); sphereGlow.position.copy(spherePos);
     const base = CH_Y - 0.4 + 0.045 + 0.1 + 0.03, topY = spherePos.y - 0.06 - 0.01, h = Math.max(0.05, topY - 0.07 - base);
     column.scale.y = h;
     column.position.y = (base - (CH_Y - 0.4 + 0.045)) + h / 2;
@@ -332,8 +331,8 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     const rpm = (c.turboRpm || 0) / 100; turboFan.rotation.y += rpm * dt * 40; rough.position.x = 1.05 + ((c.roughingRpm || 0) > 1 ? Math.sin(t * 60) * 0.0012 : 0);
     ventMat.emissiveIntensity = c.vent ? 1.2 : 0;
     // laser
-    const on = s.ldv.power && s.ldv.shutter; laser.visible = laserGlow.visible = dot.visible = on;
-    if (on) { const a = new THREE.Vector3(0, 1.725, 0), b = spherePos.clone(); b.y += 0.058 * 0.95; const d = b.clone().sub(a), len = d.length(); for (const m of [laser, laserGlow]) { m.position.copy(a).addScaledVector(d, 0.5); m.scale.set(1, len, 1); m.quaternion.setFromUnitVectors(up, d.clone().normalize()); } laserGlowMat.opacity = 0.18 + Math.sin(t * 30) * 0.04; dot.position.copy(b); }
+    const on = s.ldv.power && s.ldv.shutter; laser.visible = laserGlow.visible = dot.visible = halo.visible = on;
+    if (on) { const a = new THREE.Vector3(0, 1.725, 0), b = spherePos.clone(); b.y += 0.058 * 0.95; const d = b.clone().sub(a), len = d.length(); for (const m of [laser, laserGlow]) { m.position.copy(a).addScaledVector(d, 0.5); m.scale.set(1, len, 1); m.quaternion.setFromUnitVectors(up, d.clone().normalize()); } laserGlowMat.opacity = 0.18 + Math.sin(t * 30) * 0.04; dot.position.copy(b); halo.position.copy(b); (halo.material as THREE.SpriteMaterial).opacity = 0.55 + Math.sin(t * 25) * 0.15; }
     // RF
     const rf = s.vna.power && s.vna.rf; rfMat.emissiveIntensity = rf ? 1.2 + Math.sin(t * 8) * 0.4 : 0;
     (rfPulse.material as THREE.MeshBasicMaterial).opacity = rf ? 0.9 : 0; if (rf) rfPulse.position.copy(rfCurve.getPoint((t * 0.5) % 1));
@@ -347,14 +346,18 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   };
 
   const anchors: Record<string, THREE.Vector3> = {
+    gauge: new THREE.Vector3(-R - 0.17 - 0.0, CH_Y + 0.04, -0.2), notebook: wsG.localToWorld(new THREE.Vector3(-0.6, 0.94, 0.2)), keyboard: wsG.localToWorld(new THREE.Vector3(-0.2, 0.95, 0.18)), monitor: wsG.localToWorld(new THREE.Vector3(-0.2, 1.22, -0.1)), rackKnob: rack.localToWorld(new THREE.Vector3(0.18, 1.1, 0.28)), doorEdge: new THREE.Vector3(-0.2, CH_Y, 0.72), ldvHead: new THREE.Vector3(0, 2.0, 0.1),
     chamber: new THREE.Vector3(0, CH_Y, 0.2), door: new THREE.Vector3(-0.3, CH_Y, 0.7), stage: spherePos, rack: new THREE.Vector3(-3.15, 1.2, -0.4), bench: new THREE.Vector3(2.7, 1.2, -1.9), board: new THREE.Vector3(-0.2, 1.7, -2.5),
   };
+  const detail = buildDetail({ scene, room, bench, ch, rack, stageRoot, yCar, xCar, M, track, add, box, cuttable, R, L, CH_Y, panels: panels.map(p => ({ name: p.name, y: p.y, h: p.h })), rfCurve, fibreCurve, parts: { chamber: ch, stage: stageRoot, ldv: ldvG, pumps: pumpG }, wsG }, knobs);
+  detail.pickables.push({ name: 'pumps', label: 'Vacuum pumps', help: 'ov.pumps', root: rough, view: 'chamber' });
   setCutaway(true);
   update({
     chamber: { pressure: 760, temperature: 21, targetTemp: 20, vent: true, doorOpen: false, faraday: true, isolation: true, turboRpm: 0, roughingRpm: 0 }, stage: { x: 0, y: 0, z: 0 },
     vna: { power: false }, ldv: { power: false }, clock: { power: false }, scope: { power: false }, facility: { power: false }, experiment: {}, alarms: [],
   }, 0.016, 0);
-  const dispose = () => { disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
+  detailUpdate = detail.update;
+  const dispose = () => { detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
   void target; void sl; void wl; void back; void left; void bez; void win; void dRing; void dBody; void topPort; void leftPort1; void leftPort2; void rightPort; void capOut; void cap; void liner; void shell; void fl;
-  return { scene, update, setCutaway, dispose, spherePos, anchors };
+  return { scene, update, setCutaway, dispose, spherePos, anchors: { ...anchors, ...detail.anchors }, phone: detail.phone, pickables: detail.pickables, setQuality: (q: Quality) => { detail.setQuality(q); key.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024); key.shadow.map?.dispose(); (key.shadow as any).map = null; }, turnKnob: detail.turnKnob };
 }

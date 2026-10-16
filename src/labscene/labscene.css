@@ -18,3 +18,12 @@
 .ls-bubble.is-joke b { color: #059669; }
 .ls-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ls-fallback { display: grid; place-items: center; min-height: 240px; padding: 24px; text-align: center; font: 500 13px/1.5 system-ui, sans-serif; color: var(--ls-mut); }
+.ls-root select.ls-btn { padding: 5px 6px; }
+.ls-hover { position: absolute; left: 0; top: 0; z-index: 4; padding: 4px 8px; border-radius: 7px; background: #10233bee; color: #fff; font: 600 11px/1.3 system-ui, sans-serif; pointer-events: none; white-space: nowrap; }
+.ls-hover i { font-style: normal; opacity: .7; font-weight: 500; }
+.ls-info { position: absolute; left: 10px; bottom: 34px; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; border: 1px solid var(--ls-line); border-radius: 10px; background: #fff; font: 700 12px/1 system-ui, sans-serif; box-shadow: 0 4px 14px #0003; }
+.ls-info button { min-height: 0 !important; width: 24px; height: 24px; padding: 0 !important; border-radius: 50%; border: 1px solid #9cc3f5; background: #eaf3ff; color: #1f6feb; font: 800 13px/1 system-ui; cursor: pointer; }
+.ls-info button.ls-x { border-color: var(--ls-line); background: #fff; color: var(--ls-mut); }
+.ls-photo { position: absolute; right: 10px; top: 10px; z-index: 5; display: flex; gap: 6px; }
+.ls-quality { position: absolute; right: 10px; bottom: 8px; padding: 3px 8px; border-radius: 6px; background: #ffffffcc; font: 500 11px/1.3 system-ui, sans-serif; color: var(--ls-mut); pointer-events: none; }
+.ls-root select.ls-btn { background: #fff; color: var(--ls-ink); }

@@ -2848,7 +2848,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
           </div>
           {sceneView === "lab" && (
             <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the 3D lab…</div>}>
-              <LabScene3D stateRef={labStateRef} reduced={FX.reduced || FX.hide} />
+              <LabScene3D stateRef={labStateRef} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
             </Suspense>
           )}
           {sceneView === "engineering" && (
