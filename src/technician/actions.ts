@@ -66,6 +66,10 @@ export const ACTIONS: ActionDef[] = [
     check: () => ok, run: c => c.dispatch({ type: 'SET_UI', patch: { active: page } }), done: s => s.ui.active === page, station: 'workstation', gesture: 'type', narrate: () => `Opening ${PAGE_LABEL[page]}.`,
   })),
   {
+    id: 'look', label: 'Take a look', category: 'System', description: 'Walk over and look at something without changing anything.', params: none, risk: 'safe',
+    check: () => ok, run: () => {}, done: () => true, station: 'workstation', gesture: 'type',
+  },
+  {
     id: 'power_on', label: 'Close the main breaker', category: 'Power', description: 'Close the main breaker to give the facility AC power.', params: none, risk: 'safe',
     check: s => (powered(s) ? no('Facility power is already on.') : ok), run: c => c.dispatch({ type: 'POWER', value: true }), done: s => powered(s),
     station: 'rackKnob', gesture: 'knob', narrate: () => 'Closing the main breaker.',
@@ -106,6 +110,11 @@ export const ACTIONS: ActionDef[] = [
     check: s => needPower(s) || (s.chamber.doorOpen ? no('The chamber door is open.') : s.chamber.pressure > 50 ? no('Pressure must be below 50 Torr before the turbo can start. Run the roughing pump first.') : s.chamber.turbo ? no('The turbo is already running.') : ok),
     run: c => c.dispatch(patch('chamber', { vent: false, roughing: true, turbo: true })), done: s => !!s.chamber.turbo,
     station: 'gauge', gesture: 'readGauge', narrate: () => 'Starting the turbo pump.',
+  },
+  {
+    id: 'stop_turbo', label: 'Stop the turbo pump', category: 'Chamber', description: 'Switch the turbo pump off and keep the roughing pump running.', params: none, risk: 'safe',
+    check: s => (s.chamber.turbo ? ok : no('The turbo is not running.')), run: c => c.dispatch(patch('chamber', { turbo: false })), done: s => !s.chamber.turbo,
+    station: 'gauge', gesture: 'readGauge', narrate: () => 'Stopping the turbo pump.',
   },
   {
     id: 'wait_pressure', label: 'Wait for pressure', category: 'Chamber', description: 'Wait until the chamber pressure is below a target (in Torr). Does not change anything.',
@@ -316,7 +325,7 @@ export async function waitFor(getState: () => State, id: string, p: any, o: { ti
 }
 
 /** Actions that are for the human UI only (dialogs, downloads, toggles) and are not offered as AI tools. */
-const NOT_TOOLS = new Set(['toggle_faraday', 'toggle_isolation', 'capture_sweep', 'capture_reference', 'open_calibration_wizard', 'start_run', 'stop_run', 'export_csv', 'export_json']);
+const NOT_TOOLS = new Set(['look', 'toggle_faraday', 'toggle_isolation', 'capture_sweep', 'capture_reference', 'open_calibration_wizard', 'start_run', 'stop_run', 'export_csv', 'export_json']);
 
 /** Tool definitions in the Anthropic tool-use format, generated from the registry. */
 export function toolDefinitions() {

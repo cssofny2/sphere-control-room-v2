@@ -85,6 +85,9 @@ const PROCEDURE_STEPS = [
   { step: 6, title: "Test Location Variable", desc: "Return to '3D Env Chamber'. Use the Precision XYZ Stage sliders to alter sphere coordinates. Observe how spatial shifts impact resonance.", badge: "Location Variable Investigator" }
 ];
 
+// Lets the 3D lab's technician reach UI-only helpers (downloads, a single VNA sweep) that live in the main component.
+const labHelpersRef: { current: { performSweep?: () => void; exportCsv?: () => void; exportJson?: () => void } | undefined } = { current: undefined };
+
 const initialState = {
   facility: { power: false, speed: 1, simulationTime: 0, seededNoise: true, seed: 73421, mode: "training" },
   clock: { power: false, warmup: 0, locked: false, holdover: false, distributionAmplifier: true, cableFault: false, timeSinceLock: 0 },
@@ -891,6 +894,7 @@ export default function MetrologyLab() {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${state.experiment.id || "sphere-session"}.json`; a.click(); URL.revokeObjectURL(a.href);
   };
+  labHelpersRef.current = { performSweep, exportCsv, exportJson };
 
   const exportJournalCsv = () => {
     const rows = [
@@ -2818,7 +2822,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
           </div>
           {sceneView === "lab" && (
             <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the 3D lab…</div>}>
-              <LabScene3D stateRef={labStateRef} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
+              <LabScene3D stateRef={labStateRef} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
             </Suspense>
           )}
           {sceneView === "engineering" && (

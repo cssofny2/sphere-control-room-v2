@@ -11,14 +11,17 @@ import { buildLab, type Lab } from './buildLab';
 import { Scientist } from './Scientist';
 import { Foley } from './foley';
 import type { Quality } from './labUtil';
-import { createTechnician, DEFAULT_SETTINGS, type Settings, type Technician } from '../technician/dialogue';
+import { DEFAULT_SETTINGS, type Settings, type Technician } from '../technician/dialogue';
+import { createTechnicianSystem, type TechnicianSystem } from '../technician/system';
+import { CallBar, CallConsent, TaskChip } from '../technician/CallUI';
+import type { Ctx } from '../technician/actions';
 import { extractFactsPlus } from '../technician/facts';
 import TechnicianPanel from '../technician/TechnicianPanel';
 import type { Focus, Mood } from './scientistBrain';
 
 type Say = { text: string; focus: Focus; mood: Mood; kind: string };
 
-type Props = { stateRef: React.MutableRefObject<any>; reduced?: boolean; onHelp?: (key: string) => void };
+type Props = { stateRef: React.MutableRefObject<any>; reduced?: boolean; onHelp?: (key: string) => void; dispatch?: (action: any) => void; helpersRef?: React.MutableRefObject<Ctx['helpers'] | undefined> };
 type CamPreset = { pos: [number, number, number]; target: [number, number, number] };
 const PRESETS: Record<string, CamPreset> = {
   overview: { pos: [3.3, 3.1, 4.4], target: [-0.1, 0.95, -0.2] },
@@ -29,7 +32,7 @@ const PRESETS: Record<string, CamPreset> = {
   phone: { pos: [2.0, 1.6, -0.2], target: [1.3, 1.25, -2.4] },
 };
 
-const Btn = ({ on, f, children, label }: { on?: boolean; f: () => void; children: React.ReactNode; label?: string }) => <button type="button" className="ls-btn" aria-pressed={on === undefined ? undefined : on} aria-label={label} onClick={f}>{children}</button>;
+const Btn = ({ on, f, children, label, title, call }: { on?: boolean; f: () => void; children: React.ReactNode; label?: string; title?: string; call?: boolean }) => <button type="button" className="ls-btn" aria-pressed={on === undefined ? undefined : on} aria-label={label} title={title} data-call-button={call ? '' : undefined} onClick={f}>{children}</button>;
 
 function Typed({ text }: { text: string }) {
   const [n, setN] = useState(0);
@@ -39,20 +42,23 @@ function Typed({ text }: { text: string }) {
 
 type QualitySel = 'auto' | 'high' | 'low';
 const SETTINGS_KEY = 'sphere.technician.settings';
+const CONSENT_KEY = 'sphere.technician.consent';
 function loadSettings(): Settings {
   try { const j = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); if (j && typeof j === 'object') return { ...DEFAULT_SETTINGS, ...j, mode: ['coach', 'quiet', 'chatty'].includes(j.mode) ? j.mode : 'coach' }; } catch { /* ignore */ }
   return { ...DEFAULT_SETTINGS };
 }
 const urlParam = (k: string) => { try { return new URLSearchParams(window.location.search).get(k); } catch { return null; } };
 
-function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
+function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }: Props) {
+  const dispatchRef = useRef(dispatch); dispatchRef.current = dispatch;
+  const helpersRefLocal = useRef<Ctx['helpers'] | undefined>(undefined); const helpers = helpersRef || helpersRefLocal;
   const wrap = useRef<HTMLDivElement>(null);
   const canvasHost = useRef<HTMLDivElement>(null);
   const bubbleEl = useRef<HTMLDivElement>(null);
   const hoverEl = useRef<HTMLDivElement>(null);
   const reducedRef = useRef(reduced); reducedRef.current = reduced;
   const onHelpRef = useRef(onHelp); onHelpRef.current = onHelp;
-  const api = useRef<{ lab?: Lab; cam?: THREE.PerspectiveCamera; controls?: OrbitControls; sci?: Scientist; go?: (k: string) => void; tech?: Technician; say?: (r: Say) => void; foley?: Foley; snapshot?: () => void; setQ?: (q: QualitySel) => void }>({});
+  const api = useRef<{ lab?: Lab; cam?: THREE.PerspectiveCamera; controls?: OrbitControls; sci?: Scientist; go?: (k: string) => void; tech?: Technician; sys?: TechnicianSystem; say?: (r: Say) => void; foley?: Foley; snapshot?: () => void; setQ?: (q: QualitySel) => void }>({});
   const [failed, setFailed] = useState(false);
   const [cutaway, setCutaway] = useState(true);
   const [showSci, setShowSci] = useState(true);
@@ -70,6 +76,8 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const settingsRef = useRef(settings);
   const [, setLogN] = useState(0);
+  const [sysReady, setSysReady] = useState<TechnicianSystem | null>(null);
+  const [consentOpen, setConsentOpen] = useState(false);
   const counter = useRef(0);
 
   const speak = useCallback((r: Say) => {
@@ -96,11 +104,15 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
     controls.minDistance = 0.6; controls.maxDistance = 9; controls.maxPolarAngle = Math.PI * 0.49; controls.update();
     const sci = new Scientist(); sci.reduced = reducedRef.current; lab.scene.add(sci.root); sci.setWorld(lab.anchors); sci.attachPhone(lab.phone);
     const foley = new Foley(); sci.onStep = () => foley.footstep(); sci.onEvent = n => { if (n === 'knob') lab.turnKnob('vna', 0.5); if (n === 'pickup') foley.latch(); if (n === 'hangup') foley.latch(); };
-    const tech = createTechnician({ settings: loadSettings() });
-    tech.setSettings(settingsRef.current);
-    api.current = { lab, cam, controls, sci, tech, foley };
+    const sys = createTechnicianSystem({
+      stateRef, dispatch: a => dispatchRef.current?.(a), helpersRef: helpers, sci: sci as any, phone: lab.phone, foley, say: r => speak(r as any),
+      settings: settingsRef.current, onUpdate: () => setLogN(Math.random()),
+    });
+    const tech = sys.tech;
+    api.current = { lab, cam, controls, sci, tech, sys, foley };
+    setSysReady(sys);
     lab.setCutaway(true);
-    if (urlParam('labdebug') !== null) (window as any).__lab = { lab, sci, cam, controls, tech, foley };
+    if (urlParam('labdebug') !== null) (window as any).__lab = { lab, sci, cam, controls, tech, sys, foley };
 
     // ── quality, post-processing ──
     let eff: Quality = 'high'; let composer: EffectComposer | null = null; let frames = 0, ema = 0.016, lastRender = 0;
@@ -172,7 +184,8 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
       const s = stateRef.current; const t = now / 1000;
       lab.update(s, dt, t);
       sci.reduced = reducedRef.current; sci.root.visible = showSciRef.current; sci.laserOn = !!(s.ldv?.power && s.ldv?.shutter); foley.muted = !soundRef.current; if (showSciRef.current) sci.update(dt, cam.position);
-      brainAcc += dt; if (brainAcc > 0.25) { brainAcc = 0; const r = tech.observe(extractFactsPlus(s), now); if (r) { speak(r); setLogN(tech.log.length + Math.random()); } }
+      brainAcc += dt; if (brainAcc > 0.25) { brainAcc = 0; const r = tech.observe(extractFactsPlus(s), now); if (r) { sys.remark(r); setLogN(tech.log.length + Math.random()); } }
+      sys.tick(t, dt);
       if (tween) { tween.t = Math.min(1, tween.t + dt / 0.9); const e = tween.t * tween.t * (3 - 2 * tween.t); cam.position.lerpVectors(tween.fp, tween.tp, e); controls.target.lerpVectors(tween.ft, tween.tt, e); if (tween.t >= 1) tween = null; }
       else if (followRef.current && showSciRef.current) { const h = sci.position; controls.target.lerp(v3.set(h.x, 1.1, h.z), Math.min(1, dt * 2)); }
       controls.update();
@@ -188,7 +201,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
     return () => {
       cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); window.clearTimeout(bubbleTimer.current);
       canvas.removeEventListener('pointermove', onMove); canvas.removeEventListener('pointerleave', onLeave); canvas.removeEventListener('pointerdown', onDown); canvas.removeEventListener('pointerup', onUp);
-      controls.dispose(); sci.dispose(); foley.dispose(); lab.dispose(); composer?.dispose(); renderer.dispose(); renderer.forceContextLoss();
+      sys.dispose(); controls.dispose(); sci.dispose(); foley.dispose(); lab.dispose(); composer?.dispose(); renderer.dispose(); renderer.forceContextLoss();
       if (canvas.parentNode === host) host.removeChild(canvas); api.current = {}; if ((window as any).__lab) delete (window as any).__lab;
     };
   }, [speak, stateRef]);
@@ -201,6 +214,19 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
   const talk = () => { const b = api.current.tech; if (!b) return; if (!showSci) setShowSci(true); speak(b.chat(extractFactsPlus(stateRef.current), performance.now())); setLogN(Math.random()); };
   const ask = (q: string) => { const b = api.current.tech; if (!b) return; if (!showSci) setShowSci(true); speak(b.ask(q, extractFactsPlus(stateRef.current), performance.now()).remark); setLogN(Math.random()); };
   const changeSettings = (p: Partial<Settings>) => { const next = { ...settingsRef.current, ...p }; settingsRef.current = next; setSettings(next); api.current.tech?.setSettings(next); try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* storage may be blocked */ } };
+  const startCall = (mic: boolean) => { const sys = api.current.sys; if (!sys) return; setShowSci(true); setConsentOpen(false); try { localStorage.setItem(CONSENT_KEY, mic ? 'mic' : 'type'); } catch { /* storage may be blocked */ } void sys.call.start({ mic }); };
+  const toggleCall = () => {
+    const sys = api.current.sys; if (!sys) return; const st = sys.call.state;
+    if (st === 'connecting' || st === 'ringing' || st === 'connected') { void sys.call.hangUp(); return; }
+    if (st === 'ended') sys.call.reset();
+    let pref: string | null = null; try { pref = localStorage.getItem(CONSENT_KEY); } catch { /* ignore */ }
+    if (pref === 'mic' || pref === 'type') startCall(pref === 'mic'); else setConsentOpen(v => !v);
+  };
+  const toggleCallRef = useRef(toggleCall); toggleCallRef.current = toggleCall;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.altKey && e.code === 'KeyP' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); toggleCallRef.current(); } };
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const views = useMemo(() => [['overview', 'Overview'], ['chamber', 'Chamber'], ['stage', 'Stage close-up'], ['rack', 'Instrument rack'], ['bench', 'Workstation']], []);
 
   if (failed) return <div className="ls-root"><div className="ls-fallback">The realistic 3D lab needs WebGL, which isn't available in this browser. Use the Engineering model view instead.</div></div>;
@@ -220,6 +246,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
           <Btn on={showSci} f={() => setShowSci(v => !v)}>Dr. Wire</Btn>
           <Btn on={follow} f={() => { setShowSci(true); setFollow(v => !v); }}>Follow him</Btn>
           <Btn f={talk}>Talk to Dr. Wire</Btn>
+          <Btn on={!!sysReady && sysReady.call.state !== 'idle'} f={toggleCall} title="Call Dr. Wire on the lab phone (Alt+P)" call>{sysReady && ['connecting', 'ringing', 'connected'].includes(sysReady.call.state) ? 'Hang up' : 'Call Dr. Wire'}</Btn>
         </div>
       )}
       <div className="ls-stage" ref={canvasHost}>
@@ -229,6 +256,9 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
             <b>Dr. Wire</b><Typed text={bubble.text} />
           </div>
         )}
+        {!photo && consentOpen && <CallConsent onStart={startCall} onCancel={() => setConsentOpen(false)} />}
+        {!photo && sysReady && <TaskChip sys={sysReady} />}
+        {!photo && sysReady && <CallBar sys={sysReady} />}
         {photo && <div className="ls-photo"><Btn f={() => api.current.snapshot?.()}>Save PNG</Btn><Btn f={() => setPhoto(false)}>Exit photo mode</Btn></div>}
         {!photo && part && (
           <div className="ls-info" role="status"><span>{part.label}</span>

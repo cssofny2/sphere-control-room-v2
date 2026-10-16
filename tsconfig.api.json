@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "composite": true,
+    "types": ["node"],
+    "allowJs": false
+  },
+  "include": ["api", "src/technician/server.ts", "src/technician/persona.ts", "src/technician/knowledge.generated.ts", "src/technician/actions.ts", "src/technician/taskRunner.ts"]
+}
