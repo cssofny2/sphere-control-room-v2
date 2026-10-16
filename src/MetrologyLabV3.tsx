@@ -13,6 +13,7 @@ import type { AcquisitionContract } from './domain/acquisition';
 import { buildAxisPlan, buildPointPlan, validateAxisSettings, type PlanIssue } from './simulation/plan';
 import { paletteEntries, execute as executeAction } from './technician/actions';
 import { installLabSelectionSync } from './engineering/selection';
+import { APP_VERSION, AUTHOR, COPYRIGHT_LINE } from './siteInfo';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
@@ -1154,6 +1155,14 @@ export default function MetrologyLab() {
           {state.ui.alarmsOpen ? <AlarmList state={state} dispatch={dispatch} /> : <EventLog events={state.events} journalFilter={journalFilter} setJournalFilter={setJournalFilter} journalSearch={journalSearch} setJournalSearch={setJournalSearch} />}
         </aside>}
       </main>
+
+      <footer className="workspace-footer" data-app-footer>
+        <span data-copyright>{COPYRIGHT_LINE}</span>
+        <span className="workspace-footer-sep" aria-hidden="true">·</span>
+        <span data-credit>Designed and developed by <strong>{AUTHOR}</strong>.</span>
+        <span className="workspace-footer-sep" aria-hidden="true">·</span>
+        <span data-footer-version>Version {APP_VERSION}</span>
+      </footer>
 
       {state.ui.cmdPaletteOpen && (
         <CommandPalette state={state} dispatch={dispatch} close={() => set("ui", { cmdPaletteOpen: false })} performSweep={performSweep} exportCsv={exportCsv} exportJson={exportJson} />

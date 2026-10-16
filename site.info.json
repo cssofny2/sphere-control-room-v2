@@ -1,0 +1,11 @@
+{
+  "name": "S.P.H.E.R.E. Metrology Lab",
+  "shortName": "SPHERE Lab",
+  "url": "https://lab.spheredesci.org/",
+  "projectUrl": "https://spheredesci.org/",
+  "author": "Michael P. Goodman",
+  "owner": "SPHERE Research, LLC",
+  "startYear": 2026,
+  "title": "S.P.H.E.R.E. Metrology Lab | Educational Simulator",
+  "description": "Free interactive simulator of the S.P.H.E.R.E. metrology lab: vacuum chamber, XYZ stage, VNA, laser vibrometer and a talking technician. Educational only."
+}
