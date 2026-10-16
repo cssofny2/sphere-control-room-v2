@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useReducer, useRef, useMemo, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import WorkspaceHeader from './WorkspaceHeader';
+import LabOverview from './overview/LabOverview';
+import HelpDialog from './overview/HelpDialog';
+import { OVERVIEW_HELP } from './overview/overviewHelp';
 import PlanBuilder from './PlanBuilder';
 import { createIdentifier, createRunContract, captureSettings, MODEL_VERSION, type RunContract, type SimulationEvent } from './domain/run';
 import type { AcquisitionContract } from './domain/acquisition';
@@ -142,6 +145,11 @@ const clamp = (val, min, max) => Math.min(max, Math.max(min, val));
 const uid = () => createIdentifier('run');
 const now = () => new Date().toLocaleTimeString();
 const fmtPressure = p => p >= 10 ? `${p.toFixed(1)} Torr` : `${p.toExponential(1)} Torr`;
+// Turns a help key ("ov.*" overview terms or older glossary terms) into the entry the help dialog shows.
+const resolveHelp = (key) => {
+  const e = OVERVIEW_HELP[key] || GLOSSARY[key];
+  return { key, ...(e || { title: key, desc: "Detailed metrology specification and operational documentation." }) };
+};
 
 function addEvent(state, text, level: SimulationEvent['level'] = "info", subsystem = "SYSTEM", x = null, y = null, z = null, runId = null) {
   const ev: SimulationEvent = {
@@ -772,24 +780,29 @@ export default function MetrologyLab() {
   const recordQuality = !state.experiment.records.length ? "NO DATA" : validationResult.overall;
   const recordingState = state.experiment.active ? "RUNNING" : state.experiment.records.length > 0 ? "COMPLETE" : "IDLE";
 
-  const HelpInfo = ({ termKey }) => (
+  // Stable identity (not re-created every 50 ms tick) so the ? icon is not remounted under the pointer mid-click.
+  const HelpInfo = useCallback(({ termKey }) => {
+    const open = () => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(termKey) } });
+    return (
     <span
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); set("ui", { helpModal: GLOSSARY[termKey] || { title: termKey, desc: "Detailed metrology specification and operational documentation." } }); }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); open(); }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           e.stopPropagation();
-          set("ui", { helpModal: GLOSSARY[termKey] || { title: termKey, desc: "Detailed metrology specification and operational documentation." } });
+          open();
         }
       }}
       role="button"
       tabIndex={0}
       className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white border border-blue-500/50 text-[9px] font-bold ml-1.5 cursor-help transition-all shadow-sm shrink-0"
       title="Click for definition"
+      aria-label="What does this mean?"
     >
       ?
     </span>
   );
+  }, [dispatch]);
 
   const performSweep = () => {
     if (state.vna.sweeping) return;
@@ -1095,7 +1108,7 @@ export default function MetrologyLab() {
 
         <section className="workspace-instrument min-w-0 bg-zinc-950 flex flex-col" aria-label="Active instrument workspace" tabIndex={-1}>
           {active === "dashboard" && <Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} />}
-          {active === "overview" && <LabOverview state={state} dispatch={dispatch} />}
+          {active === "overview" && <LabOverview state={state} dispatch={dispatch} quality={recordQuality} reduced={FX.reduced || FX.hide} lab={{ getSubsystemVisualState, visualToken, fmtPressure, WARMUP_SECONDS, resolveHelp }} />}
           {active === "chamber" && <Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "spatial" && <SpatialField state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "vna" && <Vna state={state} dispatch={dispatch} sweep={performSweep} f0={f0} HelpInfo={HelpInfo} />}
@@ -1383,21 +1396,11 @@ export default function MetrologyLab() {
       )}
 
       {state.ui.helpModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-blue-500/50 rounded-lg w-full max-w-md shadow-2xl overflow-hidden font-sans">
-            <div className="bg-zinc-800 p-3 border-b border-zinc-700 flex justify-between items-center">
-              <h3 className="font-bold text-blue-400 flex items-center gap-2"><Info size={16}/> Definition</h3>
-              <button onClick={() => set("ui", { helpModal: null })} className="text-gray-400 hover:text-white"><X size={18}/></button>
-            </div>
-            <div className="p-5">
-              <h4 className="text-lg font-bold text-gray-100 mb-2">{state.ui.helpModal.title}</h4>
-              <p className="text-gray-300 text-sm leading-relaxed">{state.ui.helpModal.desc}</p>
-            </div>
-            <div className="bg-zinc-950 p-3 flex justify-end">
-              <button onClick={() => set("ui", { helpModal: null })} className="px-4 py-1.5 bg-blue-600 text-white rounded text-xs font-bold">Close</button>
-            </div>
-          </div>
-        </div>
+        <HelpDialog
+          entry={state.ui.helpModal}
+          onClose={() => set("ui", { helpModal: null })}
+          onOpen={(k) => set("ui", { helpModal: resolveHelp(k) })}
+        />
       )}
     </div>
   );
@@ -2386,25 +2389,6 @@ function LivingTelemetryBar({state,validationResult,unresolved}){
   ];
   return <div className="shrink-0 overflow-x-auto border-b border-zinc-800 bg-[#070a0f] px-3 py-1.5" aria-label="Persistent live laboratory telemetry"><div className="flex min-w-max items-stretch gap-1.5">{cells.map(([label,value,sub])=>{const vs=getSubsystemVisualState(state,sub),t=visualToken(vs);return <div key={label} data-visual-state={vs} className={`min-w-[92px] rounded border px-2 py-1 ${t.border} ${t.surface}`}><div className="text-[8px] font-bold uppercase tracking-[.14em] text-zinc-500">{label}</div><div className={`mt-.5 flex items-center gap-1 font-mono text-[10px] ${t.text}`}><span className={`h-1.5 w-1.5 rounded-full ${t.led}`} aria-hidden="true"/>{value}</div></div>})}</div></div>;
 }
-function LabOverview({state,dispatch}){
-  const go=id=>dispatch({type:"SET_UI",patch:{active:id}}), alarms=state.alarms.filter(a=>!a.acknowledged);
-  const nodes=[
-    {k:"clock",l:"10 MHz Reference",pg:"clock",x:38,y:42,w:132,h:62},{k:"vna",l:"E5080B VNA",pg:"vna",x:38,y:150,w:132,h:72},{k:"scope",l:"Oscilloscope",pg:"scope",x:38,y:273,w:132,h:72},
-    {k:"chamber",l:"Thermal-Vac Chamber",pg:"chamber",x:300,y:148,w:190,h:118},{k:"stage",l:"XYZ Stage + Sample",pg:"chamber",x:325,y:177,w:140,h:60},
-    {k:"ldv",l:"LDV Optical Head",pg:"ldv",x:596,y:42,w:140,h:67},{k:"pumps",l:"Vacuum Pumps",pg:"chamber",x:596,y:250,w:140,h:72},{k:"experiment",l:"Acquisition Workstation",pg:"runs",x:300,y:365,w:190,h:68}
-  ];
-  const faultFor=k=>alarms.some(a=>new RegExp(k==="chamber"||k==="pumps"?"turbo|vacuum|pressure|door":k,"i").test(a.text||""));
-  const routes=[
-    {d:"M104 104 L104 186",kind:"clock",on:state.clock.locked&&state.vna.power,label:"10 MHz reference to VNA"},{d:"M104 104 L18 104 L18 309 L104 309",kind:"clock",on:state.clock.locked&&state.scope.power,label:"10 MHz reference to scope"},
-    {d:"M104 104 L104 20 L666 20 L666 76",kind:"clock",on:state.clock.locked&&state.ldv.power,label:"10 MHz reference to LDV"},{d:"M170 186 C230 186 250 195 325 205",kind:"rf",on:state.vna.power&&state.vna.rf,label:"RF stimulus and return"},
-    {d:"M666 76 C560 76 515 115 430 190",kind:"laser",on:state.ldv.power&&state.ldv.shutter,label:"LDV forward beam"},{d:"M430 195 C520 125 565 90 666 83",kind:"laserReturn",on:state.ldv.power&&state.ldv.shutter,label:"LDV reflected return"},
-    {d:"M395 266 L395 365",kind:"data",on:state.experiment.active||state.vna.trace.length>0,label:"Measurement data to workstation"},{d:"M596 286 C535 286 505 245 490 225",kind:"vacuum",on:state.chamber.roughing||state.chamber.turbo,label:"Vacuum flow to pumps"}
-  ];
-  const color={clock:"#22d3ee",rf:"#e879f9",laser:"#facc15",laserReturn:"#fde68a",data:"#3b82f6",vacuum:"#94a3b8"};
-  return <div className="space-y-3"><div><h1 className="text-xl font-bold">Living Lab Overview</h1><p className="mt-1 text-sm text-zinc-400">Physical equipment, operating state, signal flow, vacuum flow, and acquisition feedback share one live model.</p></div><div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2"><svg viewBox="0 0 780 455" className="w-full" role="group" aria-label="Living laboratory equipment and signal routing"><defs><pattern id="ll-grid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M28 0H0V28" fill="none" stroke="#111b27"/></pattern></defs><rect width="780" height="455" rx="12" fill="url(#ll-grid)"/>{routes.map((r,i)=><SignalPath key={i} d={r.d} color={faultFor(r.kind)?undefined:color[r.kind]} active={r.on} fault={faultFor(r.kind)} label={r.label}/>) }
-  {nodes.map(n=>{const vs=faultFor(n.k)?"fault":getSubsystemVisualState(state,n.k),t=visualToken(vs);return <g key={n.k} role="button" tabIndex={0} aria-label={`${n.l}, ${t.label}`} onClick={()=>go(n.pg)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go(n.pg)}}} className="cursor-pointer"><rect x={n.x} y={n.y} width={n.w} height={n.h} rx="9" fill="#0a1018" stroke={t.hex} strokeWidth={vs==="fault"?3:2} opacity={vs==="offline"?.58:1}/><rect x={n.x+7} y={n.y+7} width={n.w-14} height="10" rx="3" fill={t.hex} opacity=".18"/><circle cx={n.x+n.w-13} cy={n.y+13} r="4" fill={t.hex}/><text x={n.x+12} y={n.y+34} fill="#e2e8f0" fontSize="12" fontWeight="700">{n.l}</text><text x={n.x+12} y={n.y+51} fill={t.hex} fontSize="9" fontFamily="monospace">{t.symbol} {t.label.toUpperCase()}</text></g>})}</svg></div><div className="space-y-2">{nodes.filter(n=>n.k!=="stage").map(n=>{const vs=faultFor(n.k)?"fault":getSubsystemVisualState(state,n.k);return <button key={n.k} onClick={()=>go(n.pg)} className={`flex w-full items-center justify-between rounded border p-2 text-left ${visualClass(vs)}`}><span className="text-xs font-semibold">{n.l}</span><StatusLED status={vs}/></button>})}<div className="rounded border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400"><div className="mb-2 font-bold uppercase tracking-wider text-zinc-300">Live routes</div><div className="grid grid-cols-2 gap-1">{Object.entries({clock:"Clock",rf:"RF",laser:"Laser",data:"Data",vacuum:"Vacuum",fault:"Fault"}).map(([k,l])=><span key={k} style={{color:k==="fault"?"#fb7185":color[k]||"#fb7185"}}>● {l}</span>)}</div></div></div></div></div>;
-}
-
 const GRP = { outer: "Outer Faraday enclosure", inner: "Inner Faraday enclosure", table: "Optical table", chamber: "Thermal-vacuum chamber", sphere: "Test sphere", ldv: "LDV optical heads", rf: "RF coupling fixture", pumps: "Vacuum pumps", rack: "Instrument rack", probes: "Environmental probes", room: "Laboratory room (context)" };
 const EXPL = { outer: [0, 0, 1100], inner: [0, 0, 550], table: [0, 0, -250], chamber: [0, 0, 350], sphere: [0, 0, 800], ldv: [0, 0, 900], rf: [450, 0, 550], pumps: [-500, 0, 0], rack: [600, 0, 0], probes: [0, 350, 500], room: [0, 0, 0] };
 const CAM = { iso: { yaw: 0.6, pit: 0.5, dist: 6200, t: [200, 0, 1000] }, front: { yaw: 0, pit: 0.05, dist: 6500, t: [200, 0, 1000] }, top: { yaw: 0, pit: 1.5, dist: 6500, t: [200, 0, 1000] }, interior: { yaw: -0.5, pit: 0.35, dist: 1100, t: [0, 0, 1100] }, optical: { yaw: 1.57, pit: 0.05, dist: 1500, t: [0, 0, 1450] }, rf: { yaw: -1.0, pit: 0.3, dist: 1300, t: [200, 0, 1100] }, vacuum: { yaw: 0.7, pit: 0.3, dist: 1700, t: [-550, 0, 1000] }, rack: { yaw: 1.2, pit: 0.15, dist: 2600, t: [1800, 0, 1000] } };
