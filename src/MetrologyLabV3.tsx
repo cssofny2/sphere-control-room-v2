@@ -5,11 +5,14 @@ import LabOverview from './overview/LabOverview';
 import HelpDialog from './overview/HelpDialog';
 // The realistic WebGL lab loads on demand so three.js stays out of the main bundle.
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
+const Schematic = lazy(() => import('./engineering/Schematic'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
 import PlanBuilder from './PlanBuilder';
 import { createIdentifier, createRunContract, captureSettings, MODEL_VERSION, type RunContract, type SimulationEvent } from './domain/run';
 import type { AcquisitionContract } from './domain/acquisition';
 import { buildAxisPlan, buildPointPlan, validateAxisSettings, type PlanIssue } from './simulation/plan';
+import { paletteEntries, execute as executeAction } from './technician/actions';
+import { installLabSelectionSync } from './engineering/selection';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
@@ -83,6 +86,9 @@ const PROCEDURE_STEPS = [
   { step: 5, title: "Engage LDV", desc: "Open 'Polytec PSV-500 LDV'. Click 'OPEN SHUTTER' to enable the laser. Observe structural displacement data alignment.", badge: "LDV Alignment Tech" },
   { step: 6, title: "Test Location Variable", desc: "Return to '3D Env Chamber'. Use the Precision XYZ Stage sliders to alter sphere coordinates. Observe how spatial shifts impact resonance.", badge: "Location Variable Investigator" }
 ];
+
+// Lets the 3D lab's technician reach UI-only helpers (downloads, a single VNA sweep) that live in the main component.
+const labHelpersRef: { current: { performSweep?: () => void; exportCsv?: () => void; exportJson?: () => void } | undefined } = { current: undefined };
 
 const initialState = {
   facility: { power: false, speed: 1, simulationTime: 0, seededNoise: true, seed: 73421, mode: "training" },
@@ -620,6 +626,7 @@ const stage = { ...state.stage };
 
 export default function MetrologyLab() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  useEffect(() => { try { if (new URLSearchParams(window.location.search).has('labdebug')) (window as any).__dispatch = dispatch; } catch { /* ignore */ } }, [dispatch]);
   const [journalFilter, setJournalFilter] = useState("all");
   const [journalSearch, setJournalSearch] = useState("");
   const [journalOpen, setJournalOpen] = useState(false);
@@ -890,6 +897,7 @@ export default function MetrologyLab() {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${state.experiment.id || "sphere-session"}.json`; a.click(); URL.revokeObjectURL(a.href);
   };
+  labHelpersRef.current = { performSweep, exportCsv, exportJson };
 
   const exportJournalCsv = () => {
     const rows = [
@@ -1503,48 +1511,17 @@ function CommandPalette({ state, dispatch, close, performSweep, exportCsv, expor
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const commands = [
-    { label: "Navigate: Operator Console", action: () => dispatch({ type: "SET_UI", patch: { active: "dashboard" } }), category: "Navigation" },
-    { label: "Navigate: 3D Chamber & Stage", action: () => dispatch({ type: "SET_UI", patch: { active: "chamber" } }), category: "Navigation" },
-    { label: "Navigate: Spatial Field Explorer", action: () => dispatch({ type: "SET_UI", patch: { active: "spatial" } }), category: "Navigation" },
-    { label: "Navigate: VNA Analysis", action: () => dispatch({ type: "SET_UI", patch: { active: "vna" } }), category: "Navigation" },
-    { label: "Navigate: LDV Scanner", action: () => dispatch({ type: "SET_UI", patch: { active: "ldv" } }), category: "Navigation" },
-    { label: "Navigate: Oscilloscope", action: () => dispatch({ type: "SET_UI", patch: { active: "scope" } }), category: "Navigation" },
-    { label: "Navigate: Frequency Reference", action: () => dispatch({ type: "SET_UI", patch: { active: "clock" } }), category: "Navigation" },
-    { label: "Navigate: Experiment Runs", action: () => dispatch({ type: "SET_UI", patch: { active: "runs" } }), category: "Navigation" },
-    { label: "Navigate: Training & Checklist", action: () => dispatch({ type: "SET_UI", patch: { active: "training" } }), category: "Navigation" },
-    { label: "Navigate: Challenge Mode", action: () => dispatch({ type: "SET_UI", patch: { active: "challenges" } }), category: "Navigation" },
-
-    { label: "Start Standard Experiment Run", action: () => dispatch({ type: "START_RUN" }), category: "Experiment" },
-    { label: "Stop Active Experiment Run", action: () => dispatch({ type: "STOP_RUN" }), category: "Experiment" },
-    { label: "Capture Single VNA Sweep", action: performSweep, category: "Instruments", disabled: !state.vna.power, reason: "VNA must be powered on" },
-    { label: "Capture VNA Reference Trace", action: () => dispatch({ type: "CAPTURE_REFERENCE" }), category: "Instruments" },
-    { label: "Open VNA Calibration Wizard", action: () => dispatch({ type: "SET_UI", patch: { calModalOpen: true } }), category: "Instruments" },
-    { label: "Home XYZ Stage (0,0,0)", action: () => dispatch({ type: "HOME_STAGE" }), category: "Hardware" },
-
-    { label: "Start Roughing Vacuum Pump", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { vent: false, roughing: true } }), category: "Chamber" },
-    { label:
-      state.chamber.pressure <= 50 ? "Start Turbomolecular Pump" : "Start Turbomolecular Pump — unavailable until pressure is below 50 Torr",
-      action: () => {
-        if (state.chamber.pressure <= 50) dispatch({ type: "PATCH", domain: "chamber", patch: { vent: false, roughing: true, turbo: true } });
-        else dispatch({ type: "ALARM", text: "Turbo interlock active: pressure must be below 50 Torr.", severity: "critical" });
-      },
-      category: "Chamber",
-      disabled: state.chamber.pressure > 50,
-      reason: "Pressure must be < 50 Torr"
+  const ctx = { getState: () => state, dispatch, helpers: { performSweep, exportCsv, exportJson } };
+  const commands = paletteEntries(state).map(e => ({
+    label: e.disabled ? `${e.label} — ${e.reason}` : e.label,
+    category: e.category, disabled: e.disabled, reason: e.reason,
+    action: () => {
+      const r = executeAction(ctx, e.id);
+      if (r.status === "needs-confirmation") {
+        dispatch({ type: "SET_UI", patch: { confirmModal: { title: `Confirm: ${e.label}`, desc: r.text, onConfirm: () => { executeAction(ctx, e.id, {}, { confirmed: true }); dispatch({ type: "SET_UI", patch: { confirmModal: null } }); } } } });
+      } else if (r.status !== "started") dispatch({ type: "ALARM", text: `${e.label}: ${r.reason}`, severity: "warning" });
     },
-    { label: "Toggle Faraday Cage Shielding", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { faraday: !state.chamber.faraday } }), category: "Chamber" },
-    { label: "Toggle Active Vibration Isolation", action: () => dispatch({ type: "PATCH", domain: "chamber", patch: { isolation: !state.chamber.isolation } }), category: "Chamber" },
-
-    { label: "Open Startup Wizard", action: () => dispatch({ type: "SET_UI", patch: { wizardOpen: true } }), category: "Help" },
-    { label: "Open Procedure Manual", action: () => dispatch({ type: "SET_UI", patch: { manualOpen: true } }), category: "Help" },
-    { label: "Open Glossary of Terms", action: () => dispatch({ type: "SET_UI", patch: { glossaryOpen: true } }), category: "Help" },
-    { label: "Open Video Tutorial Laptop", action: () => dispatch({ type: "SET_UI", patch: { videoModal: true } }), category: "Help" },
-
-    { label: "Acknowledge All Alarms", action: () => state.alarms.forEach(a => dispatch({ type: "ACK_ALARM", id: a.id })), category: "System" },
-    { label: "Export Experiment Run CSV", action: exportCsv, category: "Data" },
-    { label: "Export Experiment Run JSON", action: exportJson, category: "Data" },
-  ];
+  }));
 
   const filtered = commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase()));
 
@@ -2776,6 +2753,7 @@ function StageMotionPanel({state}){const sm=getStageMotionState(state),t=visualT
 function Chamber({ state, dispatch, HelpInfo }) {
   const [cv, setCv] = useState({ shell: true, cut: false, cam: "front", mode: "standard" });
   const [sceneView, setSceneView] = useState("lab");
+  useEffect(() => { installLabSelectionSync(); }, []);
   const labStateRef = useRef(state); labStateRef.current = state;
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
 
@@ -2836,7 +2814,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
       <StageMotionPanel state={state} />
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_.9fr]">
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
+        <div className={`min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl ${sceneView === "schematic" ? "xl:col-span-2" : ""}`}>
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3 flex items-center justify-between">
             <span className="flex items-center">Thermal-Vacuum Chamber (Hardware View) <HelpInfo termKey="chamber" /></span>
             <StatusLED status={getChamberLifecycle(state).visual} />
@@ -2844,11 +2822,16 @@ function Chamber({ state, dispatch, HelpInfo }) {
 
           <div className="mb-2 flex flex-wrap items-center gap-2" role="group" aria-label="Chamber view">
             <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">View</span>
-            {[["lab", "Realistic lab"], ["engineering", "Engineering model"]].map(([k, l]) => <button key={k} type="button" aria-pressed={sceneView === k} onClick={() => setSceneView(k)} className={`rounded border px-3 py-1.5 text-xs font-semibold ${sceneView === k ? "border-sky-500 bg-sky-950/40 text-sky-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"}`}>{l}</button>)}
+            {[["lab", "Realistic lab"], ["engineering", "Engineering model"], ["schematic", "Engineering schematic"]].map(([k, l]) => <button key={k} type="button" aria-pressed={sceneView === k} onClick={() => setSceneView(k)} className={`rounded border px-3 py-1.5 text-xs font-semibold ${sceneView === k ? "border-sky-500 bg-sky-950/40 text-sky-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"}`}>{l}</button>)}
           </div>
           {sceneView === "lab" && (
             <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the 3D lab…</div>}>
-              <LabScene3D stateRef={labStateRef} reduced={FX.reduced || FX.hide} />
+              <LabScene3D stateRef={labStateRef} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
+            </Suspense>
+          )}
+          {sceneView === "schematic" && (
+            <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the engineering schematic…</div>}>
+              <Schematic state={state} dispatch={dispatch} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} onShowInLab={() => setSceneView("lab")} />
             </Suspense>
           )}
           {sceneView === "engineering" && (

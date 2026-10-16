@@ -18,3 +18,58 @@
 .ls-bubble.is-joke b { color: #059669; }
 .ls-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ls-fallback { display: grid; place-items: center; min-height: 240px; padding: 24px; text-align: center; font: 500 13px/1.5 system-ui, sans-serif; color: var(--ls-mut); }
+.ls-root select.ls-btn { padding: 5px 6px; }
+.ls-hover { position: absolute; left: 0; top: 0; z-index: 4; padding: 4px 8px; border-radius: 7px; background: #10233bee; color: #fff; font: 600 11px/1.3 system-ui, sans-serif; pointer-events: none; white-space: nowrap; }
+.ls-hover i { font-style: normal; opacity: .7; font-weight: 500; }
+.ls-info { position: absolute; left: 10px; bottom: 34px; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; border: 1px solid var(--ls-line); border-radius: 10px; background: #fff; font: 700 12px/1 system-ui, sans-serif; box-shadow: 0 4px 14px #0003; }
+.ls-info button { min-height: 0 !important; width: 24px; height: 24px; padding: 0 !important; border-radius: 50%; border: 1px solid #9cc3f5; background: #eaf3ff; color: #1f6feb; font: 800 13px/1 system-ui; cursor: pointer; }
+.ls-info button.ls-x { border-color: var(--ls-line); background: #fff; color: var(--ls-mut); }
+.ls-photo { position: absolute; right: 10px; top: 10px; z-index: 5; display: flex; gap: 6px; }
+.ls-quality { position: absolute; right: 10px; bottom: 8px; padding: 3px 8px; border-radius: 6px; background: #ffffffcc; font: 500 11px/1.3 system-ui, sans-serif; color: var(--ls-mut); pointer-events: none; }
+.ls-root select.ls-btn { background: #fff; color: var(--ls-ink); }
+
+/* ── Dr. Wire settings, ask box and log ── */
+.ls-tech { margin: 8px 0 0; border: 1px solid var(--ls-line, #c9d3df); border-radius: 10px; background: var(--ls-panel, #f4f7fb); color: inherit; font-size: 13px; }
+.ls-tech > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; }
+.ls-tech-body { padding: 4px 12px 12px; display: grid; gap: 10px; }
+.ls-tech-modes { display: flex; gap: 14px; flex-wrap: wrap; border: 0; padding: 0; margin: 0; }
+.ls-tech-modes legend { font-weight: 600; margin-bottom: 4px; }
+.ls-tech-slider { display: grid; grid-template-columns: 70px 1fr 80px; align-items: center; gap: 8px; }
+.ls-tech-ask { display: flex; gap: 8px; }
+.ls-tech-ask input { flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--ls-line, #b8c4d2); background: #fff; color: #17212e; font: inherit; }
+.ls-tech-log { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow: auto; display: grid; gap: 6px; }
+.ls-tech-log li { padding: 6px 8px; border-radius: 8px; background: rgba(120,140,170,.12); line-height: 1.4; }
+.ls-tech-log li[data-cat="alarm"], .ls-tech-log li[data-cat="fault"], .ls-tech-log li[data-cat="escalation"] { background: rgba(220,80,60,.14); }
+.ls-tech-time { font-variant-numeric: tabular-nums; opacity: .65; margin-right: 4px; }
+.ls-tech-cat { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .75; margin-right: 4px; }
+.ls-tech-why { margin-left: 8px; background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; font-size: 12px; opacity: .8; }
+.ls-tech-reason { margin-top: 4px; font-size: 12px; opacity: .85; border-left: 3px solid currentColor; padding-left: 8px; }
+.ls-tech-empty { opacity: .7; }
+
+/* ── phone call and task chip ── */
+.ls-consent { position: absolute; left: 50%; top: 14%; transform: translateX(-50%); width: min(480px, calc(100% - 24px)); background: #fff; color: #17212e; border-radius: 12px; padding: 14px 16px; box-shadow: 0 10px 40px rgba(20,30,45,.35); z-index: 6; font-size: 13px; line-height: 1.45; }
+.ls-consent p { margin: 6px 0; }
+.ls-consent-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ls-call { position: absolute; right: 10px; bottom: 10px; width: min(380px, calc(100% - 20px)); background: rgba(255,255,255,.96); color: #17212e; border-radius: 12px; box-shadow: 0 8px 30px rgba(20,30,45,.3); padding: 10px 12px; z-index: 5; font-size: 13px; display: grid; gap: 8px; }
+.ls-call-head { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.ls-mic-on { display: inline-flex; align-items: center; gap: 5px; color: #b3261e; font-size: 12px; }
+.ls-mic-on i { width: 9px; height: 9px; border-radius: 50%; background: #d32f2f; animation: ls-pulse 1.2s infinite; }
+.ls-mic-off { font-size: 12px; opacity: .7; }
+@keyframes ls-pulse { 50% { opacity: .35; } }
+.ls-call-notice { background: #fff4d6; border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+.ls-call-caps { max-height: 150px; overflow: auto; display: grid; gap: 4px; }
+.ls-cap { margin: 0; line-height: 1.35; }
+.ls-cap b { margin-right: 4px; }
+.ls-cap-you b { color: #1565c0; } .ls-cap-wire b { color: #2e7d32; } .ls-cap-system { opacity: .75; font-style: italic; }
+.ls-cap.is-interim { opacity: .55; }
+.ls-call-text { display: flex; gap: 6px; }
+.ls-call-text input { flex: 1; min-width: 0; padding: 6px 9px; border-radius: 8px; border: 1px solid #b8c4d2; background: #fff; color: #17212e; font: inherit; }
+.ls-call-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ls-hangup { background: #d32f2f !important; color: #fff !important; border-color: #b71c1c !important; }
+.ls-confirm { background: #fde7e4; border-radius: 8px; padding: 8px; display: grid; gap: 6px; grid-template-columns: 1fr auto auto; align-items: center; font-size: 12.5px; }
+.ls-confirm span { grid-column: 1 / -1; }
+.ls-check { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; }
+.ls-task { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: calc(100% - 20px); background: rgba(255,255,255,.96); color: #17212e; border-radius: 10px; padding: 6px 10px; box-shadow: 0 6px 22px rgba(20,30,45,.28); z-index: 5; font-size: 12.5px; }
+.ls-task-title { font-weight: 600; } .ls-task-step { opacity: .8; } .ls-task progress { width: 90px; }
+.ls-estop { background: #b71c1c !important; color: #fff !important; }
+@media (max-width: 640px) { .ls-call { left: 10px; right: 10px; width: auto; } .ls-task { top: 6px; } }
