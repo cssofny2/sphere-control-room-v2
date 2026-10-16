@@ -3,7 +3,7 @@
     npm run dev -- --host 127.0.0.1 &        # or: npx vite preview
     python3 tests/e2e/technician.e2e.py [base_url] [scenario ...]
 
-Scenarios: call, voice, task, blocked, hangup, mic-denied, mobile, reduced, nowebgl  (default: all)
+Scenarios: call (includes hang-up), voice, task, blocked, mic-denied, mobile, reduced, nowebgl  (default: all)
 The AI endpoint is mocked with recorded server-sent events, so no API key is needed.
 """
 import json, sys, time
