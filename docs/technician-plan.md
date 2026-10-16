@@ -23,6 +23,21 @@ src/technician/
   TechnicianPanel.tsx modes, sliders, ask box, log with "Why did you say that?"
 ```
 
+```
+src/technician/ (phases 4-6)
+  actions.ts          one registry of lab actions: schema, risk, interlocks, "done" checks; palette + AI tools both use it
+  taskRunner.ts       multi-step tasks: walk to station, narrate, check, confirm, run, wait; cancel + emergency stop
+  callController.ts   phone call states, mic/typing consent, barge-in, sentence-chunked speech, AI tool loop (max 8)
+  speech.ts, intents.ts, llm.ts, snapshot.ts, persona.ts, system.ts, CallUI.tsx
+  server.ts           request handler (origin, size, rate and spend limits, caching); api/technician.ts is the thin Vercel wrapper
+src/engineering/ (phase 7)
+  parts.ts            tagged part registry, health, fault/alarm ownership, signal-path links (pure, unit-tested)
+  selection.ts        one selected part shared with the realistic lab (window event 'lab-part-click')
+  Schematic.tsx       lazy "Engineering schematic" view: parts list, P&ID / dimensioned cutaway / signal path, inspector
+```
+
+Schematic notes: statuses use shape plus colour (Okabe-Ito palette); flow lines are CSS dash animation and are switched off for reduced motion; the exported SVG embeds its own style and colour variables so it opens standalone; PDF export uses the browser print dialog. Only the stage travel (+/-35 mm) in the cutaway comes from the simulator; wall sizes are labelled conceptual.
+
 `npm run build:knowledge` regenerates `knowledge.generated.ts`; `npm test` runs `build-knowledge.mjs --check` so a stale file fails the build.
 
 ## Behaviour rules

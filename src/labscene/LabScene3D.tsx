@@ -17,6 +17,8 @@ import { CallBar, CallConsent, TaskChip } from '../technician/CallUI';
 import type { Ctx } from '../technician/actions';
 import { extractFactsPlus } from '../technician/facts';
 import TechnicianPanel from '../technician/TechnicianPanel';
+import { getSelected } from '../engineering/selection';
+import { PART_BY_ID } from '../engineering/parts';
 import type { Focus, Mood } from './scientistBrain';
 
 type Say = { text: string; focus: Focus; mood: Mood; kind: string };
@@ -145,6 +147,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     const resize = () => { const { w, h } = size(); renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); composer?.setSize(w, h); };
     const ro = new ResizeObserver(resize); ro.observe(host); resize();
     applyQuality(pickQuality(qualitySelRef.current));
+    { const sid = getSelected(); const pd = sid ? PART_BY_ID[sid] : null; if (pd) { api.current.go?.(pd.view); setPart({ label: pd.label, help: pd.help }); } } // coming from the schematic: look at the part chosen there
 
     // ── picking: hover labels + click to look at a part ──
     const ray = new THREE.Raycaster(); const ndc = new THREE.Vector2(); const roots: THREE.Object3D[] = [];

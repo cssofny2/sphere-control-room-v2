@@ -5,12 +5,14 @@ import LabOverview from './overview/LabOverview';
 import HelpDialog from './overview/HelpDialog';
 // The realistic WebGL lab loads on demand so three.js stays out of the main bundle.
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
+const Schematic = lazy(() => import('./engineering/Schematic'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
 import PlanBuilder from './PlanBuilder';
 import { createIdentifier, createRunContract, captureSettings, MODEL_VERSION, type RunContract, type SimulationEvent } from './domain/run';
 import type { AcquisitionContract } from './domain/acquisition';
 import { buildAxisPlan, buildPointPlan, validateAxisSettings, type PlanIssue } from './simulation/plan';
 import { paletteEntries, execute as executeAction } from './technician/actions';
+import { installLabSelectionSync } from './engineering/selection';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
@@ -624,6 +626,7 @@ const stage = { ...state.stage };
 
 export default function MetrologyLab() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  useEffect(() => { try { if (new URLSearchParams(window.location.search).has('labdebug')) (window as any).__dispatch = dispatch; } catch { /* ignore */ } }, [dispatch]);
   const [journalFilter, setJournalFilter] = useState("all");
   const [journalSearch, setJournalSearch] = useState("");
   const [journalOpen, setJournalOpen] = useState(false);
@@ -2750,6 +2753,7 @@ function StageMotionPanel({state}){const sm=getStageMotionState(state),t=visualT
 function Chamber({ state, dispatch, HelpInfo }) {
   const [cv, setCv] = useState({ shell: true, cut: false, cam: "front", mode: "standard" });
   const [sceneView, setSceneView] = useState("lab");
+  useEffect(() => { installLabSelectionSync(); }, []);
   const labStateRef = useRef(state); labStateRef.current = state;
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
 
@@ -2810,7 +2814,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
       <StageMotionPanel state={state} />
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_.9fr]">
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
+        <div className={`min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl ${sceneView === "schematic" ? "xl:col-span-2" : ""}`}>
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3 flex items-center justify-between">
             <span className="flex items-center">Thermal-Vacuum Chamber (Hardware View) <HelpInfo termKey="chamber" /></span>
             <StatusLED status={getChamberLifecycle(state).visual} />
@@ -2818,11 +2822,16 @@ function Chamber({ state, dispatch, HelpInfo }) {
 
           <div className="mb-2 flex flex-wrap items-center gap-2" role="group" aria-label="Chamber view">
             <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">View</span>
-            {[["lab", "Realistic lab"], ["engineering", "Engineering model"]].map(([k, l]) => <button key={k} type="button" aria-pressed={sceneView === k} onClick={() => setSceneView(k)} className={`rounded border px-3 py-1.5 text-xs font-semibold ${sceneView === k ? "border-sky-500 bg-sky-950/40 text-sky-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"}`}>{l}</button>)}
+            {[["lab", "Realistic lab"], ["engineering", "Engineering model"], ["schematic", "Engineering schematic"]].map(([k, l]) => <button key={k} type="button" aria-pressed={sceneView === k} onClick={() => setSceneView(k)} className={`rounded border px-3 py-1.5 text-xs font-semibold ${sceneView === k ? "border-sky-500 bg-sky-950/40 text-sky-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"}`}>{l}</button>)}
           </div>
           {sceneView === "lab" && (
             <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the 3D lab…</div>}>
               <LabScene3D stateRef={labStateRef} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
+            </Suspense>
+          )}
+          {sceneView === "schematic" && (
+            <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the engineering schematic…</div>}>
+              <Schematic state={state} dispatch={dispatch} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} onShowInLab={() => setSceneView("lab")} />
             </Suspense>
           )}
           {sceneView === "engineering" && (
