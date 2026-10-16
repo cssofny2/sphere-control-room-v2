@@ -304,7 +304,7 @@ function reducer(state, action) {
       if (action.domain === "vna" && state.vna.calibrated) {
         if (action.patch.center !== undefined || action.patch.span !== undefined || action.patch.startFrequency !== undefined || action.patch.stopFrequency !== undefined) {
           next.vna.calibrated = false;
-          addAlarm(next, "VNA calibration invalidated due to frequency span modification.", "warning");
+          return addAlarm(next, "VNA calibration invalidated due to frequency span modification.", "warning");
         }
       }
       return next;
