@@ -304,7 +304,7 @@ function reducer(state, action) {
       if (action.domain === "vna" && state.vna.calibrated) {
         if (action.patch.center !== undefined || action.patch.span !== undefined || action.patch.startFrequency !== undefined || action.patch.stopFrequency !== undefined) {
           next.vna.calibrated = false;
-          addAlarm(next, "VNA calibration invalidated due to frequency span modification.", "warning");
+          return addAlarm(next, "VNA calibration invalidated due to frequency span modification.", "warning");
         }
       }
       return next;
@@ -762,7 +762,7 @@ export default function MetrologyLab() {
   const valid = validationResult.overall === "VALID";
   const unresolved = state.alarms.filter(a => !a.acknowledged).length;
   const active = state.ui.active;
-  const [fx, setFx] = useState({ reduced: typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches, hide: false });
+  const [fx, setFx] = useState(() => ({ reduced: typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches, hide: false }));
   FX = fx;
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
 
@@ -772,7 +772,8 @@ export default function MetrologyLab() {
   const recordQuality = !state.experiment.records.length ? "NO DATA" : validationResult.overall;
   const recordingState = state.experiment.active ? "RUNNING" : state.experiment.records.length > 0 ? "COMPLETE" : "IDLE";
 
-  const HelpInfo = ({ termKey }) => (
+  // Stable identity: a component defined inline would remount (and drop focus) on every 50 ms tick. `set` only calls the stable `dispatch`.
+  const HelpInfo = useMemo(() => ({ termKey }) => (
     <span
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); set("ui", { helpModal: GLOSSARY[termKey] || { title: termKey, desc: "Detailed metrology specification and operational documentation." } }); }}
       onKeyDown={(e) => {
@@ -789,7 +790,7 @@ export default function MetrologyLab() {
     >
       ?
     </span>
-  );
+  ), []);
 
   const performSweep = () => {
     if (state.vna.sweeping) return;
@@ -1408,15 +1409,27 @@ function VnaCalibrationModal({ state, dispatch, close }) {
   const [progress, setProgress] = useState(0);
   const [calibrating, setCalibrating] = useState(false);
 
+  const calTimers = useRef<{ interval: number | null; timeout: number | null }>({ interval: null, timeout: null });
+  const clearCalTimers = () => {
+    if (calTimers.current.interval !== null) window.clearInterval(calTimers.current.interval);
+    if (calTimers.current.timeout !== null) window.clearTimeout(calTimers.current.timeout);
+    calTimers.current = { interval: null, timeout: null };
+  };
+  // Closing the modal (Escape, X, unmount) must cancel an in-flight calibration.
+  useEffect(() => clearCalTimers, []);
+
   const startCal = () => {
+    if (calTimers.current.interval !== null || calTimers.current.timeout !== null) return;
     setCalibrating(true);
     let p = 0;
-    const interval = setInterval(() => {
+    calTimers.current.interval = window.setInterval(() => {
       p += 25;
       setProgress(p);
       if (p >= 100) {
-        clearInterval(interval);
-        setTimeout(() => {
+        if (calTimers.current.interval !== null) window.clearInterval(calTimers.current.interval);
+        calTimers.current.interval = null;
+        calTimers.current.timeout = window.setTimeout(() => {
+          calTimers.current.timeout = null;
           dispatch({ type: "CALIBRATE_VNA", calType });
           setCalibrating(false);
           close();
