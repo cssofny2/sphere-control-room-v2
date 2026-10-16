@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Menu, MoreHorizontal, Power, Search, Terminal, Maximize, Minimize2, Target } from 'lucide-react';
 
+import { VERSION_LABEL, VERSION_TITLE } from './siteInfo';
+
 type Props = {
   state: any;
   navOptions: { id: string; label: string }[];
@@ -53,6 +55,7 @@ export default function WorkspaceHeader(props: Props) {
         <a className="workspace-logo" href="https://spheredesci.org/demo" target="_blank" rel="noreferrer" aria-label="S.P.H.E.R.E. project website">
           <Target size={21} /><span>S.P.H.E.R.E.<small>SIMULATOR</small></span>
         </a>
+        <span className="app-version" data-app-version title={VERSION_TITLE} aria-label={VERSION_TITLE}>{VERSION_LABEL}</span>
       </div>
       <select className="workspace-view-select" aria-label="Active workspace" value={props.state.ui.active} onChange={e => props.onNavigate(e.target.value)}>
         {props.navOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
