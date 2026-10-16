@@ -156,3 +156,19 @@ assert.equal(s.experiment.contract.status, 'cancelled');
 assert.equal(L.reducer(s, { type: 'RECORD', record: { ...record, id: 'late-acquisition', contract: { id: 'late-acquisition', runId: s.experiment.id } } }), s);
 assert.equal(s.experiment.records.length, 1);
 console.log('PASS run-bound identity/deduplication guard without claiming full runner cancellation');
+
+{
+  // Changing the VNA span invalidates calibration and must keep the operator-visible alarm.
+  const base = fresh();
+  base.vna.calibrated = true;
+  const changed = L.reducer(base, { type: 'PATCH', domain: 'vna', patch: { span: 1234 } });
+  assert.equal(changed.vna.calibrated, false);
+  assert.equal(changed.alarms.filter(a => /calibration invalidated/i.test(a.text)).length, 1);
+  assert.equal(base.vna.calibrated, true, 'input state must not be mutated');
+  const quiet = L.reducer(fresh(), { type: 'PATCH', domain: 'vna', patch: { span: 1234 } });
+  assert.equal(quiet.alarms.length, 0, 'no alarm when the VNA was not calibrated');
+  const unrelated = L.reducer(base, { type: 'PATCH', domain: 'vna', patch: { rf: true } });
+  assert.equal(unrelated.vna.calibrated, true);
+  assert.equal(unrelated.alarms.length, 0);
+  console.log('PASS VNA span change keeps the calibration-invalidated alarm');
+}
