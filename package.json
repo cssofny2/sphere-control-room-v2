@@ -7,11 +7,12 @@
     "node": "24.x"
   },
   "scripts": {
-    "test": "node scripts/scientist-brain.test.mjs && node scripts/overview-help.test.mjs && node scripts/plan-contract.test.mjs && node scripts/simulator-regression.mjs && node scripts/cancellation.test.mjs && node scripts/sweep-race.test.mjs",
+    "test": "node scripts/build-knowledge.mjs --check && node scripts/scientist-brain.test.mjs && node scripts/technician-dialogue.test.mjs && node scripts/overview-help.test.mjs && node scripts/plan-contract.test.mjs && node scripts/simulator-regression.mjs && node scripts/cancellation.test.mjs && node scripts/sweep-race.test.mjs",
     "dev": "vite",
     "build": "tsc -p tsconfig.domain.json && tsc -b && vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "build:knowledge": "node scripts/build-knowledge.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -11,7 +11,12 @@ import { buildLab, type Lab } from './buildLab';
 import { Scientist } from './Scientist';
 import { Foley } from './foley';
 import type { Quality } from './labUtil';
-import { createBrain, extractFacts, type Remark } from './scientistBrain';
+import { createTechnician, DEFAULT_SETTINGS, type Settings, type Technician } from '../technician/dialogue';
+import { extractFactsPlus } from '../technician/facts';
+import TechnicianPanel from '../technician/TechnicianPanel';
+import type { Focus, Mood } from './scientistBrain';
+
+type Say = { text: string; focus: Focus; mood: Mood; kind: string };
 
 type Props = { stateRef: React.MutableRefObject<any>; reduced?: boolean; onHelp?: (key: string) => void };
 type CamPreset = { pos: [number, number, number]; target: [number, number, number] };
@@ -33,6 +38,11 @@ function Typed({ text }: { text: string }) {
 }
 
 type QualitySel = 'auto' | 'high' | 'low';
+const SETTINGS_KEY = 'sphere.technician.settings';
+function loadSettings(): Settings {
+  try { const j = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); if (j && typeof j === 'object') return { ...DEFAULT_SETTINGS, ...j, mode: ['coach', 'quiet', 'chatty'].includes(j.mode) ? j.mode : 'coach' }; } catch { /* ignore */ }
+  return { ...DEFAULT_SETTINGS };
+}
 const urlParam = (k: string) => { try { return new URLSearchParams(window.location.search).get(k); } catch { return null; } };
 
 function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
@@ -42,7 +52,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
   const hoverEl = useRef<HTMLDivElement>(null);
   const reducedRef = useRef(reduced); reducedRef.current = reduced;
   const onHelpRef = useRef(onHelp); onHelpRef.current = onHelp;
-  const api = useRef<{ lab?: Lab; cam?: THREE.PerspectiveCamera; controls?: OrbitControls; sci?: Scientist; go?: (k: string) => void; brain?: ReturnType<typeof createBrain>; say?: (r: Remark) => void; foley?: Foley; snapshot?: () => void; setQ?: (q: QualitySel) => void }>({});
+  const api = useRef<{ lab?: Lab; cam?: THREE.PerspectiveCamera; controls?: OrbitControls; sci?: Scientist; go?: (k: string) => void; tech?: Technician; say?: (r: Say) => void; foley?: Foley; snapshot?: () => void; setQ?: (q: QualitySel) => void }>({});
   const [failed, setFailed] = useState(false);
   const [cutaway, setCutaway] = useState(true);
   const [showSci, setShowSci] = useState(true);
@@ -52,18 +62,21 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
   const [qualitySel, setQualitySel] = useState<QualitySel>(() => { const f = urlParam('labq'); return f === 'high' || f === 'low' ? f : 'auto'; });
   const [effQuality, setEffQuality] = useState<Quality>('high');
   const [part, setPart] = useState<{ label: string; help: string } | null>(null);
-  const [bubble, setBubble] = useState<(Remark & { n: number }) | null>(null);
+  const [bubble, setBubble] = useState<(Say & { n: number }) | null>(null);
   const showSciRef = useRef(true); showSciRef.current = showSci;
   const followRef = useRef(false); followRef.current = follow;
   const qualitySelRef = useRef(qualitySel); qualitySelRef.current = qualitySel;
   const bubbleTimer = useRef(0);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+  const settingsRef = useRef(settings);
+  const [, setLogN] = useState(0);
   const counter = useRef(0);
 
-  const speak = useCallback((r: Remark) => {
+  const speak = useCallback((r: Say) => {
     if (!showSciRef.current) return;
     const n = ++counter.current; setBubble({ ...r, n });
     window.clearTimeout(bubbleTimer.current);
-    bubbleTimer.current = window.setTimeout(() => setBubble(b => (b && b.n === n ? null : b)), Math.min(11000, 4200 + r.text.length * 55));
+    bubbleTimer.current = window.setTimeout(() => setBubble(b => (b && b.n === n ? null : b)), Math.min(18000, 4200 + r.text.length * 55));
     api.current.sci?.say(r.focus, r.mood, r.text.length, performance.now());
   }, []);
 
@@ -83,10 +96,11 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
     controls.minDistance = 0.6; controls.maxDistance = 9; controls.maxPolarAngle = Math.PI * 0.49; controls.update();
     const sci = new Scientist(); sci.reduced = reducedRef.current; lab.scene.add(sci.root); sci.setWorld(lab.anchors); sci.attachPhone(lab.phone);
     const foley = new Foley(); sci.onStep = () => foley.footstep(); sci.onEvent = n => { if (n === 'knob') lab.turnKnob('vna', 0.5); if (n === 'pickup') foley.latch(); if (n === 'hangup') foley.latch(); };
-    const brain = createBrain();
-    api.current = { lab, cam, controls, sci, brain, foley };
+    const tech = createTechnician({ settings: loadSettings() });
+    tech.setSettings(settingsRef.current);
+    api.current = { lab, cam, controls, sci, tech, foley };
     lab.setCutaway(true);
-    if (urlParam('labdebug') !== null) (window as any).__lab = { lab, sci, cam, controls, brain, foley };
+    if (urlParam('labdebug') !== null) (window as any).__lab = { lab, sci, cam, controls, tech, foley };
 
     // ── quality, post-processing ──
     let eff: Quality = 'high'; let composer: EffectComposer | null = null; let frames = 0, ema = 0.016, lastRender = 0;
@@ -158,7 +172,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
       const s = stateRef.current; const t = now / 1000;
       lab.update(s, dt, t);
       sci.reduced = reducedRef.current; sci.root.visible = showSciRef.current; sci.laserOn = !!(s.ldv?.power && s.ldv?.shutter); foley.muted = !soundRef.current; if (showSciRef.current) sci.update(dt, cam.position);
-      brainAcc += dt; if (brainAcc > 0.25) { brainAcc = 0; const r = brain.observe(extractFacts(s), now); if (r) speak(r); }
+      brainAcc += dt; if (brainAcc > 0.25) { brainAcc = 0; const r = tech.observe(extractFactsPlus(s), now); if (r) { speak(r); setLogN(tech.log.length + Math.random()); } }
       if (tween) { tween.t = Math.min(1, tween.t + dt / 0.9); const e = tween.t * tween.t * (3 - 2 * tween.t); cam.position.lerpVectors(tween.fp, tween.tp, e); controls.target.lerpVectors(tween.ft, tween.tt, e); if (tween.t >= 1) tween = null; }
       else if (followRef.current && showSciRef.current) { const h = sci.position; controls.target.lerp(v3.set(h.x, 1.1, h.z), Math.min(1, dt * 2)); }
       controls.update();
@@ -184,7 +198,9 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
   useEffect(() => { if (!showSci) setBubble(null); }, [showSci]);
   useEffect(() => { api.current.setQ?.(qualitySel); }, [qualitySel]);
 
-  const talk = () => { const b = api.current.brain; if (!b) return; if (!showSci) setShowSci(true); speak(b.chat(extractFacts(stateRef.current), performance.now())); };
+  const talk = () => { const b = api.current.tech; if (!b) return; if (!showSci) setShowSci(true); speak(b.chat(extractFactsPlus(stateRef.current), performance.now())); setLogN(Math.random()); };
+  const ask = (q: string) => { const b = api.current.tech; if (!b) return; if (!showSci) setShowSci(true); speak(b.ask(q, extractFactsPlus(stateRef.current), performance.now()).remark); setLogN(Math.random()); };
+  const changeSettings = (p: Partial<Settings>) => { const next = { ...settingsRef.current, ...p }; settingsRef.current = next; setSettings(next); api.current.tech?.setSettings(next); try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* storage may be blocked */ } };
   const views = useMemo(() => [['overview', 'Overview'], ['chamber', 'Chamber'], ['stage', 'Stage close-up'], ['rack', 'Instrument rack'], ['bench', 'Workstation']], []);
 
   if (failed) return <div className="ls-root"><div className="ls-fallback">The realistic 3D lab needs WebGL, which isn't available in this browser. Use the Engineering model view instead.</div></div>;
@@ -222,6 +238,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp }: Props) {
         {!photo && <div className="ls-note">Stage motion is exaggerated ×3 so you can see it. Drag to orbit · scroll to zoom · click a part to look at it.</div>}
         {!photo && <div className="ls-quality">{effQuality === 'high' ? 'High quality' : 'Low quality'}{qualitySel === 'auto' ? ' (auto)' : ''}</div>}
       </div>
+      {!photo && <TechnicianPanel settings={settings} onSettings={changeSettings} log={api.current.tech?.log ?? []} onAsk={ask} />}
       <div className="ls-sr" role="status" aria-live="polite">{bubble ? `Dr. Wire says: ${bubble.text}` : ''}</div>
     </div>
   );
