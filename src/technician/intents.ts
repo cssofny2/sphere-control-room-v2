@@ -1,9 +1,13 @@
 // Offline understanding of simple spoken or typed commands, used when the AI service is not available.
 // The language model handles anything more complicated.
+import { placeFrom } from './smalltalk';
 export type Intent =
   | { type: 'task'; id: string; params: Record<string, unknown> }
   | { type: 'cancel' }
   | { type: 'estop' }
+  | { type: 'lookup'; query: string }
+  | { type: 'food'; place: string | null; request: string }
+  | { type: 'part'; part: string; qty: number; urgent: boolean }
   | null;
 
 const NUM = String.raw`(-?\d+(?:\.\d+)?)`;
@@ -34,6 +38,17 @@ export function parseCommand(text: string, state?: any): Intent {
   if (/\b(explain|look at|check|what('| i)?s)\b.*\balarm\b/.test(q) && /\b(explain|look at|check)\b/.test(q)) return T('explain_alarm');
   if (/\bfault drill\b/.test(q) && /\b(start|run|begin)\b/.test(q)) return T('fault_drill');
   if (/\bexport\b/.test(q)) return T('export_data', { format: /\bjson\b/.test(q) ? 'json' : 'csv' });
+  const FOOD = /\b(food|lunch|dinner|breakfast|snack|doordash|door dash|mcdonald'?s?|burgers?|fries|big mac|nuggets|pizza|sandwich(es)?|tacos?|sushi|something to eat)\b/;
+  if (/\b(order|get|grab|put in|place|build)\b/.test(q) && FOOD.test(q) && !/\b(what|why|how|explain)\b/.test(q)) return { type: 'food', place: placeFrom(text), request: text.slice(0, 120) };
+  const lk = q.match(/\b(?:look up|lookup|google|search (?:the web |the internet |online )?(?:for|up)?|find out|look into|check online (?:for|about)?)\s+(.{3,160})$/);
+  if (lk) return { type: 'lookup', query: lk[1].replace(/^(about|for|on)\s+/, '').trim() };
+  const pt = q.match(/\b(?:order|buy|purchase|reorder|requisition)\s+(?:(\d+|an?|one|two|three|four|five|six|some|another|new)\s+)?(.{3,80}?)(?:\s+(?:for|from|on|at|asap|please|today|right away|now)\b.*)?$/);
+  if (pt && !FOOD.test(q) && !/\b(operations?|magnitude|of)\b/.test(pt[2])) {
+    const w: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, some: 1, another: 1, new: 1 };
+    const qty = pt[1] ? (/^\d+$/.test(pt[1]) ? Number(pt[1]) : w[pt[1]] ?? 1) : 1;
+    const part = pt[2].replace(/\b(please|asap)\b/g, '').replace(/\s+/g, ' ').trim();
+    if (part.length >= 3) return { type: 'part', part, qty, urgent: /\b(asap|urgent|rush|overnight|expedite|right away|as soon as possible)\b/.test(q) };
+  }
   return null;
 }
 

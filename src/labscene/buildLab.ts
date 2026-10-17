@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { canvasTex, glowTex, roughnessMapTex, type CanvasTex, type Quality } from './labUtil';
 import { buildDetail, type PhoneRig, type Pickable } from './labDetail';
+import { drawDesk } from './deskRender';
+import type { DeskState } from '../technician/desk';
 
 // A bright, realistic-looking laboratory: stainless thermal-vacuum chamber with door and
 // viewports, an XYZ stage and sphere inside, vacuum pumps, a laser vibrometer on a gantry, an
@@ -19,6 +21,8 @@ export type Lab = {
   spherePos: THREE.Vector3;
   anchors: Record<string, THREE.Vector3>;
   phone: PhoneRig; pickables: Pickable[]; setQuality: (q: Quality) => void; turnKnob: (panel: string, delta: number) => void;
+  /** Shows what is on Dr. Wire's computer (left monitor). */
+  setDesk: (st: DeskState) => void;
 };
 
 export function buildLab(renderer: THREE.WebGLRenderer): Lab {
@@ -258,11 +262,18 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   const wsG = new THREE.Group(); wsG.position.set(2.9, 0, -1.9); scene.add(wsG);
   add(box(2.0, 0.05, 0.8), M.laminate, wsG, 0, 0.9, 0); for (const x of [-0.95, 0.95]) for (const z of [-0.35, 0.35]) add(box(0.05, 0.88, 0.05), M.alu, wsG, x, 0.44, z);
   add(box(1.9, 0.04, 0.7), M.alu, wsG, 0, 0.3, 0);
-  const monTex = canvasTex(512, 300, () => {});
-  add(box(0.62, 0.38, 0.03), M.black, wsG, -0.2, 1.22, -0.12); add(box(0.04, 0.2, 0.04), M.dark, wsG, -0.2, 1.03, -0.14); add(box(0.24, 0.015, 0.16), M.dark, wsG, -0.2, 0.935, -0.12);
-  add(new THREE.PlaneGeometry(0.58, 0.34), track(new THREE.MeshBasicMaterial({ map: monTex.tex })), wsG, -0.2, 1.22, -0.103, false);
-  add(box(0.4, 0.015, 0.13), M.dark, wsG, -0.2, 0.93, 0.18); add(box(0.5, 0.35, 0.3), M.alu, wsG, 0.55, 1.1, -0.1);
-  add(new THREE.CylinderGeometry(0.04, 0.035, 0.09, 16), M.white, wsG, 0.5, 0.97, 0.25);
+  // Two large LCD monitors: left = his browser / email, right = the SPHERE acquisition software. Each is 0.74 m wide with a 1024 x 600 texture.
+  const monTex = canvasTex(1024, 600, () => {}), deskTex = canvasTex(1024, 600, () => {});
+  const SCR_W = 0.74, SCR_H = 0.43;
+  const makeMonitor = (x: number, yaw: number, tex: CanvasTex) => {
+    const g = new THREE.Group(); g.position.set(x, 0, -0.16); g.rotation.y = yaw; wsG.add(g);
+    add(box(SCR_W + 0.04, SCR_H + 0.04, 0.035), M.black, g, 0, 1.2, 0);
+    add(box(0.05, 0.22, 0.04), M.dark, g, 0, 1.0, -0.02); add(box(0.3, 0.015, 0.2), M.dark, g, 0, 0.9375, 0.0);
+    add(new THREE.PlaneGeometry(SCR_W, SCR_H), track(new THREE.MeshBasicMaterial({ map: tex.tex, toneMapped: false })), g, 0, 1.2, 0.019, false);
+  };
+  makeMonitor(-0.43, 0.11, deskTex); makeMonitor(0.36, -0.11, monTex);
+  add(box(0.4, 0.015, 0.13), M.dark, wsG, -0.02, 0.93, 0.2); add(box(0.2, 0.38, 0.4), M.alu, wsG, 0.88, 1.12, -0.05);
+  add(new THREE.CylinderGeometry(0.04, 0.035, 0.09, 16), M.white, wsG, 0.5, 0.97, 0.3);
   const chair = new THREE.Group(); chair.position.set(2.9, 0, -1.15); scene.add(chair); add(box(0.45, 0.06, 0.45), M.dark, chair, 0, 0.5, 0); add(box(0.45, 0.45, 0.06), M.dark, chair, 0, 0.78, 0.2); add(new THREE.CylinderGeometry(0.03, 0.03, 0.45, 12), M.alu, chair, 0, 0.25, 0); for (let i = 0; i < 5; i++) { const a = i * 1.2566; add(box(0.28, 0.025, 0.04), M.dark, chair, Math.cos(a) * 0.14, 0.03, Math.sin(a) * 0.14).rotation.y = -a; }
 
   // ── redraw helpers for live screens ──
@@ -286,7 +297,8 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
       if (p.name === 'daq') { c.fillStyle = '#e2e8f0'; mono(c, 16); c.fillText(`records ${(s.experiment.records || []).length}`, 8, h - 10); }
     });
   };
-  const drawMonitor = (s: any) => monTex.redraw((c, w, h) => {
+  const drawMonitor = (s: any) => monTex.redraw((c, w0, h0) => {
+    c.setTransform(2, 0, 0, 2, 0, 0); const w = w0 / 2, h = h0 / 2;
     c.fillStyle = '#f4f7fa'; c.fillRect(0, 0, w, h); c.fillStyle = '#1f6feb'; c.fillRect(0, 0, w, 38); c.fillStyle = '#fff'; c.font = '700 22px system-ui'; c.fillText('SPHERE Acquisition', 14, 26);
     const e = s.experiment; c.fillStyle = '#1f3a5f'; c.font = '600 22px system-ui'; c.fillText(e.scanActive ? 'Scan in progress' : (e.records || []).length ? 'Scan complete' : 'Idle', 14, 80);
     c.fillStyle = '#d6dde5'; c.fillRect(14, 96, w - 28, 18); c.fillStyle = '#22c55e'; c.fillRect(14, 96, (w - 28) * (e.scanProgress || 0), 18);
@@ -299,7 +311,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   });
 
   // ── per-frame update ──
-  let acc = 0;
+  let acc = 0; let deskSt: DeskState = { screen: { kind: 'idle' }, handoff: null, keys: 0, rev: 0 }, deskRev = -1, deskBlink = -1, deskMin = -1;
   const target = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
   let doorAng = 0, jitter = 0; let detailUpdate: (s: any, dt: number, t: number) => void = () => {};
@@ -342,11 +354,12 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     beacon.forEach((m, i) => { m.emissiveIntensity = (lvl === i ? 1.6 * blink : 0.08); });
     lamp.intensity = c.doorOpen ? 3.2 : 2.2;
     // slow refresh of the canvases
+    { const blink = Math.floor(t * 2) % 2, minute = Math.floor(Date.now() / 60000); if (deskRev !== deskSt.rev || deskBlink !== blink || deskMin !== minute) { deskRev = deskSt.rev; deskBlink = blink; deskMin = minute; deskTex.redraw((c, w, h) => { c.setTransform(1, 0, 0, 1, 0, 0); drawDesk(c, w, h, deskSt, blink === 1, new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })); }); } }
     acc += dt; if (acc > 0.25) { acc = 0; panels.forEach(p => drawScreen(p, s)); drawMonitor(s); drawGauge(s); }
   };
 
   const anchors: Record<string, THREE.Vector3> = {
-    gauge: new THREE.Vector3(-R - 0.17 - 0.0, CH_Y + 0.04, -0.2), notebook: wsG.localToWorld(new THREE.Vector3(-0.6, 0.94, 0.2)), keyboard: wsG.localToWorld(new THREE.Vector3(-0.2, 0.95, 0.18)), monitor: wsG.localToWorld(new THREE.Vector3(-0.2, 1.22, -0.1)), rackKnob: rack.localToWorld(new THREE.Vector3(0.18, 1.1, 0.28)), doorEdge: new THREE.Vector3(-0.2, CH_Y, 0.72), ldvHead: new THREE.Vector3(0, 2.0, 0.1),
+    gauge: new THREE.Vector3(-R - 0.17 - 0.0, CH_Y + 0.04, -0.2), notebook: wsG.localToWorld(new THREE.Vector3(-0.6, 0.94, 0.2)), keyboard: wsG.localToWorld(new THREE.Vector3(-0.02, 0.95, 0.2)), monitor: wsG.localToWorld(new THREE.Vector3(-0.02, 1.2, -0.14)), rackKnob: rack.localToWorld(new THREE.Vector3(0.18, 1.1, 0.28)), doorEdge: new THREE.Vector3(-0.2, CH_Y, 0.72), ldvHead: new THREE.Vector3(0, 2.0, 0.1),
     chamber: new THREE.Vector3(0, CH_Y, 0.2), door: new THREE.Vector3(-0.3, CH_Y, 0.7), stage: spherePos, rack: new THREE.Vector3(-3.15, 1.2, -0.4), bench: new THREE.Vector3(2.7, 1.2, -1.9), board: new THREE.Vector3(-0.2, 1.7, -2.5),
   };
   const detail = buildDetail({ scene, room, bench, ch, rack, stageRoot, yCar, xCar, M, track, add, box, cuttable, R, L, CH_Y, panels: panels.map(p => ({ name: p.name, y: p.y, h: p.h })), rfCurve, fibreCurve, parts: { chamber: ch, stage: stageRoot, ldv: ldvG, pumps: pumpG }, wsG }, knobs);
@@ -357,7 +370,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     vna: { power: false }, ldv: { power: false }, clock: { power: false }, scope: { power: false }, facility: { power: false }, experiment: {}, alarms: [],
   }, 0.016, 0);
   detailUpdate = detail.update;
-  const dispose = () => { detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
+  const dispose = () => { detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, deskTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
   void target; void sl; void wl; void back; void left; void bez; void win; void dRing; void dBody; void topPort; void leftPort1; void leftPort2; void rightPort; void capOut; void cap; void liner; void shell; void fl;
-  return { scene, update, setCutaway, dispose, spherePos, anchors: { ...anchors, ...detail.anchors }, phone: detail.phone, pickables: detail.pickables, setQuality: (q: Quality) => { detail.setQuality(q); key.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024); key.shadow.map?.dispose(); (key.shadow as any).map = null; }, turnKnob: detail.turnKnob };
+  return { scene, update, setCutaway, dispose, spherePos, setDesk: (st: DeskState) => { deskSt = st; }, anchors: { ...anchors, ...detail.anchors }, phone: detail.phone, pickables: detail.pickables, setQuality: (q: Quality) => { detail.setQuality(q); key.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024); key.shadow.map?.dispose(); (key.shadow as any).map = null; }, turnKnob: detail.turnKnob };
 }

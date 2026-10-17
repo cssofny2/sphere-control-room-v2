@@ -1,0 +1,10 @@
+// The tools Dr. Wire can use at his computer. Defined once so the browser and the server agree on the names.
+export const DESK_TOOLS = [
+  { name: 'look_it_up', description: "Go to the computer and search the web when you do not know an answer (general knowledge, parts, news, anything outside the lab notes). The search shows on his screen and you get the answer back as text; then say it naturally in your own words and mention where it came from. If the result says the search failed, say so plainly and do not guess.",
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'What to search for, as a short question or phrase', maxLength: 200 } }, required: ['query'], additionalProperties: false } },
+  { name: 'order_food', description: "Build a delivery cart on DoorDash at the computer when the operator wants lunch or food. This only prepares the cart: the operator checks out and pays on DoorDash themselves with the button on the screen. Never say food was ordered.",
+    input_schema: { type: 'object', properties: { restaurant: { type: 'string', description: "Restaurant, e.g. McDonald's", maxLength: 40 }, items: { type: 'string', description: 'What they want, if they said', maxLength: 120 } }, required: ['restaurant'], additionalProperties: false } },
+  { name: 'order_part', description: "Write a purchase requisition for a part or supply at the computer. He asks the operator to approve it first, then submits it to purchasing and calls the operator back with the estimated arrival date. Nothing is paid by this app. Say 'requisition submitted' or 'order request', never 'bought'.",
+    input_schema: { type: 'object', properties: { part: { type: 'string', description: 'What to order, in plain words', maxLength: 80 }, quantity: { type: 'number', minimum: 1, maximum: 99 }, urgent: { type: 'boolean', description: 'True only if the operator asked for it quickly' } }, required: ['part'], additionalProperties: false } },
+] as const;
+export const DESK_TOOL_NAMES: string[] = DESK_TOOLS.map(t => t.name);
