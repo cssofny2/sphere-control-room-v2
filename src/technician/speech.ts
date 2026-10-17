@@ -38,6 +38,9 @@ function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null 
   return en.find(v => /en[-_]US/i.test(v.lang)) || en[0] || null;
 }
 
+/** Android Chrome gives the microphone to one user at a time, so a held getUserMedia stream starves speech recognition. */
+export const isAndroid = () => typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
+
 export function createBrowserSpeech(): SpeechIO {
   const w = window as any;
   const Rec = w.SpeechRecognition || w.webkitSpeechRecognition;
@@ -51,14 +54,16 @@ export function createBrowserSpeech(): SpeechIO {
   const startRec = () => {
     if (!Rec || !wantListen) return;
     try {
-      rec = new Rec(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'; rec.maxAlternatives = 1;
+      rec = new Rec(); rec.continuous = !isAndroid();   // Android Chrome repeats text in continuous mode; it restarts after every phrase instead
+      rec.interimResults = true; rec.lang = 'en-US'; rec.maxAlternatives = 1;
       rec.onresult = (e: any) => {
-        for (let i = e.resultIndex; i < e.results.length; i++) { const r = e.results[i]; const t = String(r[0]?.transcript || '').trim(); if (t) tr.emit(t, !!r.isFinal); }
+        for (let i = e.resultIndex; i < e.results.length; i++) { const r = e.results[i]; const t = String(r[0]?.transcript || '').trim(); if (t) { restarts = 0; tr.emit(t, !!r.isFinal); } }
       };
       rec.onerror = (e: any) => {
         const code = String(e?.error || 'error');
         if (code === 'no-speech' || code === 'aborted') return;
         if (code === 'not-allowed' || code === 'service-not-allowed') { wantListen = false; er.emit('mic-denied'); return; }
+        if (code === 'audio-capture') { wantListen = false; er.emit('mic-busy'); return; }
         if (code === 'network' || code === 'language-not-supported') { wantListen = false; er.emit('no-speech-service'); return; }
         er.emit(code);
       };
@@ -106,7 +111,7 @@ registerSpeechProvider('browser', createBrowserSpeech);
 export function createMicMonitor(stream: MediaStream) {
   const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
   let ctx: AudioContext | null = null, analyser: AnalyserNode | null = null, buf: Uint8Array<ArrayBuffer> | null = null;
-  try { ctx = new AC(); const src = ctx!.createMediaStreamSource(stream); analyser = ctx!.createAnalyser(); analyser.fftSize = 512; src.connect(analyser); buf = new Uint8Array(new ArrayBuffer(analyser.fftSize)); } catch { ctx = null; }
+  try { if (!stream.getAudioTracks().some(t => t.readyState === 'live')) throw new Error('no live audio'); ctx = new AC(); const src = ctx!.createMediaStreamSource(stream); analyser = ctx!.createAnalyser(); analyser.fftSize = 512; src.connect(analyser); buf = new Uint8Array(new ArrayBuffer(analyser.fftSize)); } catch { ctx = null; }
   return {
     available: !!ctx,
     level(): number { if (!analyser || !buf) return 0; analyser.getByteTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; s += x * x; } return Math.min(1, Math.sqrt(s / buf.length) * 3); },
@@ -117,6 +122,11 @@ export function createMicMonitor(stream: MediaStream) {
 /** Asks for the microphone. Must be called from a click so the browser shows its permission prompt. */
 export async function requestMic(): Promise<{ ok: true; stream: MediaStream } | { ok: false; reason: 'denied' | 'unsupported' | 'error' }> {
   if (!navigator.mediaDevices?.getUserMedia) return { ok: false, reason: 'unsupported' };
-  try { const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); return { ok: true, stream }; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    // On Android the permission is all we need from this stream. Holding it open would block speech recognition, so release it now (barge-in detection is off there).
+    if (isAndroid()) stream.getTracks().forEach(t => t.stop());
+    return { ok: true, stream };
+  }
   catch (e) { const n = (e as DOMException)?.name; return { ok: false, reason: n === 'NotAllowedError' || n === 'SecurityError' ? 'denied' : n === 'NotFoundError' ? 'unsupported' : 'error' }; }
 }

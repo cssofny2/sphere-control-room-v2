@@ -1,7 +1,7 @@
 {
   "name": "sphere-metrology-lab",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": "Michael P. Goodman",
   "type": "module",
   "engines": {
