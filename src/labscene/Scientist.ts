@@ -193,7 +193,9 @@ export class Scientist {
     this.mug = part(new THREE.CylinderGeometry(0.035, 0.032, 0.08, 20), ceramic, this.hands[1].root, 0, -0.07, 0.04); this.mug.visible = false;
     part(new THREE.TorusGeometry(0.02, 0.005, 6, 12, Math.PI), ceramic, this.mug, 0.04, 0, 0).rotation.z = -Math.PI / 2;
     this.root.position.set(WAYPOINTS.backRight[0], 0, WAYPOINTS.backRight[1]); this.root.rotation.y = this.heading; this.lastPos.copy(this.root.position);
-    this.body.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = !(m.material as THREE.Material).transparent; m.receiveShadow = false; } });
+    // Only the large parts cast shadows: glasses, eyes, buttons and the like are invisible in a shadow and cost a draw call each.
+    this.body.updateMatrixWorld(true); const whole = new THREE.Box3().setFromObject(this.body), tall = Math.max(0.001, whole.max.y - whole.min.y), bb = new THREE.Box3(), sz = new THREE.Vector3();
+    this.body.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh) { bb.setFromObject(m); bb.getSize(sz); m.castShadow = !(m.material as THREE.Material).transparent && Math.max(sz.x, sz.y, sz.z) >= tall * 0.07; m.receiveShadow = false; } });
   }
 
   // ───────────────────────── public API ─────────────────────────

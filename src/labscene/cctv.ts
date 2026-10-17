@@ -19,7 +19,7 @@ export function buildCameraProps(scene: THREE.Scene) {
   const leds: THREE.MeshBasicMaterial[] = [];
   const groups = new Map<number, THREE.Group>();
   for (const cam of CAMERAS) {
-    const g = new THREE.Group(); g.name = `cctv-${cam.id}`; g.position.set(...cam.pos);
+    const g = new THREE.Group(); g.name = `cctv-${cam.id}`; g.userData.noMerge = true; g.position.set(...cam.pos);
     // The housing looks along the camera's view direction; the bracket reaches back to the wall.
     const look = new THREE.Vector3(...cam.target).sub(g.position);
     const wallDir = new THREE.Vector3(Math.abs(cam.pos[0] + 4.4) < 0.3 ? -1 : 0, 0, Math.abs(cam.pos[0] + 4.4) < 0.3 ? 0 : -1);

@@ -2,6 +2,7 @@
 // cloud speech provider can replace the browser one later without touching the call logic.
 
 import { chooseVoice, shapeSpeech, voiceScore } from './speechShape';
+import { withCloudVoice } from './cloudSpeech';
 
 export interface SpeechIO {
   readonly supported: { listen: boolean; speak: boolean };
@@ -24,6 +25,8 @@ export interface SpeechIO {
   voices?(): string[];
   setVoice?(name: string | null): void;
   currentVoice?(): string;
+  /** Present when a neural "studio" voice can be used instead of the browser voice (needs the server-side key). */
+  cloud?: { available(): boolean; enabled(): boolean; setEnabled(on: boolean): void; ready(): Promise<boolean> };
   dispose(): void;
 }
 
@@ -120,6 +123,8 @@ export function createBrowserSpeech(): SpeechIO {
   };
 }
 registerSpeechProvider('browser', createBrowserSpeech);
+/** Browser listening plus the neural voice when the server has it on; falls back to the browser voice by itself. */
+registerSpeechProvider('studio', () => withCloudVoice(createBrowserSpeech()));
 
 /** Watches the microphone loudness (0..1) so the call can detect the operator talking over Dr. Wire (barge-in). */
 export function createMicMonitor(stream: MediaStream) {
