@@ -2,6 +2,20 @@
 
 Versions follow semantic versioning. The version lives in `package.json` and is shown in the top-left corner of the app next to the S.P.H.E.R.E. logo.
 
+## [1.3.0] - 2026-10-17
+
+### Added
+- Dr. Wire asks who he is speaking with when he picks up the phone and uses the first name now and then (not in every sentence). The name is kept in memory for the page only, is never written to storage, and is sent to the AI service with your questions. He re-confirms it on the next call, and respects "I'd rather not say".
+- Many different ways of not knowing: ten "I don't know" phrasings, eight "let me look it up" lead-ins, "I'm not sure, but..." hedges for weak matches, and the language model is told to vary its wording too. No phrase repeats twice in a row.
+- Search almost any topic: Brave Search (if `BRAVE_SEARCH_API_KEY` is set) or Claude web search, then Claude's general knowledge when search is unavailable (clearly labelled "not a live search"), then Wikipedia straight from the browser when the service is not set up. The desk shows the result type and he says where the answer came from.
+- A more natural voice: lab abbreviations and units are pronounced properly (V N A, kilohertz, 1e-3), speech is cut into phrases with their own pace, pitch and pauses (questions rise, "Hmm," is slower), the best male English voice the browser offers is chosen automatically, and a voice picker appears in the call bar.
+- A realistic Dr. Wire: a solid, shaded figure with proportioned head, face, glasses, hair, a blue shirt, trousers, shoes and an open white lab coat. The S.P.H.E.R.E. logo is on the left chest and large on the back, with an ID badge and pocket outlines.
+- Screensaver on his left monitor after 90 seconds of no use (a turning copper sphere and a 230 kHz trace). It wakes when he uses the computer.
+- Three security cameras mounted in the lab (blinking red lights) and a Cameras control: Cam 1 (overview), Cam 2 (workstation), Cam 3 (chamber and rack) as fixed views with a time stamp and REC light, plus an All cams grid.
+
+### Changed
+- The greeting is "Lab, Dr. Wire speaking. Who am I speaking with?"; spoken text says "Doctor Wire".
+
 ## [1.2.1] - 2026-10-17
 
 ### Fixed

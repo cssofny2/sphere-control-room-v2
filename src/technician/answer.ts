@@ -34,7 +34,7 @@ export function search(question: string, kb: KBEntry[] = KNOWLEDGE, limit = 3): 
   return hits.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
-const firstSentences = (t: string, n: number) => (t.match(/[^.!?]+[.!?]+(\s|$)/g) || [t]).slice(0, n).join('').trim();
+const firstSentences = (t: string, n: number) => (t.match(/(?:[^.!?]|\.(?=\d))+[.!?]+(?=\s|$)\s*/g) || [t]).slice(0, n).join('').trim();   // a decimal point (1.5 kHz) is not a sentence end
 
 export type Answer = { text: string; known: boolean; sources: string[]; topic?: string };
 

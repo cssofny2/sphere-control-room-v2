@@ -38,7 +38,7 @@ def ask(s, text):
 def scenario_lookup():
     with sync_playwright() as p:
         s = Session(p, mock=False); connect(s)
-        ask(s, "what time is it?"); s.wait_for("window.__spoken.some(t => /^It's \\d{1,2}:\\d\\d (AM|PM)\\.$/.test(t))", 20, "time")
+        ask(s, "what time is it?"); s.wait_for("window.__spoken.some(t => /^It's \\d{1,2}:\\d\\d (AM|PM|A M|P M)\\.$/.test(t))", 20, "time")
         check("he tells the time", True)
         ask(s, "what time are you working until?"); s.wait_for("window.__spoken.some(t => /five PM|shift/i.test(t))", 20, "shift")
         check("he answers when his shift ends", True)
@@ -46,7 +46,8 @@ def scenario_lookup():
         s.wait_for("document.querySelector('[data-desk-screen]')?.dataset.screenKind === 'browser'", 60, "browser on his screen")
         check("the search appears on his workstation screen", True)
         s.wait_for("/liquid nitrogen/i.test(document.querySelector('[data-desk-screen]')?.textContent || '') && /Search box|Results/.test(document.querySelector('[data-desk-screen]').textContent)", 60, "query typed")
-        s.wait_for("window.__spoken.some(t => /here's what I found.*196/.test(t))", 90, "answer read aloud")
+        s.wait_for("/here's what I found.*196/.test(window.__spoken.join(' '))", 90, "answer read aloud")
+        s.wait_for("/example dot org/.test(window.__spoken.join(' '))", 30, "source named")
         check("he reads the answer naturally and names the source", s.js("window.__spoken.some(t => /example dot org/.test(t))"))
         check("results with the source are on screen", s.js("/example\\.org/.test(document.querySelector('[data-desk-screen]').textContent)"))
         check("no console errors", not s.errs, s.errs[:3]); s.close()
@@ -59,7 +60,8 @@ def scenario_lunch():
         ask(s, "mcdonalds"); s.wait_for("!!document.querySelector('[data-desk-handoff]')", 90, "cart ready")
         check("cart is on screen with a DoorDash button", s.js("document.querySelector('[data-desk-handoff]').href.startsWith('https://www.doordash.com/')"))
         check("the link opens safely in a new tab", s.js("document.querySelector('[data-desk-handoff]').rel.includes('noopener') && document.querySelector('[data-desk-handoff]').target === '_blank'"))
-        check("he says he cannot pay, and never claims it was ordered", s.js("window.__spoken.some(t => /can't use your card/.test(t))") and not s.js("window.__spoken.some(t => /\\b(I ordered|has been ordered|order placed)\\b/i.test(t))"))
+        s.wait_for("/can.?t use your card/.test(window.__spoken.join(' '))", 40, "says cannot pay")
+        check("he says he cannot pay, and never claims it was ordered", s.js("/can.?t use your card/.test(window.__spoken.join(' '))") and not s.js("/\\b(I ordered|has been ordered|order placed)\\b/i.test(window.__spoken.join(' '))"))
         check("order list says nothing was bought", s.js("/Nothing is bought or paid/.test(document.querySelector('[data-desk-orders]').textContent)"))
         check("no console errors", not s.errs, s.errs[:3]); s.close()
 
@@ -74,8 +76,8 @@ def scenario_part():
         s.sc.locator("[data-call-hangup]").click(); s.wait_for("document.querySelector('[data-call-bar]')?.dataset.callState === 'ended'", 30, "ended")
         s.wait_for("!!document.querySelector('[data-incoming-call]')", 60, "he calls back")
         check("Dr. Wire calls back and the phone rings", s.js("window.__lab.lab.phone.ringing === true"))
-        s.sc.locator("[data-incoming-answer]").click(); s.wait_for("window.__spoken.some(t => /calling back about the part.*estimated arrival/.test(t))", 120, "call-back message")
-        check("call-back states the requisition and arrival day", s.js("window.__spoken.some(t => /PR-1001/.test(t))"))
+        s.sc.locator("[data-incoming-answer]").click(); s.wait_for("/calling back about the part.*estimated arrival/.test(window.__spoken.join(' '))", 120, "call-back message")
+        check("call-back states the requisition and arrival day", s.js("window.__spoken.some(t => /P R 1001/.test(t))"))
         check("no console errors", not s.errs, s.errs[:3]); s.close()
 
 def scenario_mail():

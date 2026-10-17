@@ -36,7 +36,7 @@ const BASE_RATE = 1.0, BASE_PITCH = 0.94;
 export function shapeSpeech(raw: string, o: { rate?: number; pitch?: number } = {}): Segment[] {
   const text = pronounce(raw); if (!text) return [];
   const rate0 = o.rate ?? BASE_RATE, pitch0 = o.pitch ?? BASE_PITCH;
-  const sentences = (text.replace(/\n+/g, ' ¶ ').match(/[^.!?…¶]+(?:[.!?…]+|¶|$)/g) || [text]).map(s => s.trim()).filter(Boolean);
+  const sentences = (text.replace(/\n+/g, ' ¶ ').match(/(?:[^.!?…¶]|\.(?=\d))+(?:[.!?…]+(?=\s|$)|¶|$)/g) || [text]).map(s => s.trim()).filter(Boolean);
   const out: Segment[] = [];
   for (const sentence of sentences) {
     if (sentence === '¶') { if (out.length) out[out.length - 1].pauseMs = Math.max(out[out.length - 1].pauseMs, 450); continue; }

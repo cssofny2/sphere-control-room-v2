@@ -107,7 +107,7 @@ export function parseName(text: string): NameResult {
 const ASK_NAME = [
   "Who am I speaking with?",
   "And who's this?",
-  "Sorry, I didn't catch your name. Who am I talking to?",
+  "And may I ask who's calling?",
   "Who do I have on the line?",
 ] as const;
 const MEET = [

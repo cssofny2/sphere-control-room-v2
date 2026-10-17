@@ -53,7 +53,7 @@ const A = await loadTypeScript(new URL('../src/technician/answer.ts', import.met
   assert.ok(new Set(Array.from({ length: 8 }, (_, i) => M.lookUpLead(() => i))).size >= 6);
   assert.ok(new Set(Array.from({ length: 6 }, (_, i) => M.unsureLead(() => i))).size >= 5);
   const answers = new Set(); for (let i = 0; i < 40; i++) answers.add(A.knowledgeAnswer('what is the capital of france').text); assert.ok(answers.size >= 5, 'unknown answers vary');
-  const weak = A.knowledgeAnswer('chamber'); void weak;
+  assert.match(A.knowledgeAnswer('what is the VNA').text, /^Power on the VNA.*230\.5 kHz/, 'answers start at the beginning of the sentence, decimals intact');
   console.log('PASS uncertainty: varied, honest phrases; no immediate repeats'); }
 
 // 2. names
@@ -100,6 +100,7 @@ const A = await loadTypeScript(new URL('../src/technician/answer.ts', import.met
   const long = SS.shapeSpeech('The chamber is at pressure right now, and the turbo pump needs to be below fifty torr before I can spin it up, which is why I rough it first.'); assert.ok(long.length >= 2 && long.every(s => s.text.length < 120));
   for (const s of seg) { assert.ok(s.rate >= 0.8 && s.rate <= 1.2 && s.pitch >= 0.8 && s.pitch <= 1.2, JSON.stringify(s)); }
   assert.deepEqual(SS.shapeSpeech(''), []);
+  const dec = SS.shapeSpeech('The span is 1.5 kHz wide. Next one.'); assert.equal(dec.length, 2); assert.match(dec[0].text, /1\.5 kilohertz wide\.$/, 'decimals are not sentence ends');
   console.log('PASS speech shaping: pronunciation, fillers, question pitch, pauses, long sentences'); }
 
 // 6. voice choice
