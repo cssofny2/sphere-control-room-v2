@@ -48,9 +48,9 @@ def mock_ai(route, request):
         route.fulfill(status=200, headers={"content-type": "text/event-stream"}, body=sse({"type": "text", "delta": "Good question. The sphere's resonance is read by the VNA near 230 kilohertz. "}, {"type": "text", "delta": "Anything else?"}, {"type": "done", "stop_reason": "end_turn"}))
 
 class Session:
-    def __init__(self, p, viewport=(1100, 800), reduced=False, mock=True, nowebgl=False, deny_mic=False):
+    def __init__(self, p, viewport=(1100, 800), reduced=False, mock=True, nowebgl=False, deny_mic=False, ua=None):
         self.b = p.chromium.launch(args=ARGS)
-        self.ctx = self.b.new_context(viewport={"width": viewport[0], "height": viewport[1]}, permissions=["microphone"], reduced_motion="reduce" if reduced else "no-preference")
+        self.ctx = self.b.new_context(viewport={"width": viewport[0], "height": viewport[1]}, permissions=["microphone"], **({"user_agent": ua} if ua else {}), reduced_motion="reduce" if reduced else "no-preference")
         self.errs = []
         self.pg = self.ctx.new_page()
         self.pg.on("pageerror", lambda e: self.errs.append("PAGEERR " + str(e)))
@@ -180,6 +180,20 @@ def scenario_reduced():
         check("reduced motion: call still connects (he teleports instead of walking)", True)
         check("no console errors", not s.errs, s.errs[:3]); s.close()
 
+def scenario_android():
+    ua = "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    with sync_playwright() as p:
+        s = Session(p, ua=ua); power_on(s); s.js("window.__lab.sci.timeScale = 4")
+        start_call(s); s.wait_for("document.querySelector('[data-call-bar]')?.dataset.callState === 'connected'", 90, "connected")
+        s.wait_for("window.__rec && window.__rec.started", 10, "recognition started")
+        check("Android: the microphone stream is released so recognition can use it", s.js("window.__tracks.length > 0 && window.__tracks.every(t => t.readyState === 'ended')"))
+        check("Android: recognition is not continuous (it restarts per phrase)", s.js("window.__rec.continuous === false"))
+        s.js("window.__say('what is the pressure right now')"); s.wait_for("window.__spoken.some(t => /230|pressure/i.test(t))", 20, "answer")
+        check("Android: a spoken question is answered", True)
+        s.js("window.__rec.onerror && window.__rec.onerror({ error: 'audio-capture' })"); s.pg.wait_for_timeout(300)
+        check("Android: a busy microphone gives a clear message and typing still works", s.js("/microphone/i.test(document.querySelector('[data-call-captions]').textContent) && !!document.querySelector('[data-call-input]')"))
+        check("no console errors", not s.errs, s.errs[:3]); s.close()
+
 def scenario_nowebgl():
     with sync_playwright() as p:
         s = Session(p, nowebgl=True)
@@ -187,6 +201,6 @@ def scenario_nowebgl():
         check("WebGL failure shows a friendly fallback, not a crash", True)
         check("no uncaught errors", not [e for e in s.errs if e.startswith('PAGEERR')], s.errs[:3]); s.close()
 
-ALL = {"call": scenario_call, "voice": scenario_voice, "task": scenario_task, "blocked": scenario_blocked, "mic-denied": scenario_denied, "mobile": scenario_mobile, "reduced": scenario_reduced, "nowebgl": scenario_nowebgl}
+ALL = {"call": scenario_call, "voice": scenario_voice, "task": scenario_task, "blocked": scenario_blocked, "mic-denied": scenario_denied, "mobile": scenario_mobile, "reduced": scenario_reduced, "android": scenario_android, "nowebgl": scenario_nowebgl}
 for name in (WANT or ALL):
     print("== " + name); ALL[name]()

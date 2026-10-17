@@ -93,6 +93,7 @@ export function createCallController(deps: CallDeps) {
   }));
   unsub.push(deps.speech.onError(code => {
     if (code === 'mic-denied') { micState = 'denied'; textOnly = true; cap('system', 'The browser blocked speech recognition. You can type instead.'); }
+    else if (code === 'mic-busy') { micState = 'unsupported'; textOnly = true; cap('system', 'Speech recognition could not use the microphone (another app or tab may be holding it). You can type instead, or hang up and call again.'); }
     else if (code === 'no-speech-service') { micState = 'unsupported'; textOnly = true; cap('system', 'Speech recognition is not available in this browser. You can type instead.'); }
     emit();
   }));

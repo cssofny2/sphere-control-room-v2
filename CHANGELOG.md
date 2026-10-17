@@ -2,6 +2,11 @@
 
 Versions follow semantic versioning. The version lives in `package.json` and is shown in the top-left corner of the app next to the S.P.H.E.R.E. logo.
 
+## [1.2.1] - 2026-10-17
+
+### Fixed
+- Microphone on Android tablets: the call no longer holds the microphone stream open (it blocked speech recognition), recognition restarts per phrase instead of running continuously, and a busy microphone now gives a clear message with typing still available. Barge-in (talking over Dr. Wire) is off on Android.
+
 ## [1.2.0] - 2026-10-17
 
 ### Added
