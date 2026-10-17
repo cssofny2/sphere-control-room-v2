@@ -3,7 +3,7 @@ import { readiness, fmtPressure, type FactsPlus } from './facts';
 
 export type Snapshot = ReturnType<typeof buildSnapshot>;
 
-export function buildSnapshot(f: FactsPlus, extra: { task?: string | null; pendingConfirm?: string | null; localTime?: string; shift?: string } = {}) {
+export function buildSnapshot(f: FactsPlus, extra: { task?: string | null; pendingConfirm?: string | null; localTime?: string; shift?: string; operator?: string | null } = {}) {
   const rd = readiness(f);
   return {
     power: f.power,
@@ -19,7 +19,7 @@ export function buildSnapshot(f: FactsPlus, extra: { task?: string | null; pendi
     openAlarms: f.alarms.slice(0, 5).map(a => `${a.severity}: ${a.text.slice(0, 120)}`),
     activeFaults: f.blindDrill ? 'hidden fault drill running (do not name the fault)' : Object.entries(f.failures).filter(([, v]) => v).map(([k]) => k),
     readyToMeasure: rd.ready, failingChecks: rd.rules.filter(r => !r.pass).map(r => `${r.label} (${r.detail})`),
-    localTime: extra.localTime || null, shift: extra.shift || null,
+    operatorName: extra.operator || null, localTime: extra.localTime || null, shift: extra.shift || null,
     currentTask: extra.task || null, waitingForConfirmation: extra.pendingConfirm || null,
   };
 }

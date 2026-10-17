@@ -1,6 +1,8 @@
 // Speech in and out for the phone call. The rest of the app only knows the SpeechIO interface, so a
 // cloud speech provider can replace the browser one later without touching the call logic.
 
+import { chooseVoice, shapeSpeech, voiceScore } from './speechShape';
+
 export interface SpeechIO {
   readonly supported: { listen: boolean; speak: boolean };
   /** Start listening (continuous). Safe to call twice. */
@@ -18,6 +20,10 @@ export interface SpeechIO {
   isSpeaking(): boolean;
   /** Called with true/false when speech starts and ends, and with word-boundary pulses for lip-sync. */
   onSpeaking(cb: (speaking: boolean, pulse: number) => void): () => void;
+  /** English voices the browser offers, best first, and a way to choose one (null = automatic). Optional: not every provider has them. */
+  voices?(): string[];
+  setVoice?(name: string | null): void;
+  currentVoice?(): string;
   dispose(): void;
 }
 
@@ -31,13 +37,6 @@ const listeners = <T extends unknown[]>() => {
   return { add(cb: (...a: T) => void) { set.add(cb); return () => { set.delete(cb); }; }, emit(...a: T) { set.forEach(cb => { try { cb(...a); } catch { /* listener errors never break speech */ } }); } };
 };
 
-function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
-  const en = voices.filter(v => /^en[-_]/i.test(v.lang));
-  const prefer = [/google us english/i, /daniel/i, /alex/i, /david/i, /microsoft (guy|mark|david)/i, /male/i];
-  for (const re of prefer) { const v = en.find(x => re.test(x.name)); if (v) return v; }
-  return en.find(v => /en[-_]US/i.test(v.lang)) || en[0] || null;
-}
-
 /** Android Chrome gives the microphone to one user at a time, so a held getUserMedia stream starves speech recognition. */
 export const isAndroid = () => typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
 
@@ -50,6 +49,9 @@ export function createBrowserSpeech(): SpeechIO {
   let rec: any = null, wantListen = false, restarts = 0, lastStart = 0;
   let speaking = false, queued = 0, token = 0;
   const pending: (() => void)[] = [];
+  let tail: Promise<void> = Promise.resolve(); let chosen: string | null = null;
+  try { chosen = window.localStorage?.getItem('sphere.technician.voice') || null; } catch { /* storage may be blocked */ }
+  const listVoices = () => { try { return synth ? Array.from(synth.getVoices()) : []; } catch { return []; } };
 
   const startRec = () => {
     if (!Rec || !wantListen) return;
@@ -88,20 +90,32 @@ export function createBrowserSpeech(): SpeechIO {
     isListening() { return wantListen; },
     onTranscript: tr.add, onError: er.add, onSpeaking: sp.add,
     speak(text: string) {
-      return new Promise<void>(resolve => {
-        if (!synth || !supported.speak || !text.trim()) { resolve(); return; }
-        const my = token; queued++;
-        const u = new w.SpeechSynthesisUtterance(text);
-        const v = pickVoice(synth.getVoices()); if (v) u.voice = v; u.rate = 1.03; u.pitch = 0.95; u.lang = v?.lang || 'en-US';
-        u.onstart = () => { if (!speaking) { speaking = true; sp.emit(true, 0.6); } };
-        u.onboundary = () => sp.emit(true, 0.5 + Math.random() * 0.5);
-        const done = () => { if (my === token) finish(); const i = pending.indexOf(done); if (i >= 0) pending.splice(i, 1); resolve(); };
-        u.onend = done; u.onerror = done; pending.push(done);
-        try { synth.speak(u); } catch { done(); }
+      // Each call is cut into phrases with their own pace and pitch and a short pause between them. Calls queue in order.
+      const run = () => new Promise<void>(resolve => {
+        const segs = shapeSpeech(text);
+        if (!synth || !supported.speak || !segs.length) { resolve(); return; }
+        const my = token; queued++; let i = 0, gap: ReturnType<typeof setTimeout> | null = null, over = false;
+        const done = () => { if (over) return; over = true; if (gap) clearTimeout(gap); if (my === token) finish(); const k = pending.indexOf(done); if (k >= 0) pending.splice(k, 1); resolve(); };
+        pending.push(done);
+        const next = () => {
+          if (over) return; if (my !== token || i >= segs.length) { done(); return; }
+          const seg = segs[i++]; const u = new w.SpeechSynthesisUtterance(seg.text);
+          const v = chooseVoice(listVoices(), chosen); if (v) u.voice = v; u.rate = seg.rate; u.pitch = seg.pitch; u.lang = v?.lang || 'en-US';
+          u.onstart = () => { if (!speaking) { speaking = true; sp.emit(true, 0.6); } };
+          u.onboundary = () => sp.emit(true, 0.5 + Math.random() * 0.5);
+          u.onend = () => { if (over) return; if (i >= segs.length || my !== token) done(); else gap = setTimeout(next, seg.pauseMs); };
+          u.onerror = done;
+          try { synth.speak(u); } catch { done(); }
+        };
+        next();
       });
+      const p = tail.then(run, run); tail = p.catch(() => undefined); return p;
     },
     cancel() { token++; try { synth?.cancel(); } catch { /* ignore */ } pending.splice(0).forEach(f => f()); queued = 0; if (speaking) { speaking = false; sp.emit(false, 0); } },
     isSpeaking() { return speaking; },
+    voices() { return listVoices().filter(v => /^en[-_]/i.test(v.lang)).sort((a, b) => voiceScore(b) - voiceScore(a)).map(v => v.name); },
+    setVoice(name: string | null) { chosen = name; try { if (name) window.localStorage?.setItem('sphere.technician.voice', name); else window.localStorage?.removeItem('sphere.technician.voice'); } catch { /* ignore */ } },
+    currentVoice() { return chooseVoice(listVoices(), chosen)?.name || ''; },
     dispose() { wantListen = false; try { rec?.abort?.(); } catch { /* ignore */ } try { synth?.cancel(); } catch { /* ignore */ } },
   };
 }

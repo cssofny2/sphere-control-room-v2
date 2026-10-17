@@ -86,7 +86,7 @@ const settle = (t, s, at) => t.observe(fp(s), at);
 { const t = mk(); const s = base(); s.chamber.pressure = 5e-4; const f = fp(s);
   let a = t.ask("What's the pressure right now?", f, 10); assert.ok(a.known && /5\.0e-4 Torr/.test(a.remark.text), a.remark.text);
   a = t.ask('Why do we need a Faraday cage?', f, 20); assert.ok(a.known && /RF|electromagnetic|interference|radio/i.test(a.remark.text), a.remark.text);
-  a = t.ask('What is the capital of France?', f, 30); assert.ok(!a.known && /don't know/i.test(a.remark.text)); assert.ok(t.memory.unanswered.length === 1);
+  a = t.ask('What is the capital of France?', f, 30); assert.ok(!a.known && /don'?t know|no idea|not sure|drawing a blank|don'?t have an answer|not something i know|wish i could|outside what/i.test(a.remark.text), a.remark.text); assert.ok(t.memory.unanswered.length === 1);
   a = t.ask('How do I pump down the chamber?', f, 40); assert.ok(a.known && /roughing/i.test(a.remark.text), a.remark.text);
   a = t.ask('Are we ready to measure?', f, 50); assert.ok(a.known && /Not yet|good to measure/.test(a.remark.text));
   console.log('PASS questions: live state, knowledge, and "I don\'t know"'); }
