@@ -1,4 +1,4 @@
-// "Dr. Wire" — the lab's wireframe scientist. This file is the NPC's brain: it reads a small
+// "Dr. Wire" — the lab technician. This file is the NPC's brain: it reads a small
 // snapshot of the experiment, notices what changed, and decides what to say. It has no
 // rendering code, so it can be unit-tested in Node.
 

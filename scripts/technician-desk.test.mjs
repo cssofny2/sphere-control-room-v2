@@ -104,9 +104,9 @@ function harness(o = {}) {
 { const H = harness(); const out = await H.flows.lookUp('what is the melting point of copper', { speak: true });
   assert.ok(H.visits.includes('workstation')); assert.ok(H.keys.length > 20, 'typed the address and the question'); assert.match(out, /Found online \(example\.org\)/);
   assert.equal(H.desk.state.screen.page.kind, 'results'); assert.ok(H.desk.state.screen.page.lines.some(l => /example\.org/.test(l)));
-  assert.ok(H.said.some(x => /let me look it up/i.test(x))); assert.ok(H.said.some(x => /here's what I found.*1,085/.test(x)) && H.said.some(x => /example dot org/.test(x)));
+  assert.ok(H.said.some(x => /look it up|check on the computer|search for that|find out|web says|go look|pull that up|dig that up/i.test(x))); assert.ok(H.said.some(x => /here's what I found.*1,085/.test(x)) && H.said.some(x => /example dot org/.test(x)));
   const off = harness({ lookup: async () => ({ ok: false, code: 'not_deployed', sources: [] }) }); const o2 = await off.flows.lookUp('anything', { speak: true });
-  assert.match(o2, /couldn't look that up/); assert.equal(off.desk.state.screen.page.kind, 'offline'); assert.ok(off.said.some(x => /couldn't look that up/.test(x))); assert.ok(!off.said.some(x => /found/i.test(x)));
+  assert.match(o2, /couldn't look that up/); assert.equal(off.desk.state.screen.page.kind, 'offline'); assert.ok(off.said.some(x => /couldn't find|came up empty|no luck|couldn't get a reliable|The reason:/.test(x))); assert.ok(!off.said.some(x => /found/i.test(x)));
   console.log('PASS look-up flow: walks, types with key sounds, shows results, reads them, and admits failure'); }
 
 // 7. lunch: builds a cart and hands checkout to the operator; never claims it ordered

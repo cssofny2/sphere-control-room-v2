@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import type { Focus, Mood } from './scientistBrain';
 import type { PhoneRig } from './labDetail';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { badgeTexture, logoPatchTexture, pocketTexture } from './logoTex';
 
-// "Dr. Wire": a see-through wireframe lab technician with a skeleton (hips, spine, two-bone arms and
+// "Dr. Wire": a lab technician (named for the wireframe he started as; he is now a solid, shaded figure) with a skeleton (hips, spine, two-bone arms and
 // legs solved with inverse kinematics), hands with fingers, a face that blinks and talks, a lab coat,
 // goggles and a badge. He walks around the lab on a waypoint graph, sits at the workstation, uses real
 // stations (gauge, notebook, rack knob, door seal, laser head, phone) and fidgets when idle.
@@ -71,9 +73,9 @@ export class Scientist {
   private armU: THREE.Group[] = [new THREE.Group(), new THREE.Group()]; private armL: THREE.Group[] = [new THREE.Group(), new THREE.Group()];
   private legU: THREE.Group[] = [new THREE.Group(), new THREE.Group()]; private legL: THREE.Group[] = [new THREE.Group(), new THREE.Group()]; private foot: THREE.Group[] = [new THREE.Group(), new THREE.Group()];
   private hands: Hand[] = [];
-  private coat!: THREE.Mesh; private eyes: THREE.Mesh[] = []; private brows: THREE.Mesh[] = []; private mouth!: THREE.Mesh; private goggles = new THREE.Group(); private mug = new THREE.Mesh(); private clip = new THREE.Mesh();
+  private coat!: THREE.Mesh; private eyes: THREE.Object3D[] = []; private brows: THREE.Mesh[] = []; private mouth!: THREE.Mesh; private goggles = new THREE.Group(); private mug = new THREE.Mesh(); private clip = new THREE.Mesh();
   private detail = new THREE.Group();
-  private mats: THREE.Material[] = []; private geos: THREE.BufferGeometry[] = [];
+  private mats: THREE.Material[] = []; private geos: THREE.BufferGeometry[] = []; private texs: THREE.Texture[] = []; private coatMat!: THREE.MeshStandardMaterial;
   private node = 'backRight'; private path: string[] = []; private target: [number, number] | null = null;
   private heading = Math.PI; private wantHeading = Math.PI; private phase = 0; private moveBlend = 0; private lastStepSign = 1;
   private idleUntil = 2; private nextWander = 14; private lookYaw = 0; private lookTo = 0; private nextLook = 1.5; private nextBlink = 2; private blink = 0;
@@ -90,79 +92,108 @@ export class Scientist {
   onEvent: ((name: string) => void) | null = null;
 
   constructor() {
-    const lineMat = (color: number, opacity = 1) => { const m = new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: opacity < 1, opacity, depthWrite: false }); this.mats.push(m); return m; };
-    const fillMat = (color: number, opacity: number) => { const m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }); this.mats.push(m); return m; };
-    const skin = lineMat(0x1d4ed8), coatM = lineMat(0x0ea5e9, 0.85), dark = lineMat(0x0f2a5c), accent = lineMat(0xf97316), glove = lineMat(0x2563eb), glass = lineMat(0x0891b2);
-    const fill = fillMat(0x7dd3fc, 0.1), coatFill = fillMat(0xe0f2fe, 0.16), gFill = fillMat(0x67e8f9, 0.25);
+    // Solid, shaded materials so he matches the realistic lab. Real-world sizes in metres.
+    const std = (color: number, rough = 0.7, metal = 0, extra: THREE.MeshStandardMaterialParameters = {}) => { const m = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, ...extra }); this.mats.push(m); return m; };
+    const skin = std(0xd9a47f, 0.62), skinDark = std(0xc58f6c, 0.7), hairM = std(0x3a2a20, 0.85), browM = std(0x2f2119, 0.9);
+    const coatM = std(0xf3f5f7, 0.88, 0, { side: THREE.DoubleSide }), shirtM = std(0x7ea6d4, 0.8), pants = std(0x353c47, 0.85), shoeM = std(0x1b1c20, 0.45), sole = std(0x8b9097, 0.8);
+    const eyeW = std(0xf7f7f4, 0.3), iris = std(0x5a3a22, 0.35), pupil = std(0x050505, 0.2), lipM = std(0xa8635d, 0.5), mouthM = std(0x4a1c1c, 0.8, 0, { side: THREE.DoubleSide });
+    const frame = std(0x15171b, 0.35, 0.3), strapM = std(0x1d2a44, 0.8), glassM = std(0x9fe7f3, 0.05, 0, { transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false });
+    const paper = std(0xfdfdfb, 0.9), board = std(0x2d3946, 0.5), ceramic = std(0xf1f3f5, 0.3), metalM = std(0xaab2bb, 0.35, 0.8);
+    this.coatMat = coatM;
     const g = <T extends THREE.BufferGeometry>(geo: T) => { this.geos.push(geo); return geo; };
-    const part = (geo: THREE.BufferGeometry, wire: THREE.Material, fl: THREE.Material | null, parent: THREE.Object3D, x = 0, y = 0, z = 0) => {
-      const m = new THREE.Mesh(g(geo), wire); m.position.set(x, y, z); parent.add(m);
-      if (fl) { const f2 = new THREE.Mesh(geo, fl); f2.position.copy(m.position); parent.add(f2); }
-      return m;
-    };
+    const part = (geo: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Object3D, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(g(geo), mat); m.position.set(x, y, z); parent.add(m); return m; };
+    const rbox = (w: number, h: number, d: number, r = 0.012) => new RoundedBoxGeometry(w, h, d, 3, r);
+    const ell = (geo: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Object3D, sx: number, sy: number, sz: number, x = 0, y = 0, z = 0) => { const m = part(geo, mat, parent, x, y, z); m.scale.set(sx, sy, sz); return m; };
+    const SPH = (r = 1, w = 24, h = 16) => new THREE.SphereGeometry(r, w, h);
     this.root.add(this.body); this.body.add(this.hips); this.hips.position.y = 0.93;
-    part(new THREE.BoxGeometry(0.3, 0.14, 0.2), dark, fill, this.hips, 0, 0, 0); // pelvis
-    // legs: thigh, shin, shoe (two-bone IK, joints hang along -Y)
+    part(rbox(0.3, 0.15, 0.2, 0.04), pants, this.hips, 0, 0, 0); // pelvis
+    // legs: trousers and shoes (two-bone IK; joints hang along -Y)
     for (const i of [0, 1]) {
       const side = i ? 1 : -1; const U = this.legU[i], Lw = this.legL[i], F = this.foot[i];
-      U.position.set(side * 0.09, -0.02, 0); this.hips.add(U); part(new THREE.CapsuleGeometry(0.068, 0.3, 3, 8), dark, fill, U, 0, -0.215, 0);
-      Lw.position.set(0, -0.43, 0); U.add(Lw); part(new THREE.CapsuleGeometry(0.05, 0.3, 3, 8), dark, fill, Lw, 0, -0.205, 0);
-      F.position.set(0, -0.41, 0); Lw.add(F); part(new THREE.BoxGeometry(0.085, 0.06, 0.2), accent, fill, F, 0, -0.03, 0.045);
+      U.position.set(side * 0.09, -0.02, 0); this.hips.add(U); part(new THREE.CapsuleGeometry(0.07, 0.3, 4, 14), pants, U, 0, -0.215, 0);
+      Lw.position.set(0, -0.43, 0); U.add(Lw); part(new THREE.CapsuleGeometry(0.052, 0.3, 4, 14), pants, Lw, 0, -0.205, 0);
+      F.position.set(0, -0.41, 0); Lw.add(F);
+      part(rbox(0.095, 0.075, 0.26, 0.032), shoeM, F, 0, -0.04, 0.06); part(rbox(0.1, 0.016, 0.27, 0.006), sole, F, 0, -0.082, 0.06);
     }
-    // torso (spine) + coat
+    // torso: blue shirt, belt, open white lab coat
     this.torso.position.y = 0.02; this.hips.add(this.torso);
-    part(new THREE.CapsuleGeometry(0.15, 0.3, 3, 10), skin, fill, this.torso, 0, 0.27, 0);
-    this.coat = part(new THREE.CylinderGeometry(0.2, 0.33, 0.9, 16, 4, true), coatM, coatFill, this.torso, 0, 0.0, 0);
-    part(new THREE.BoxGeometry(0.34, 0.1, 0.2), coatM, null, this.torso, 0, 0.52, 0);  // shoulders
-    // neck + head
-    this.neck.position.set(0, 0.58, 0); this.torso.add(this.neck); part(new THREE.CylinderGeometry(0.04, 0.047, 0.1, 8), skin, null, this.neck, 0, 0.04, 0);
-    this.head.position.y = 0.12; this.neck.add(this.head);
-    part(new THREE.IcosahedronGeometry(0.115, 1), skin, fill, this.head, 0, 0.1, 0);
-    const hair = part(new THREE.SphereGeometry(0.122, 12, 7, 0, Math.PI * 2, 0, 1.25), dark, null, this.head, 0, 0.115, -0.008); hair.rotation.x = -0.18;
-    this.detail.name = 'detail'; this.torso.add(this.detail);
-    // face (high detail group lives on the head)
+    ell(new THREE.CapsuleGeometry(0.14, 0.3, 6, 16), shirtM, this.torso, 1, 1, 0.72, 0, 0.27, 0);
+    part(new THREE.CylinderGeometry(0.146, 0.15, 0.04, 20), std(0x24282f, 0.5), this.torso, 0, -0.07, 0).scale.z = 0.72;
+    const COAT_TOP = 0.19, COAT_BOT = 0.27, GAP = 0.17;
+    const coatR = (y: number) => COAT_TOP + ((0.45 - y) / 0.9) * (COAT_BOT - COAT_TOP);
+    this.coat = part(new THREE.CylinderGeometry(COAT_TOP, COAT_BOT, 0.9, 32, 1, true, GAP, Math.PI * 2 - 2 * GAP), coatM, this.torso, 0, 0, 0); this.coat.scale.z = 0.72;
+    for (const sx of [-1, 1]) { const sh = part(rbox(0.19, 0.1, 0.2, 0.04), coatM, this.torso, sx * 0.13, 0.5, 0); sh.rotation.z = sx * -0.18; }
+    // neck + head (ellipsoid skull so it reads as a person, not a ball)
+    this.neck.position.set(0, 0.58, 0); this.torso.add(this.neck); part(new THREE.CylinderGeometry(0.042, 0.05, 0.09, 16), skin, this.neck, 0, 0.03, 0);
+    part(new THREE.TorusGeometry(0.052, 0.012, 8, 20), shirtM, this.neck, 0, -0.005, 0).rotation.x = Math.PI / 2;
+    this.head.position.y = 0.092; this.neck.add(this.head);
+    ell(SPH(1, 32, 22), skin, this.head, 0.092, 0.118, 0.103, 0, 0.1, 0);
+    const hair = ell(SPH(1, 32, 20), hairM, this.head, 0.099, 0.123, 0.11, 0, 0.1, -0.008); hair.geometry.dispose(); hair.geometry = g(new THREE.SphereGeometry(1, 32, 20, 0, Math.PI * 2, 0, 1.55)); hair.rotation.x = -0.5;
+    ell(SPH(1, 16, 10), hairM, this.head, 0.062, 0.034, 0.05, 0, 0.212, 0.035);
+    for (const sx of [-1, 1]) part(rbox(0.012, 0.05, 0.04, 0.005), hairM, this.head, sx * 0.093, 0.118, 0.004);   // sideburns
+    // face
     const face = new THREE.Group(); this.head.add(face);
     for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(g(new THREE.SphereGeometry(0.014, 8, 6)), accent); eye.position.set(sx * 0.04, 0.112, 0.103); face.add(eye); this.eyes.push(eye);
-      const brow = new THREE.Mesh(g(new THREE.BoxGeometry(0.052, 0.008, 0.01)), dark); brow.position.set(sx * 0.042, 0.142, 0.106); face.add(brow); this.brows.push(brow);
-      part(new THREE.SphereGeometry(0.024, 6, 5), skin, null, face, sx * 0.116, 0.1, 0);              // ears
+      const eye = new THREE.Group(); eye.position.set(sx * 0.037, 0.112, 0.085); face.add(eye); this.eyes.push(eye);   // blinking scales this group
+      const ball = ell(SPH(1, 16, 12), eyeW, eye, 0.0125, 0.0125, 0.0105);
+      part(new THREE.CircleGeometry(0.54, 18), iris, ball, 0, 0, 1.01);   // the eyeball is a scaled unit sphere, so these are in its units
+      part(new THREE.CircleGeometry(0.26, 14), pupil, ball, 0, 0, 1.02);
+      const brow = new THREE.Mesh(g(rbox(0.05, 0.009, 0.012, 0.004)), browM); brow.position.set(sx * 0.04, 0.142, 0.092); face.add(brow); this.brows.push(brow);
+      ell(SPH(1, 12, 10), skin, face, 0.011, 0.028, 0.018, sx * 0.0925, 0.098, -0.004);   // ears
+      const rim = part(new THREE.TorusGeometry(0.0285, 0.0028, 8, 24), frame, face, sx * 0.037, 0.112, 0.1); rim.scale.set(1.08, 0.92, 1);     // glasses
+      part(new THREE.CircleGeometry(0.027, 20), glassM, face, sx * 0.037, 0.112, 0.1);
+      part(new THREE.CylinderGeometry(0.0022, 0.0022, 0.085, 6), frame, face, sx * 0.0925, 0.115, 0.05).rotation.x = Math.PI / 2;   // temple arms
     }
-    part(new THREE.ConeGeometry(0.016, 0.045, 5), skin, null, face, 0, 0.088, 0.122).rotation.x = Math.PI / 2;  // nose
-    this.jaw.position.set(0, 0.045, 0.02); face.add(this.jaw); part(new THREE.BoxGeometry(0.09, 0.05, 0.09), skin, null, this.jaw, 0, -0.008, 0.045);
-    this.mouth = new THREE.Mesh(g(new THREE.CircleGeometry(0.026, 10)), accent); this.mouth.position.set(0, 0.0, 0.092); this.jaw.add(this.mouth);
+    part(new THREE.CylinderGeometry(0.002, 0.002, 0.02, 6), frame, face, 0, 0.116, 0.1).rotation.z = Math.PI / 2;   // bridge
+    ell(SPH(1, 14, 10), skinDark, face, 0.0135, 0.02, 0.019, 0, 0.083, 0.101);   // nose
+    ell(SPH(1, 10, 8), skin, face, 0.007, 0.007, 0.009, -0.0105, 0.072, 0.098); ell(SPH(1, 10, 8), skin, face, 0.007, 0.007, 0.009, 0.0105, 0.072, 0.098);
+    this.jaw.position.set(0, 0.05, 0); face.add(this.jaw);
+    ell(SPH(1, 20, 14), skin, this.jaw, 0.066, 0.052, 0.062, 0, -0.045, 0.034);   // chin and jaw line
+    this.mouth = new THREE.Mesh(g(new THREE.CircleGeometry(0.024, 16)), mouthM); this.mouth.position.set(0, -0.005, 0.0925); this.jaw.add(this.mouth);
+    const lip = new THREE.Mesh(g(new THREE.CircleGeometry(0.03, 16)), lipM); lip.position.z = -0.0006; this.mouth.add(lip);
     // goggles (pushed up on the forehead until the laser is on)
-    for (const sx of [-1, 1]) { const lens = part(new THREE.TorusGeometry(0.032, 0.006, 6, 14), glass, null, this.goggles, sx * 0.045, 0, 0.0); void lens; part(new THREE.CircleGeometry(0.03, 10), gFill, null, this.goggles, sx * 0.045, 0, 0.001); }
-    const strap = part(new THREE.TorusGeometry(0.118, 0.004, 4, 24), glass, null, this.goggles, 0, 0, -0.105); strap.rotation.x = Math.PI / 2; strap.position.z = -0.105 + 0.105; strap.scale.set(1, 1, 1);
-    this.goggles.position.set(0, 0.185, 0.105); this.goggles.rotation.x = -0.5; this.head.add(this.goggles);
-    // coat details: collar, pockets, badge + lanyard, buttons
-    for (const sx of [-1, 1]) { const col = part(new THREE.BoxGeometry(0.07, 0.07, 0.015), coatM, null, this.detail, sx * 0.05, 0.6, 0.12); col.rotation.set(0.25, 0, sx * -0.5); }
-    for (const sx of [-1, 1]) part(new THREE.BoxGeometry(0.1, 0.09, 0.012), coatM, null, this.detail, sx * 0.13, 0.04, 0.185);
-    part(new THREE.BoxGeometry(0.07, 0.09, 0.008), accent, null, this.detail, -0.1, 0.4, 0.172);
-    for (const sx of [-1, 1]) { const l = part(new THREE.BoxGeometry(0.008, 0.24, 0.004), dark, null, this.detail, sx * 0.04, 0.5, 0.16); l.rotation.z = sx * 0.28; }
-    for (let k = 0; k < 4; k++) part(new THREE.SphereGeometry(0.008, 5, 4), dark, null, this.detail, 0, 0.35 - k * 0.14, 0.19);
-    // arms: two bones, cuffs rolled at the forearm, hands with fingers
+    for (const sx of [-1, 1]) { part(new THREE.TorusGeometry(0.034, 0.0065, 8, 20), frame, this.goggles, sx * 0.047, 0, 0); part(new THREE.CircleGeometry(0.033, 16), glassM, this.goggles, sx * 0.047, 0, 0); }
+    part(rbox(0.03, 0.014, 0.012, 0.004), frame, this.goggles, 0, 0, 0);
+    const strap = part(new THREE.TorusGeometry(0.1, 0.006, 6, 28), strapM, this.goggles, 0, 0, -0.045); strap.rotation.x = Math.PI / 2; strap.scale.set(0.95, 1.1, 1);
+    this.goggles.position.set(0, 0.185, 0.098); this.goggles.rotation.x = -0.5; this.head.add(this.goggles);
+    // coat details (dropped at low quality): collar, lapels, pocket outlines
+    this.detail.name = 'detail'; this.torso.add(this.detail);
+    for (const sx of [-1, 1]) { const col = part(rbox(0.075, 0.085, 0.014, 0.005), coatM, this.detail, sx * 0.062, 0.575, 0.105); col.rotation.set(0.35, 0, sx * -0.55); }
+    const pocketTex = pocketTexture(), logoTex = logoPatchTexture(), badgeTex = badgeTexture(); this.texs.push(pocketTex, logoTex, badgeTex);
+    const decal = (tex: THREE.Texture, parent: THREE.Object3D, y: number, thetaCenter: number, widthM: number, heightM: number, off = 0.004) => {
+      const rT = coatR(y + heightM / 2) + off, rB = coatR(y - heightM / 2) + off, len = widthM / ((rT + rB) / 2); const m = new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }); this.mats.push(m);
+      const d = new THREE.Mesh(g(new THREE.CylinderGeometry(rT, rB, heightM, 20, 1, true, thetaCenter - len / 2, len)), m); d.position.y = y; d.renderOrder = 2; parent.add(d); return d;
+    };
+    for (const sx of [-1, 1]) decal(pocketTex, this.detail, -0.13, sx * 0.85, 0.12, 0.105, 0.002).userData.coatChild = true;
+    // the project's logo on the left chest and large on the back, plus the ID badge on the right chest
+    decal(logoTex, this.coat, 0.3, 0.62, 0.105, 0.082).name = 'logo-chest';
+    decal(logoTex, this.coat, 0.18, Math.PI, 0.25, 0.195).name = 'logo-back';
+    decal(badgeTex, this.coat, 0.33, -0.55, 0.055, 0.082).name = 'badge';
+    // arms: coat sleeve to the elbow, bare forearm with the cuff rolled, hands with fingers
     for (const i of [0, 1]) {
       const side = i ? 1 : -1; const U = this.armU[i], Lw = this.armL[i];
-      U.position.set(side * 0.2, 0.5, 0); this.torso.add(U); part(new THREE.CapsuleGeometry(0.047, 0.2, 3, 8), coatM, coatFill, U, 0, -0.15, 0);
-      Lw.position.set(0, -0.3, 0); U.add(Lw); part(new THREE.CapsuleGeometry(0.04, 0.17, 3, 8), skin, fill, Lw, 0, -0.135, 0);
-      const cuff = part(new THREE.TorusGeometry(0.05, 0.01, 5, 12), coatM, null, Lw, 0, -0.03, 0); cuff.rotation.x = Math.PI / 2;   // rolled sleeve
+      U.position.set(side * 0.2, 0.5, 0); this.torso.add(U); part(new THREE.CapsuleGeometry(0.05, 0.2, 5, 14), coatM, U, 0, -0.15, 0);
+      Lw.position.set(0, -0.3, 0); U.add(Lw); part(new THREE.CapsuleGeometry(0.039, 0.17, 5, 14), skin, Lw, 0, -0.135, 0);
+      const cuff = part(new THREE.TorusGeometry(0.047, 0.013, 8, 18), coatM, Lw, 0, -0.012, 0); cuff.rotation.x = Math.PI / 2;
       const hand = new THREE.Group(); hand.position.set(0, -0.27, 0); Lw.add(hand);
-      part(new THREE.BoxGeometry(0.07, 0.085, 0.03), glove, fill, hand, 0, -0.045, 0);
+      part(rbox(0.07, 0.09, 0.03, 0.012), skin, hand, 0, -0.045, 0);
       const fingers: Finger[] = [];
       for (let f = 0; f < 4; f++) {
-        const f1 = new THREE.Group(); f1.position.set(-0.026 + f * 0.0175, -0.09, 0); hand.add(f1); part(new THREE.CapsuleGeometry(0.008, 0.02, 2, 4), glove, null, f1, 0, -0.016, 0);
-        const f2 = new THREE.Group(); f2.position.set(0, -0.034, 0); f1.add(f2); part(new THREE.CapsuleGeometry(0.0075, 0.018, 2, 4), glove, null, f2, 0, -0.014, 0);
+        const f1 = new THREE.Group(); f1.position.set(-0.026 + f * 0.0175, -0.09, 0); hand.add(f1); part(new THREE.CapsuleGeometry(0.0078, 0.02, 3, 6), skin, f1, 0, -0.016, 0);
+        const f2 = new THREE.Group(); f2.position.set(0, -0.034, 0); f1.add(f2); part(new THREE.CapsuleGeometry(0.0072, 0.018, 3, 6), skin, f2, 0, -0.014, 0);
         fingers.push({ joints: [f1, f2] });
       }
-      const t1 = new THREE.Group(); t1.position.set(side * -0.04, -0.045, 0.01); hand.add(t1); t1.rotation.z = side * 0.6; part(new THREE.CapsuleGeometry(0.009, 0.022, 2, 4), glove, null, t1, 0, -0.018, 0);
-      const t2 = new THREE.Group(); t2.position.set(0, -0.04, 0); t1.add(t2); part(new THREE.CapsuleGeometry(0.008, 0.016, 2, 4), glove, null, t2, 0, -0.012, 0);
+      const t1 = new THREE.Group(); t1.position.set(side * -0.04, -0.045, 0.01); hand.add(t1); t1.rotation.z = side * 0.6; part(new THREE.CapsuleGeometry(0.0088, 0.022, 3, 6), skin, t1, 0, -0.018, 0);
+      const t2 = new THREE.Group(); t2.position.set(0, -0.04, 0); t1.add(t2); part(new THREE.CapsuleGeometry(0.0078, 0.016, 3, 6), skin, t2, 0, -0.012, 0);
       this.hands.push({ root: hand, fingers, thumb: { joints: [t1, t2] }, curl: 0.3, wantCurl: 0.3, indexOut: false });
     }
-    // clipboard in the left hand, coffee mug for the right
-    this.clip = part(new THREE.BoxGeometry(0.2, 0.26, 0.015), accent, null, this.hands[0].root, 0.0, -0.14, 0.07); this.clip.rotation.set(0.15, 0.3, 0);
-    this.mug = part(new THREE.CylinderGeometry(0.035, 0.032, 0.08, 10, 1, true), accent, null, this.hands[1].root, 0, -0.07, 0.04); this.mug.visible = false;
+    // clipboard in the left hand (with paper and a clip), coffee mug for the right
+    this.clip = part(rbox(0.2, 0.26, 0.014, 0.006), board, this.hands[0].root, 0.0, -0.14, 0.07); this.clip.rotation.set(0.15, 0.3, 0);
+    part(new THREE.PlaneGeometry(0.17, 0.225), paper, this.clip, 0, -0.01, 0.0085); part(rbox(0.06, 0.03, 0.016, 0.005), metalM, this.clip, 0, 0.12, 0.012);
+    this.mug = part(new THREE.CylinderGeometry(0.035, 0.032, 0.08, 20), ceramic, this.hands[1].root, 0, -0.07, 0.04); this.mug.visible = false;
+    part(new THREE.TorusGeometry(0.02, 0.005, 6, 12, Math.PI), ceramic, this.mug, 0.04, 0, 0).rotation.z = -Math.PI / 2;
     this.root.position.set(WAYPOINTS.backRight[0], 0, WAYPOINTS.backRight[1]); this.root.rotation.y = this.heading; this.lastPos.copy(this.root.position);
-    this.body.traverse(o => { (o as any).castShadow = false; });
+    this.body.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = !(m.material as THREE.Material).transparent; m.receiveShadow = false; } });
   }
 
   // ───────────────────────── public API ─────────────────────────
@@ -232,7 +263,7 @@ export class Scientist {
     this.node = from; this.path = route(from, name); this.target = null;
     const wp = WAYPOINTS[name]; if (!this.path.length && wp && Math.hypot(wp[0] - this.root.position.x, wp[1] - this.root.position.z) > 0.15) this.path = [name];
   }
-  dispose() { this.geos.forEach(x => x.dispose()); this.mats.forEach(x => x.dispose()); }
+  dispose() { this.geos.forEach(x => x.dispose()); this.mats.forEach(x => x.dispose()); this.texs.forEach(x => x.dispose()); }
 
   private tq = new THREE.Quaternion(); private tv = new THREE.Vector3(); private tv2 = new THREE.Vector3(); private tv3 = new THREE.Vector3();
   /** Two-bone IK: place the end of the chain (upper+lower) at `target` (in the parent space of `upper`), elbow/knee bends toward `pole`. */
@@ -379,11 +410,11 @@ export class Scientist {
     for (const e of this.eyes) e.scale.y = this.blink > 0 ? 0.12 : 1;
     this.brows.forEach((b, k) => { const raise = worried ? 0.012 : talk ? Math.max(0, Math.sin(t * 4)) * 0.008 : 0; b.position.y += ((0.142 + raise) - b.position.y) * Math.min(1, dt * 8); b.rotation.z = (k ? -1 : 1) * (worried ? 0.25 : 0); });
     const mo = this.speakingExternal ? this.mouthLevel : talk ? (Math.abs(Math.sin(t * 9)) * 0.6 + Math.abs(Math.sin(t * 5.3)) * 0.3) : 0;
-    this.jaw.rotation.x += (mo * 0.28 - this.jaw.rotation.x) * Math.min(1, dt * 18); this.mouth.scale.set(1 + mo * 0.1, 0.25 + mo * 1.1, 1);
+    this.jaw.rotation.x += (mo * 0.28 - this.jaw.rotation.x) * Math.min(1, dt * 18); this.mouth.scale.set(1 - mo * 0.12, 0.1 + mo * 0.6, 1);
     // coat sway: follows acceleration, plus a little breathing
     const ax = -this.vel.x * Math.sin(this.heading) * 0.05 - this.vel.z * Math.cos(this.heading) * 0.05;
     this.coatSpring.x += (ax - this.coatSpring.x) * Math.min(1, dt * 6); this.coat.rotation.x = this.coatSpring.x * 0.5 + Math.sin(t * 1.7) * 0.01; this.coat.rotation.z = Math.sin(this.phase * 0.5) * 0.04 * w;
-    (this.coat.material as THREE.MeshBasicMaterial).color.set(worried ? 0xf59e0b : 0x0ea5e9);
+    this.coatMat.color.set(worried ? 0xffe6bd : 0xf3f5f7);
     this.root.position.y = 0;
   }
 }

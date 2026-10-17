@@ -99,7 +99,7 @@ def scenario_call():
         check("Dr. Wire is on the phone", s.js("window.__lab.sci.mode === 'phone'"))
         check("call bar shows a timer", s.js("/Connected \\d\\d:\\d\\d/.test(document.querySelector('[data-call-status]').textContent)"))
         check("microphone indicator is visible", s.js("!!document.querySelector('[data-mic-indicator]')"))
-        check("greeting is spoken and captioned", s.js("window.__spoken.some(t => /Dr\\. Wire speaking/.test(t))") and s.js("/Dr\\. Wire speaking/.test(document.querySelector('[data-call-captions]').textContent)"))
+        check("greeting is spoken and captioned", s.js("window.__spoken.some(t => /(Dr\\.|Doctor) Wire speaking/.test(t))") and s.js("/Dr\\. Wire speaking/.test(document.querySelector('[data-call-captions]').textContent)"))
         s.sc.locator("[data-call-input]").fill("How does the VNA find the resonance?"); s.sc.locator("[data-call-send]").click()
         s.wait_for("window.__spoken.some(t => /230 kilohertz/.test(t))", 20, "mocked reply spoken")
         check("typed question -> mocked reply -> speechSynthesis.speak", True)

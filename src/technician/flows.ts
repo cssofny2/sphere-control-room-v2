@@ -11,6 +11,7 @@ import type { OrderLog } from './commerce';
 import { buildCart, buildRequisition, cartPages, requisitionPages } from './commerce';
 import type { Step, Task, TaskRunner } from './taskRunner';
 import { offlineReply, senderName, type InMail, type MailClient } from './mail';
+import { couldNotLookUp, lookUpLead } from './manner';
 
 export type FlowDeps = {
   runner: Pick<TaskRunner, 'enqueueSteps' | 'waitSettled'>;
@@ -58,7 +59,7 @@ export function createFlows(d: FlowDeps) {
       const q = clean(query, 200); const out = { text: '' };
       const search: Page = { kind: 'search', title: 'Lab web search', site: 'web search', lines: ['Type a question and press Enter.'] };
       return run('Look something up', [
-        at('Search the web', "I don't have that in my head. Let me look it up.", async c => {
+        at('Search the web', lookUpLead(), async c => {
           d.desk.reset();
           if (!(await d.desk.openUrl('about:websearch', search)) || c.cancelled()) return;
           if (!(await d.desk.search(q)) || c.cancelled()) return;
@@ -66,13 +67,23 @@ export function createFlows(d: FlowDeps) {
           if (r.ok === false) {
             d.desk.showPage({ kind: 'offline', title: 'Search unavailable', site: 'web search', lines: [`Could not search: ${WHY[r.code] || WHY.error}.`], footer: 'Nothing was found.' });
             out.text = `I couldn't look that up: ${WHY[r.code] || WHY.error}.`;
-            if (o.speak) d.say(`Hmm, I couldn't look that up, because ${WHY[r.code] || WHY.error}.`); return;
+            if (o.speak) d.say(`${couldNotLookUp()} The reason: ${WHY[r.code] || WHY.error}.`); return;
           }
-          d.desk.showPage({ kind: 'results', title: `Results for “${q}”`, site: 'web search', lines: [...r.sources.map(s => `${s.title} — ${s.domain}`), '', ...r.answer.match(/[^.!?]+[.!?]*/g)!.map(x => x.trim()).filter(Boolean)], footer: r.sources.length ? `Sources: ${r.sources.map(s => s.domain).join(', ')}` : undefined });
+          const via = r.via ?? 'web';
+          const kind = via === 'ai' ? 'AI general knowledge (not a live search)' : via === 'encyclopedia' ? 'Encyclopedia (Wikipedia)' : 'Live web search';
+          d.desk.showPage({ kind: 'results', title: `Results for “${q}”`, site: via === 'ai' ? 'AI assistant' : 'web search', lines: [`Result type: ${kind}`, ...r.sources.map(s => `${s.title} — ${s.domain}`), '', ...r.answer.match(/[^.!?]+[.!?]*/g)!.map(x => x.trim()).filter(Boolean)], footer: r.sources.length ? `Sources: ${r.sources.map(s => s.domain).join(', ')}` : via === 'ai' ? 'No web page was checked. Verify important facts.' : undefined });
           await d.sleep(1800); if (c.cancelled()) return;
           const dom = r.sources[0]?.domain;
-          out.text = `Found online${dom ? ` (${dom})` : ''}: ${r.answer}`;
-          if (o.speak) d.say(`Okay, here's what I found. ${r.answer}${dom ? ` That's from ${dom.replace(/\./g, ' dot ')}.` : ''}`);
+          if (via === 'ai') {
+            out.text = `AI general knowledge, NOT a live web search (no page was checked; tell the operator it is worth double-checking): ${r.answer}`;
+            if (o.speak) d.say(`I couldn't pull up a live page for that, so this comes from general knowledge, not a fresh search. ${r.answer} It's worth double-checking.`);
+          } else if (via === 'encyclopedia') {
+            out.text = `From Wikipedia: ${r.answer}`;
+            if (o.speak) d.say(`There's a Wikipedia article on it. ${r.answer}`);
+          } else {
+            out.text = `Found online${dom ? ` (${dom})` : ''}: ${r.answer}`;
+            if (o.speak) d.say(`Okay, here's what I found. ${r.answer}${dom ? ` That's from ${dom.replace(/\./g, ' dot ')}.` : ''}`);
+          }
         }),
       ], out);
     },

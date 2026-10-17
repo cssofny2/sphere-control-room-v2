@@ -11,6 +11,7 @@ import type { Flows } from './flows';
 import { ACTION_BY_ID } from './actions';
 import type { ConfirmBroker, Step, TaskRunner } from './taskRunner';
 import type { SpeechIO } from './speech';
+import { askName, clarify, dontKnow, lookUpLead, meet, noName, parseName, withName } from './manner';
 
 export type CallState = 'idle' | 'connecting' | 'ringing' | 'connected' | 'ended';
 export type Caption = { id: number; who: 'you' | 'wire' | 'system'; text: string; interim?: boolean };
@@ -71,6 +72,8 @@ export function createCallController(deps: CallDeps) {
   const unsub: (() => void)[] = [];
   let busyTurn = false; const turnQueue: string[] = [];
   let pending: Pending = null, lunchOffered = false, incoming: { message: string } | null = null;
+  // Who he is talking to. The name lives only in memory for this page; it is never written to storage.
+  let callerName: string | null = null, namePending: 'ask' | 'confirm' | null = null, nameDeclined = false, sinceName = 2;
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const later = (fn: () => void, ms: number) => { const h = setTimeout(() => { timers.delete(h); fn(); }, ms); timers.add(h); return h; };
 
@@ -113,14 +116,15 @@ export function createCallController(deps: CallDeps) {
   // ——— everyday talk and his computer ———
   const wall = () => (deps.clock ? deps.clock() : new Date());
   const talkCtx = () => { const f = deps.facts(); return { now: wall(), shift: deps.shift, alarms: f.alarms.length, busy: !!deps.runner.current, lunchOffered, pick: deps.rng ? (n: number) => Math.floor(deps.rng!() * n) : undefined }; };
+  const named = (text: string) => { const w = withName(text, callerName, sinceName, deps.rng ? (n: number) => Math.floor(deps.rng!() * n) : undefined); sinceName = w.used ? 0 : sinceName + 1; return w.text; };
   const applyTalk = (r: TalkResult) => {
-    reply(r.text); pending = r.ask ?? null; if (r.ask?.topic === 'lunch' || /lunch/i.test(r.text)) lunchOffered = true;
+    reply(named(r.text)); pending = r.ask ?? null; if (r.ask?.topic === 'lunch' || /lunch/i.test(r.text)) lunchOffered = true;
     if (r.intent?.type === 'food') runFood(r.intent.place, '');
   };
   const quiet = (p: Promise<unknown>) => { p.catch(() => { /* a failed flow has already told the operator */ }); };
   const runFood = (place: string, request: string) => { if (!deps.flows) { reply("I can't get to the computer right now."); return; } quiet(deps.flows.orderFood(place, request, { speak: true })); };
   const runPart = (part: string, qty: number, urgent: boolean) => { if (!deps.flows) { reply("I can't get to the computer right now."); return; } quiet(deps.flows.orderPart(part, { qty, urgent, speak: true })); };
-  const runLookup = (query: string) => { if (!deps.flows) { reply("I don't know that, and I can't get to the computer right now."); return; } quiet(deps.flows.lookUp(query, { speak: true })); };
+  const runLookup = (query: string) => { if (!deps.flows) { reply(`${dontKnow()} And I can't get to the computer right now.`); return; } quiet(deps.flows.lookUp(query, { speak: true })); };
 
   async function runTool(name: string, input: Record<string, unknown>): Promise<{ content: string; is_error?: boolean }> {
     const R = deps.runner;
@@ -163,7 +167,7 @@ export function createCallController(deps: CallDeps) {
       let buf = ''; const uses: { id: string; name: string; input: Record<string, unknown> }[] = [];
       const chunker = createSentenceChunker(s => { spoken += (spoken ? ' ' : '') + s; speakChunk(s); deps.say({ text: spoken, focus: 'none', mood: 'neutral', kind: 'answer' }); });
       try {
-        await stream({ messages: history, snapshot: buildSnapshot(deps.facts(), { task: deps.runner.current?.title, pendingConfirm: deps.broker.pending?.text, localTime: wall().toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }), shift: shiftAnswer(wall(), deps.shift ?? DEFAULT_SHIFT) }), signal: abort.signal }, ev => {
+        await stream({ messages: history, snapshot: buildSnapshot(deps.facts(), { task: deps.runner.current?.title, pendingConfirm: deps.broker.pending?.text, operator: callerName, localTime: wall().toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }), shift: shiftAnswer(wall(), deps.shift ?? DEFAULT_SHIFT) }), signal: abort.signal }, ev => {
           if (my !== epoch) return;
           if (ev.type === 'text') { buf += ev.delta; chunker.push(ev.delta); if (!cid.id) cid.id = cap('wire', buf).id; else updateCap(cid.id, spoken ? buf : buf); }
           else if (ev.type === 'tool_use') uses.push({ id: ev.id, name: ev.name, input: ev.input });
@@ -201,8 +205,8 @@ export function createCallController(deps: CallDeps) {
       reply(r.ok === true ? `Sure. ${r.task.title}. Watch me.` : `I can't do that: ${r.reason}`, 'answer', r.ok === true ? 'neutral' : 'worried'); return;
     }
     const a = deps.tech.ask(text, deps.facts(), now());
-    if (!a.known && deps.flows && text.trim().split(/\s+/).length >= 3) { runLookup(text.replace(/[?]+$/, '')); return; }
-    reply(a.remark.text, 'answer', a.known ? 'neutral' : 'worried');
+    if (!a.known && deps.flows && text.trim().split(/\s+/).length >= 2) { runLookup(text.replace(/[?]+$/, '')); return; }
+    reply(a.known ? named(a.remark.text) : a.remark.text, 'answer', a.known ? 'neutral' : 'worried');
   }
 
   async function handle(text: string) {
@@ -212,7 +216,28 @@ export function createCallController(deps: CallDeps) {
       if (isNo(text)) { deps.broker.answer(false); return; }
     }
     if (/\b(emergency stop|stop everything|e-?stop)\b/i.test(text)) { offlineTurn(text); return; }
-    if (/\b(hang up|goodbye|bye|that's all|that is all)\b/i.test(text) && text.trim().split(/\s+/).length <= 4) { reply('Okay, talk soon.'); setTimeout(() => void hangUp(), 1800); return; }
+    if (/\b(hang up|goodbye|bye|that's all|that is all)\b/i.test(text) && text.trim().split(/\s+/).length <= 4) { reply(callerName ? `Okay, talk soon, ${callerName}.` : 'Okay, talk soon.'); setTimeout(() => void hangUp(), 1800); return; }
+    // Who is this? He asked in the greeting; the operator can also volunteer a name or ask whether he remembers it.
+    if (namePending) {
+      const mode = namePending; namePending = null;
+      if (mode === 'confirm' && callerName) {
+        if (isYes(text) || /\b(it'?s me|same|still me)\b/i.test(text)) { sinceName = 0; reply(`Good to hear from you again, ${callerName}. What can I do for you?`); return; }
+        if (isNo(text)) { callerName = null; namePending = 'ask'; reply(`Oh, sorry about that. ${askName()}`); return; }
+      }
+      const r = parseName(text);
+      if (r.kind === 'name') {
+        callerName = r.name; nameDeclined = false; sinceName = 0;
+        if (text.trim().split(/\s+/).length <= 5) { reply(`${meet(r.name)} What can I do for you?`); return; }
+        reply(meet(r.name));
+      } else if (r.kind === 'declined') { callerName = null; nameDeclined = true; reply(`${noName()} What can I do for you?`); return; }
+      else if (mode === 'confirm') callerName = null;
+    } else if (/\b(my name is|call me|they call me|name'?s)\b/i.test(text)) {
+      const r = parseName(text);
+      if (r.kind === 'name') { callerName = r.name; nameDeclined = false; sinceName = 0; reply(`${meet(r.name)} I'll remember that for this call.`); return; }
+    } else if (/\b(what('?s| is) my name|do you (know|remember) (my name|who i am|me)|who am i)\b/i.test(text)) {
+      reply(callerName ? `You're ${callerName}. I wouldn't forget that so quickly.` : nameDeclined ? "You didn't want to say, and that's fine. You can tell me any time." : "I don't think you told me yet. Who am I speaking with?");
+      if (!callerName && !nameDeclined) namePending = 'ask'; return;
+    }
     // Something he asked the operator a moment ago (how is your day, lunch?).
     const tc = talkCtx();
     if (pending) { const p = pending; pending = null; const r = answerPending(p, text, tc); if (r) { applyTalk(r); return; } }
@@ -235,7 +260,7 @@ export function createCallController(deps: CallDeps) {
     if (busyTurn) { turnQueue.push(text); return; }
     busyTurn = true;
     try { await handle(text); while (turnQueue.length) await handle(turnQueue.shift() as string); }
-    catch { reply("Sorry, I lost my train of thought. Could you say that again?", 'answer', 'worried'); }
+    catch { reply(`Sorry, I lost my train of thought. ${clarify()}`, 'answer', 'worried'); }
     finally { busyTurn = false; }
   }
 
@@ -252,7 +277,7 @@ export function createCallController(deps: CallDeps) {
   async function start(opts: { mic?: boolean; opening?: string } = {}) {
     if (state !== 'idle' && state !== 'ended') return;
     if (incoming) { opts = { ...opts, opening: opts.opening ?? incoming.message }; incoming = null; }
-    captions = []; history = []; pending = null; capId = 0; interimId = 0; notice = ''; llmDown = false; textOnly = false; muted = false; epoch++; micState = 'off'; deps.tech.memory.questions += 0;
+    captions = []; history = []; pending = null; namePending = null; capId = 0; interimId = 0; notice = ''; llmDown = false; textOnly = false; muted = false; epoch++; micState = 'off'; deps.tech.memory.questions += 0;
     state = 'connecting'; emit();
     const wantMic = opts.mic !== false;
     const m = wantMic ? await deps.requestMic() : ({ ok: false, reason: 'off' } as const);   // must run inside the click that started the call
@@ -268,7 +293,10 @@ export function createCallController(deps: CallDeps) {
     deps.beep(true); state = 'connected'; connectedAt = now(); emit();
     startPolling();
     const f = deps.facts(); const open = f.alarms.length;
-    if (opts.opening) reply(opts.opening, 'answer'); else reply(`Lab, Dr. Wire speaking.${open ? ` I can see ${open} open alarm${open > 1 ? 's' : ''}.` : ''} What can I do for you?`, 'answer', open ? 'worried' : 'neutral');
+    if (opts.opening) { reply(opts.opening, 'answer'); }
+    else if (open) reply(`Lab, Dr. Wire speaking. I can see ${open} open alarm${open > 1 ? 's' : ''}. ${callerName ? `${callerName}, is that you?` : 'Who am I speaking with?'}`, 'answer', 'worried');
+    else reply(callerName ? `Lab, Dr. Wire speaking. Is that ${callerName} again?` : `Lab, Dr. Wire speaking. ${askName()}`, 'answer', 'neutral');
+    if (!opts.opening && !nameDeclined) namePending = callerName ? 'confirm' : 'ask';
     if (micState === 'ok' && micInput === 'open') deps.speech.listen();
   }
 
@@ -293,7 +321,8 @@ export function createCallController(deps: CallDeps) {
     start, hangUp, submit,
     get incoming() { return incoming; },
     /** Dr. Wire calls the operator back later (for example with the arrival date of an ordered part). */
-    callBack(message: string, delayMs = 20000) {
+    callBack(rawMessage: string, delayMs = 20000) {
+      const message = callerName ? `Hi ${callerName}, it's Dr. Wire. ${rawMessage}` : rawMessage;
       later(() => {
         if (state === 'connected') { reply(message, 'alert'); return; }
         if (state !== 'idle' && state !== 'ended') { later(() => { if (state === 'connected') reply(message, 'alert'); }, 8000); return; }

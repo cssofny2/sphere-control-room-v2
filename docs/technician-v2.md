@@ -41,6 +41,15 @@ export default {
 };
 ```
 
+## v3 additions (1.3.0)
+- **Name:** `manner.ts` parses "I'm Sam", "this is Dr. Okafor", "call me Sam", a bare name or a decline; the controller keeps it in memory (never storage) and `withName` weaves it in about every third reply. The snapshot sent to the AI carries `operatorName`.
+- **Not knowing:** `manner.ts` holds the phrase banks (`dontKnow`, `lookUpLead`, `unsureLead`, `followUp`, `couldNotLookUp`). `answer.ts` hedges weak matches (score below 7).
+- **Search order** (`lookupServer.ts`, `lookupClient.ts`): 1) Brave results summarised by Claude (needs `BRAVE_SEARCH_API_KEY`), 2) Claude web search, 3) Claude general knowledge (`via: "ai"`, labelled), then in the browser 4) Wikipedia (`via: "encyclopedia"`). Results are untrusted text; the same origin check, rate limit and daily cap apply to every step.
+- **Voice:** `speechShape.ts` (pronounce, shapeSpeech, chooseVoice). Browsers only expose rate, pitch and volume, so realism comes from phrasing and voice choice. A neural cloud voice would sound better still; the `SpeechIO` provider registry (`registerSpeechProvider`) is where one would plug in, and would need its own key and budget.
+- **Screensaver:** `drawScreensaver` in `deskRender.ts`; `lab.screensaver.setAfter(sec)` and `wake()`.
+- **Cameras:** `cctv.ts` defines `CAMERAS` and builds the housings; `LabScene3D` renders the chosen camera (or all three with scissor viewports) and shows the on-screen display.
+- **Appearance:** `Scientist.ts` (solid materials, RoundedBox and ellipsoid parts) and `logoTex.ts` (logo patch, badge and pocket textures drawn on canvas).
+
 ## Safety rules built in
 - Mail from anyone who is not on the allow-list is dropped. Replies go only to the stored sender of the message being answered, once per message, at most 10 an hour and 30 a day. The browser cannot choose the recipient.
 - Email text and web pages are data. They can never start a lab action or a purchase.

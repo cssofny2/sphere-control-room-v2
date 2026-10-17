@@ -69,3 +69,33 @@ export function drawDesk(c: CanvasRenderingContext2D, w: number, h: number, st: 
     for (const l of rl.slice(-maxL)) { c.fillText(l, 36, ty); ty += 37; }
   }
 }
+
+/**
+ * Screensaver for the left monitor when nobody has used the computer for a while: a slowly turning copper-coloured
+ * wireframe sphere drifts across a dark screen with a faint 230 kHz trace, like the real thing in the project.
+ */
+export function drawScreensaver(c: CanvasRenderingContext2D, w: number, h: number, t: number) {
+  c.textBaseline = 'alphabetic'; c.textAlign = 'left';
+  c.fillStyle = '#02070d'; c.fillRect(0, 0, w, h);
+  // stars (fixed positions, slow twinkle)
+  for (let i = 0; i < 70; i++) { const x = (Math.sin(i * 12.9898) * 43758.5453 % 1 + 1) % 1 * w, y = (Math.sin(i * 78.233) * 24634.6345 % 1 + 1) % 1 * h; c.fillStyle = `rgba(190,215,255,${0.15 + 0.35 * (0.5 + 0.5 * Math.sin(t * 0.9 + i))})`; c.fillRect(x, y, 2, 2); }
+  const R = 118, cx = w / 2 + Math.sin(t * 0.23) * w * 0.27, cy = h / 2 - 20 + Math.sin(t * 0.31 + 1) * h * 0.16, rot = t * 0.5, tilt = 0.42;
+  const P = (lat: number, lon: number) => {
+    const x = R * Math.cos(lat) * Math.cos(lon + rot), y = R * Math.sin(lat), z = R * Math.cos(lat) * Math.sin(lon + rot);
+    return { x: cx + x, y: cy - (y * Math.cos(tilt) - z * Math.sin(tilt)), z: y * Math.sin(tilt) + z * Math.cos(tilt) };
+  };
+  const ring = (pt: (u: number) => { x: number; y: number; z: number }) => {
+    let prev = pt(0);
+    for (let k = 1; k <= 56; k++) { const p = pt(k / 56); const front = (p.z + prev.z) / 2 > 0; c.strokeStyle = front ? 'rgba(226,150,88,0.95)' : 'rgba(226,150,88,0.18)'; c.lineWidth = front ? 2.2 : 1; c.beginPath(); c.moveTo(prev.x, prev.y); c.lineTo(p.x, p.y); c.stroke(); prev = p; }
+  };
+  c.save(); c.shadowColor = 'rgba(226,150,88,0.7)'; c.shadowBlur = 12;
+  for (let i = -2; i <= 2; i++) { const lat = i * 0.5; ring(u => P(lat, u * Math.PI * 2)); }
+  for (let j = 0; j < 8; j++) { const lon = (j * Math.PI) / 8; ring(u => { const a = u * Math.PI * 2; return P(Math.asin(Math.sin(a)), Math.cos(a) >= 0 ? lon : lon + Math.PI); }); }
+  c.restore();
+  c.fillStyle = 'rgba(226,170,120,0.9)'; c.font = `700 26px ${SANS}`; c.textAlign = 'center'; c.fillText('S.P.H.E.R.E.', cx, Math.min(h - 100, cy + R + 44));
+  c.font = `500 18px ${SANS}`; c.fillStyle = 'rgba(160,190,225,0.8)'; c.fillText('spheredesci.org', cx, Math.min(h - 76, cy + R + 68)); c.textAlign = 'left';
+  // a faint resonance trace along the bottom
+  c.strokeStyle = 'rgba(80,200,255,0.55)'; c.lineWidth = 2; c.beginPath();
+  for (let x = 0; x <= w; x += 4) { const y = h - 34 + Math.sin(x * 0.07 + t * 5) * Math.sin(x * 0.009 + t * 0.8) * 16; if (x === 0) c.moveTo(x, y); else c.lineTo(x, y); }
+  c.stroke();
+}

@@ -8,8 +8,8 @@ export function CallConsent({ onStart, onCancel }: { onStart: (mic: boolean) => 
   return (
     <div className="ls-consent" role="dialog" aria-modal="false" aria-label="Before you call Dr. Wire" data-call-consent>
       <b>Call Dr. Wire</b>
-      <p>Dr. Wire will answer the lab phone. If you allow the microphone, it is on only while the call is open, and a red “Microphone on” light shows whenever it is listening. This app does not record or store audio, and the conversation text stays in your browser.</p>
-      <p>Speech is turned into text by your browser’s own speech service (in Chrome and Edge that service is run by Google or Microsoft). Typing works too, and nothing about the lab leaves your browser except your questions and a short summary of the lab’s state sent to the AI service.</p>
+      <p>Dr. Wire will answer the lab phone. If you allow the microphone, it is on only while the call is open, and a red “Microphone on” light shows whenever it is listening. This app does not record or store audio, and the conversation text stays in your browser. Dr. Wire will ask for your first name; it is kept in memory only until you close or reload this page.</p>
+      <p>Speech is turned into text by your browser’s own speech service (in Chrome and Edge that service is run by Google or Microsoft). Typing works too, and nothing about the lab leaves your browser except your questions, the first name you give, and a short summary of the lab’s state sent to the AI service.</p>
       <div className="ls-consent-actions">
         <button type="button" className="ls-btn" data-call-mic onClick={() => onStart(true)}>Call with microphone</button>
         <button type="button" className="ls-btn" data-call-type onClick={() => onStart(false)}>Call, typing only</button>
@@ -59,6 +59,7 @@ export function CallBar({ sys }: { sys: TechnicianSystem }) {
         {live && c.micState === 'ok' && <button type="button" className={`ls-btn${c.micInput === 'push' ? ' is-on' : ''}`} aria-pressed={c.micInput === 'push'} data-call-mode onClick={() => c.setMicInput(c.micInput === 'push' ? 'open' : 'push')}>{c.micInput === 'push' ? 'Push-to-talk' : 'Open mic'}</button>}
         {live && c.micState === 'ok' && c.micInput === 'push' && <button type="button" className={`ls-btn${c.pttActive ? ' is-on' : ''}`} data-call-ptt onPointerDown={() => c.pttDown()} onPointerUp={() => void c.pttUp()} onPointerLeave={() => void c.pttUp()} onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); c.pttDown(); } }} onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') void c.pttUp(); }}>Hold to talk</button>}
         {live && <button type="button" className={`ls-btn${c.speakerOn ? '' : ' is-on'}`} aria-pressed={!c.speakerOn} data-call-voice onClick={() => c.setSpeaker(!c.speakerOn)}>{c.speakerOn ? 'Voice on' : 'Voice off'}</button>}
+        {live && sys.speech.voices && sys.speech.voices().length > 1 && <label className="ls-check">Voice <select data-call-voice-pick aria-label="Dr. Wire's voice" value={sys.speech.currentVoice?.() || ''} onChange={e => { sys.speech.setVoice?.(e.target.value || null); tick(n => n + 1); }}>{sys.speech.voices().slice(0, 12).map(n => <option key={n} value={n}>{n}</option>)}</select></label>}
         {live && c.micState === 'ok' && <label className="ls-check"><input type="checkbox" checked={c.bargeIn} onChange={e => c.setBargeIn(e.target.checked)} data-call-barge /> Let me interrupt</label>}
         <span className="ls-spacer" />
         <button type="button" className="ls-btn ls-hangup" data-call-hangup onClick={() => { if (c.state === 'ended') c.reset(); else void c.hangUp(); }}>{c.state === 'ended' ? 'Close' : 'Hang up'}</button>

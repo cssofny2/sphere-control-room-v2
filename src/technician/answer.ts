@@ -2,6 +2,7 @@
 // If nothing matches well he says he does not know instead of guessing.
 import { KNOWLEDGE, type KBEntry } from './knowledge.generated';
 import { fmtPressure, readiness, type FactsPlus } from './facts';
+import { dontKnow, followUp, unsureLead } from './manner';
 
 const STOP = new Set(('a an the is are was were be been am do does did how what why when where which who whom whose can could should would will shall may might must i you he she it we they me my your our their this that these those of in on at to for from with by about as into over under up down out off and or but not no yes please tell show explain give say need want know just really very also than then so if any some there here has have had get got make makes lab thing things stuff work works working use used using').split(' '));
 
@@ -33,7 +34,7 @@ export function search(question: string, kb: KBEntry[] = KNOWLEDGE, limit = 3): 
   return hits.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
-const firstSentences = (t: string, n: number) => (t.match(/[^.!?]+[.!?]+(\s|$)/g) || [t]).slice(0, n).join('').trim();
+const firstSentences = (t: string, n: number) => (t.match(/(?:[^.!?]|\.(?=\d))+[.!?]+(?=\s|$)\s*/g) || [t]).slice(0, n).join('').trim();   // a decimal point (1.5 kHz) is not a sentence end
 
 export type Answer = { text: string; known: boolean; sources: string[]; topic?: string };
 
@@ -75,9 +76,10 @@ export function liveAnswer(question: string, f: FactsPlus): Answer | null {
 /** Looks up a general question in the knowledge base. */
 export function knowledgeAnswer(question: string, verbosity = 0.5): Answer {
   const hits = search(question);
-  if (!hits.length) return { text: "I don't know that one. It isn't something I have notes on for this project. I've written it down as an open question for the team.", known: false, sources: [] };
+  if (!hits.length) return { text: `${dontKnow()} ${followUp()}`, known: false, sources: [] };
   const top = hits[0].entry; const n = verbosity < 0.34 ? 1 : verbosity < 0.67 ? 2 : 4;
   let text = firstSentences(top.text, n);
+  if (hits[0].score < 7) text = `${unsureLead()} ${text}`;   // a weak match: say so instead of sounding sure
   const alt = hits[1] && hits[1].score >= hits[0].score * 0.7 ? hits[1].entry : null;
   if (alt && verbosity >= 0.34) text += ` Related: ${alt.title.toLowerCase()}.`;
   return { text, known: true, sources: [top.id, ...(alt ? [alt.id] : [])], topic: top.id.split('.')[0] };
