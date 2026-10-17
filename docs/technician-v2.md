@@ -68,3 +68,9 @@ export default {
 - Shift hours and the 3-day shipping estimate are defaults, not data from a supplier.
 - Mail is polled every 20 seconds while the lab page is open and visible.
 - Typing and mail sounds need one click on the page first (browser audio rules).
+
+## v5 additions (1.5.0)
+- Phone commands: `parseCommand` maps spoken or typed requests to `startup_sequence`, `shutdown_sequence`, the older tasks, or `action` (any single registry action with params). Clear lab commands skip the language model so Dr. Wire always walks to the device. The model path gets the same tasks through `run_task`.
+- Startup order follows the wall poster and is built from the live state, so finished steps are skipped. It stops before the laser shutter by design.
+- Eastern time clock and calendar: `labDetail.ts` formats `Date.now()` with `Intl.DateTimeFormat` and `timeZone: 'America/New_York'`.
+- Audio: `foley.ts` is fed `dist`, `pan` and `clockDist` by the scene each frame and the instrument state through `setLab`.

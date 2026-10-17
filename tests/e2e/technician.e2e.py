@@ -116,7 +116,7 @@ def scenario_voice():
         check("speech recognition is listening (open mic)", True)
         s.js("window.__say('what is the pressure right now')"); s.wait_for("window.__spoken.some(t => /Chamber pressure|230|pressure/i.test(t))", 20, "answer")
         check("spoken question is answered aloud", True)
-        s.sc.locator("[data-call-mute]").click(); s.pg.wait_for_timeout(300)
+        s.sc.locator("[data-call-more]").click(); s.sc.locator("[data-call-mute]").click(); s.pg.wait_for_timeout(300)
         before = s.js("document.querySelectorAll('.ls-cap-you').length"); s.js("window.__say('this should be ignored')"); s.pg.wait_for_timeout(500)
         check("mute ignores speech", s.js("document.querySelectorAll('.ls-cap-you').length") == before)
         check("mic indicator hidden while muted", s.js("!document.querySelector('[data-mic-indicator]')"))
@@ -201,6 +201,23 @@ def scenario_nowebgl():
         check("WebGL failure shows a friendly fallback, not a crash", True)
         check("no uncaught errors", not [e for e in s.errs if e.startswith('PAGEERR')], s.errs[:3]); s.close()
 
-ALL = {"call": scenario_call, "voice": scenario_voice, "task": scenario_task, "blocked": scenario_blocked, "mic-denied": scenario_denied, "mobile": scenario_mobile, "reduced": scenario_reduced, "android": scenario_android, "nowebgl": scenario_nowebgl}
+def scenario_startup():
+    with sync_playwright() as p:
+        s = Session(p); s.js("window.__lab.sci.timeScale = 8")
+        start_call(s, mic=False); s.wait_for("document.querySelector('[data-call-bar]')?.dataset.callState === 'connected'", 90, "connected")
+        s.sc.locator("[data-call-input]").fill("run startup sequence"); s.sc.locator("[data-call-send]").click()
+        s.wait_for("window.__lab.sys.runner.current?.def === 'startup_sequence'", 20, "startup task")
+        stations = set()
+        for _ in range(400):
+            st = s.js("(() => { const r = window.__lab.sys.runner; return [r.current ? r.current.steps[r.current.index]?.station || '' : '', !r.current]; })()")
+            if st[0]: stations.add(st[0])
+            if st[1]: break
+            s.pg.wait_for_timeout(500)
+        check("he walked to the rack and the gauge", {"rackKnob", "gauge"} <= stations, stations)
+        state = s.js("(() => { const st = window.__lab.sys.getState ? window.__lab.sys.getState() : null; return st ? [st.facility.power, st.clock.power, st.vna.power, st.ldv.power, st.chamber.faraday, st.chamber.isolation, st.ldv.shutter] : null; })()")
+        check("lab is up and the shutter is still closed", state is None or (all(state[:6]) and not state[6]), state)
+        check("no console errors", not s.errs, s.errs[:3]); s.close()
+
+ALL = {"startup": scenario_startup, "call": scenario_call, "voice": scenario_voice, "task": scenario_task, "blocked": scenario_blocked, "mic-denied": scenario_denied, "mobile": scenario_mobile, "reduced": scenario_reduced, "android": scenario_android, "nowebgl": scenario_nowebgl}
 for name in (WANT or ALL):
     print("== " + name); ALL[name]()

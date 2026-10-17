@@ -2,6 +2,17 @@
 
 Versions follow semantic versioning. The version lives in `package.json` and is shown in the top-left corner of the app next to the S.P.H.E.R.E. logo.
 
+## [1.5.0] - 2026-10-17
+
+### Added
+- Ask Dr. Wire for any lab action on the phone, by voice or typing. "Run the startup sequence" sends him round the lab in poster order: main breaker, Rubidium clock, VNA, vibrometer, Faraday cage, vibration isolation, close the chamber door, roughing pump then turbo, wait for the clock lock, calibrate the VNA. It skips what is already done and never opens the laser shutter. "Run the shutdown sequence" closes the shutter, pauses a scan, stops the turbo and powers the instruments off. Single commands such as "turn on the VNA", "close the laser shutter", "start the turbo", "set the temperature to 22", "vent the chamber" or "go to the VNA page" work the same way, and every interlock and confirmation still applies. New registry action `wait_clock_lock`.
+- Wall clock that shows Eastern time (America/New_York, EST or EDT as it applies) whatever the visitor's own time zone, and a wall calendar that shows the current Eastern date and redraws when the date changes.
+- Realistic lab audio: layered footsteps (heel thud, contact click, sole scuff, occasional rubber squeak, alternating feet, per-step variation) with room reverb and stereo position and loudness that follow the camera; an ambient bed with HVAC, light hum, rack fans, a roughing pump and a turbo whine that follow the real instrument state; a quiet wall-clock tick; better latch and relay sounds.
+
+### Changed
+- The call panel is much smaller (about 264 px wide, 11 px text), translucent, shows the last three lines, and keeps the audio and microphone controls behind an Options button.
+- The two computer monitors are larger again (0.96 m by 0.56 m, up from 0.74 m by 0.43 m).
+
 ## [1.4.0] - 2026-10-17
 
 ### Added

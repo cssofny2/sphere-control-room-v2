@@ -23,7 +23,7 @@ export function CallBar({ sys }: { sys: TechnicianSystem }) {
   const c = sys.call; const [text, setText] = useState(''); const [, tick] = useState(0);
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => { const id = window.setInterval(() => tick(n => n + 1), 1000); return () => window.clearInterval(id); }, []);
-  const caps = c.captions.slice(-6);
+  const [more, setMore] = useState(false); const caps = c.captions.slice(-3);
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [caps.length, caps[caps.length - 1]?.text]);
   if (c.state === 'idle') return null;
   const live = c.state === 'connected';
@@ -36,6 +36,7 @@ export function CallBar({ sys }: { sys: TechnicianSystem }) {
         <span className="ls-call-status" data-call-status>{label}</span>
         {micOn && <span className="ls-mic-on" data-mic-indicator title="The microphone is listening"><i aria-hidden="true" /> Microphone on</span>}
         {live && c.micState !== 'ok' && <span className="ls-mic-off">Typing only</span>}
+        {live && <button type="button" className="ls-btn ls-more" aria-expanded={more} data-call-more onClick={() => setMore(m => !m)}>{more ? 'Less' : 'Options'}</button>}
       </div>
       {c.notice && <div className="ls-call-notice" role="status" data-call-notice>{c.notice}</div>}
       <div className="ls-call-caps" ref={logRef} role="log" aria-live="polite" aria-label="Call captions" data-call-captions>
@@ -55,6 +56,7 @@ export function CallBar({ sys }: { sys: TechnicianSystem }) {
         </form>
       )}
       <div className="ls-call-actions">
+        {(more || !live) && <>
         {live && c.micState === 'ok' && <button type="button" className={`ls-btn${c.muted ? ' is-on' : ''}`} aria-pressed={c.muted} data-call-mute onClick={() => c.setMuted(!c.muted)}>{c.muted ? 'Unmute' : 'Mute'}</button>}
         {live && c.micState === 'ok' && <button type="button" className={`ls-btn${c.micInput === 'push' ? ' is-on' : ''}`} aria-pressed={c.micInput === 'push'} data-call-mode onClick={() => c.setMicInput(c.micInput === 'push' ? 'open' : 'push')}>{c.micInput === 'push' ? 'Push-to-talk' : 'Open mic'}</button>}
         {live && c.micState === 'ok' && c.micInput === 'push' && <button type="button" className={`ls-btn${c.pttActive ? ' is-on' : ''}`} data-call-ptt onPointerDown={() => c.pttDown()} onPointerUp={() => void c.pttUp()} onPointerLeave={() => void c.pttUp()} onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); c.pttDown(); } }} onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') void c.pttUp(); }}>Hold to talk</button>}
@@ -62,6 +64,7 @@ export function CallBar({ sys }: { sys: TechnicianSystem }) {
         {live && sys.speech.cloud?.available() && <label className="ls-check"><input type="checkbox" data-call-studio checked={sys.speech.cloud.enabled()} onChange={e => { sys.speech.cloud?.setEnabled(e.target.checked); tick(n => n + 1); }} /> Studio voice</label>}
         {live && sys.speech.voices && sys.speech.voices().length > 1 && <label className="ls-check">Voice <select data-call-voice-pick aria-label="Dr. Wire's voice" value={sys.speech.currentVoice?.() || ''} onChange={e => { sys.speech.setVoice?.(e.target.value || null); tick(n => n + 1); }}>{sys.speech.voices().slice(0, 12).map(n => <option key={n} value={n}>{n}</option>)}</select></label>}
         {live && c.micState === 'ok' && <label className="ls-check"><input type="checkbox" checked={c.bargeIn} onChange={e => c.setBargeIn(e.target.checked)} data-call-barge /> Let me interrupt</label>}
+        </>}
         <span className="ls-spacer" />
         <button type="button" className="ls-btn ls-hangup" data-call-hangup onClick={() => { if (c.state === 'ended') c.reset(); else void c.hangUp(); }}>{c.state === 'ended' ? 'Close' : 'Hang up'}</button>
       </div>

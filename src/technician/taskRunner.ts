@@ -51,7 +51,41 @@ function alarmFix(s: any): { steps: Step[]; explain: string } {
   return { steps, explain };
 }
 
+/** Power sequence order from the startup poster: breaker, instruments, clock lock, shielding, door, rough then turbo, calibrate. Stops before the laser. */
+function startupSteps(s: any): Step[] {
+  const st: Step[] = [];
+  if (!s.facility.power) st.push(step('power_on'));
+  if (!s.clock.power) st.push(step('clock_power', { on: true }));
+  if (!s.vna.power || !s.vna.rf) st.push(step('vna_power', { on: true }));
+  if (!s.ldv.power) st.push(step('ldv_power', { on: true }));
+  if (!s.chamber.faraday) st.push(step('set_faraday', { on: true }));
+  if (!s.chamber.isolation) st.push(step('set_isolation', { on: true }));
+  if (s.chamber.doorOpen) st.push(step('close_door'));
+  if (!s.chamber.roughing || s.chamber.vent) st.push(step('start_roughing'));
+  if (s.chamber.pressure >= 50) st.push({ ...step('wait_pressure', { below_torr: 50 }, 'Wait for 50 Torr', 'Roughing down to 50 Torr. I will watch the gauge.'), timeoutMs: 900000 });
+  if (!s.chamber.turbo) st.push(step('start_turbo'));
+  if (!s.clock.locked) st.push({ ...step('wait_clock_lock'), timeoutMs: 120000 });
+  if (!s.vna.calibrated) st.push(step('calibrate_vna'));
+  return st;
+}
+function shutdownSteps(s: any): Step[] {
+  const st: Step[] = [];
+  if (s.ldv.shutter) st.push(step('laser_shutter', { on: false }));
+  if (s.experiment?.scanActive) st.push(step('pause_scan'));
+  if (s.chamber.turbo) st.push(step('stop_turbo'));
+  if (s.ldv.power) st.push(step('ldv_power', { on: false }));
+  if (s.vna.power) st.push(step('vna_power', { on: false }));
+  if (s.clock.power) st.push(step('clock_power', { on: false }));
+  return st;
+}
+
 export const TASKS: TaskDef[] = [
+  { id: 'startup_sequence', title: 'Run the startup sequence', description: 'Full startup in poster order: main breaker, Rubidium clock, VNA, vibrometer, shielding, isolation, close the door, roughing then turbo pump, wait for the clock lock, calibrate the VNA. Stops before opening the laser shutter.',
+    build: s => { const st = startupSteps(s); return st.length ? st : { error: 'Everything is already powered, pumped down and calibrated. Nothing to start.' }; } },
+  { id: 'shutdown_sequence', title: 'Run the shutdown sequence', description: 'Close the laser shutter, pause any scan, stop the turbo, then power off the vibrometer, VNA and clock. The main breaker and the vacuum are left alone.',
+    build: s => { const st = shutdownSteps(s); return st.length ? st : { error: 'The instruments are already off.' }; } },
+  { id: 'action', title: 'Do one thing', description: 'Run a single registry action by id with params (used for spoken commands such as "turn on the VNA").',
+    build: (s, p) => { const id = String(p.action || ''); const def = ACTION_BY_ID[id]; if (!def) return { error: `I don't know how to do "${id}".` }; return [step(id, (p.params || {}) as Params, def.label)]; } },
   { id: 'pump_down', title: 'Pump down to deep vacuum', description: 'Close the door, run the roughing pump to under 50 Torr, start the turbo and wait for pressure below 1e-3 Torr.',
     build: s => {
       const st: Step[] = [];
@@ -161,7 +195,7 @@ export function createTaskRunner(deps: RunnerDeps) {
     enqueue(defId: string, params: Params = {}): { ok: true; task: Task } | { ok: false; reason: string } {
       const def = TASK_BY_ID[defId]; if (!def) return { ok: false, reason: `I don't know a task called "${defId}".` };
       const built = def.build(state(), params); if (!Array.isArray(built)) return { ok: false, reason: built.error };
-      const task: Task = { id: nextId++, def: defId, title: def.title, params, steps: built, index: 0, status: 'queued' };
+      const task: Task = { id: nextId++, def: defId, title: defId === 'action' && built.length === 1 ? built[0].label : def.title, params, steps: built, index: 0, status: 'queued' };
       queue.push(task); notify(); void loop(); return { ok: true, task };
     },
     /** Queue an ad-hoc task made of registry steps (used for single tool calls). */
@@ -201,8 +235,8 @@ export function runnerTools(base: { name: string; description: string; input_sch
   return [
     ...base,
     ...(DESK_TOOLS as unknown as { name: string; description: string; input_schema: unknown }[]),
-    { name: 'run_task', description: `Do a multi-step job the way a technician would: ${TASKS.map(t => `${t.id} (${t.description})`).join(' ')} Returns immediately; the job runs while you keep talking.`,
-      input_schema: { type: 'object', properties: { task: { type: 'string', description: 'Task id', enum: TASKS.map(t => t.id) }, x: { type: 'number', description: 'X in mm (move_stage)', minimum: -35, maximum: 35 }, y: { type: 'number', description: 'Y in mm (move_stage)', minimum: -35, maximum: 35 }, z: { type: 'number', description: 'Z in mm (move_stage)', minimum: -35, maximum: 35 }, kind: { type: 'string', description: 'Scan type for start_scan', enum: ['axis', 'grid'] }, format: { type: 'string', description: 'Export format', enum: ['csv', 'json'] } }, required: ['task'], additionalProperties: false } },
+    { name: 'run_task', description: `Do a multi-step job the way a technician would: ${TASKS.filter(t => t.id !== 'action').map(t => `${t.id} (${t.description})`).join(' ')} Returns immediately; the job runs while you keep talking.`,
+      input_schema: { type: 'object', properties: { task: { type: 'string', description: 'Task id', enum: TASKS.filter(t => t.id !== 'action').map(t => t.id) }, x: { type: 'number', description: 'X in mm (move_stage)', minimum: -35, maximum: 35 }, y: { type: 'number', description: 'Y in mm (move_stage)', minimum: -35, maximum: 35 }, z: { type: 'number', description: 'Z in mm (move_stage)', minimum: -35, maximum: 35 }, kind: { type: 'string', description: 'Scan type for start_scan', enum: ['axis', 'grid'] }, format: { type: 'string', description: 'Export format', enum: ['csv', 'json'] } }, required: ['task'], additionalProperties: false } },
     { name: 'cancel_task', description: 'Cancel the task Dr. Wire is doing right now.', input_schema: { type: 'object', properties: {}, additionalProperties: false } },
   ];
 }

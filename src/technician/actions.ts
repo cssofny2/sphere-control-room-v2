@@ -87,6 +87,11 @@ export const ACTIONS: ActionDef[] = [
     station: 'rackKnob', gesture: 'knob', narrate: p => (p.on ? 'Powering on the Rubidium clock.' : 'Powering off the clock.'),
   },
   {
+    id: 'wait_clock_lock', label: 'Wait for the Rubidium lock', category: 'Instruments', description: 'Wait until the Rubidium clock has warmed up and locked. Does not change anything.', params: none, risk: 'safe',
+    check: s => (s.clock.power ? ok : no('The Rubidium clock is off.')), run: () => {}, done: s => !!s.clock.locked, timeoutMs: 120000,
+    station: 'rackKnob', gesture: 'inspect', narrate: () => 'Waiting for the Rubidium clock to lock.',
+  },
+  {
     id: 'close_door', label: 'Close the chamber door', category: 'Chamber', description: 'Close and seal the chamber door.', params: none, risk: 'safe',
     check: s => (s.chamber.doorOpen ? ok : no('The door is already closed.')), run: c => c.dispatch(patch('chamber', { doorOpen: false })), done: s => !s.chamber.doorOpen,
     station: 'doorSeal', gesture: 'inspect', narrate: () => 'Closing the chamber door.',

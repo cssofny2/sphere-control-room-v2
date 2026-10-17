@@ -248,6 +248,8 @@ export function createCallController(deps: CallDeps) {
     if (intent?.type === 'food') { if (intent.place) runFood(intent.place, intent.request); else { reply("Sure. Where from? I can do McDonald's on DoorDash, or tell me another place."); pending = { topic: 'food_place' }; } return; }
     if (intent?.type === 'part') { runPart(intent.part, intent.qty, intent.urgent); return; }
     if (intent?.type === 'lookup') { runLookup(intent.query); return; }
+    // Clear lab commands (startup and shutdown sequences, single device actions) run straight away so he always walks to the device.
+    if (intent?.type === 'task' && (intent.id === 'startup_sequence' || intent.id === 'shutdown_sequence' || intent.id === 'action')) { offlineTurn(text); return; }
     if (!llmDown) { const ok = await llmTurn(text); if (ok) return; }
     offlineTurn(text);
   }

@@ -18,6 +18,35 @@ export function parseCommand(text: string, state?: any): Intent {
   if (/\b(emergency stop|e-?stop|stop everything|halt everything|abort everything)\b/.test(q)) return { type: 'estop' };
   if (/\b(cancel|stop|forget) (the |that |this |your )?(task|job|that|what you('| a)re doing)\b/.test(q)) return { type: 'cancel' };
   const T = (id: string, params: Record<string, unknown> = {}): Intent => ({ type: 'task', id, params });
+  const ask = /\b(what|why|how|explain|is|are|does|do you know)\b/.test(q) && !/\b(please|can you|could you)\b/.test(q);
+  const A = (action: string, params: Record<string, unknown> = {}): Intent => T('action', { action, params });
+  const off = /\b(off|down|stop|disable|disengage|kill|shut ?(down|off)|power down|turn off|switch off)\b/.test(q) && !/\b(turn on|switch on|power on|power up|start up|enable)\b/.test(q);
+  const on = !off;
+  if (!ask && /\b(startup|start up|start-up|boot up|bring (the )?(lab|everything|system) (up|online)|power (up|on) (the )?(lab|everything|whole|all|facility|system)|get (the )?(lab|everything) (going|running|ready)|turn everything on|initiali[sz]e (the )?(lab|system))\b/.test(q) && !/\b(chamber|vna|laser|clock|pump)\b.*\b(startup|start up)\b/.test(q)) return T('startup_sequence');
+  if (!ask && /\b(shut ?down|power down|turn everything off|shut everything|close up|wind down)\b/.test(q) && /\b(sequence|lab|everything|system|instruments|all|facility)\b/.test(q)) return T('shutdown_sequence');
+  if (!ask) {
+    if (/\b(main )?breaker\b/.test(q)) return A(off || /\b(open)\b/.test(q) && !/\bclose\b/.test(q) ? 'power_off' : 'power_on');
+    if (/\b(rubidium|rb|atomic)?\s*clock\b|\brubidium\b/.test(q) && /\b(on|off|power|turn|switch|start|stop|enable|disable)\b/.test(q) && !/\b(wall|time|what)\b/.test(q)) return A('clock_power', { on });
+    if (/\b(laser )?shutter\b/.test(q)) return A('laser_shutter', { on: /\b(open|on)\b/.test(q) && !/\bclose|shut\b/.test(q) });
+    if (/\b(vibrometer|ldv)\b/.test(q) && /\b(on|off|power|turn|switch|start|stop)\b/.test(q)) return A('ldv_power', { on });
+    if (/\bvna\b|\bnetwork analy[sz]er\b/.test(q) && /\b(on|off|power|turn|switch|rf)\b/.test(q) && !/\bcalibrat/.test(q)) return A('vna_power', { on });
+    if (/\bturbo/.test(q)) return A(off ? 'stop_turbo' : 'start_turbo');
+    if (/\b(roughing|rough|backing|scroll) ?(pump)?\b/.test(q) && /\b(start|on|run|turn|begin)\b/.test(q) && !off) return A('start_roughing');
+    if (/\bvent\b/.test(q)) return A('vent_chamber');
+    if (/\bfaraday|shield(ing)?\b/.test(q)) return A('set_faraday', { on });
+    if (/\b(vibration|isolation)\b/.test(q)) return A('set_isolation', { on });
+    const tp = q.match(new RegExp(String.raw`\b(?:temperature|thermostat|temp)\b.*?\bto\b\s*${NUM}`)) || q.match(new RegExp(String.raw`\bset\b.*?\b(?:chamber|thermostat)\b.*?${NUM}`)); if (tp) return A('set_temperature', { celsius: Number(tp[1]) });
+    if (/\b(wait|watch)\b.*\b(lock|rubidium|clock)\b/.test(q)) return A('wait_clock_lock');
+    if (/\b(wait|watch)\b.*\b(scan)\b/.test(q)) return A('wait_scan');
+    if (/\b(resume|continue)\b.*\bscan\b/.test(q)) return A('resume_scan');
+    if (/\b(capture|take|grab)\b.*\b(reference)\b/.test(q)) return A('capture_reference');
+    if (/\b(capture|take|grab|run)\b.*\b(sweep|trace)\b/.test(q)) return A('capture_sweep');
+    if (/\b(start|begin|run)\b.*\b(experiment|standard run|the run)\b/.test(q)) return A('start_run');
+    if (/\b(stop|end)\b.*\b(experiment|the run)\b/.test(q)) return A('stop_run');
+    if (/\b(clear|remove)\b.*\bfaults?\b/.test(q)) return A('clear_faults');
+    const pg = q.match(/\b(?:go to|show|pull up|switch to|navigate to|bring up|open)\b.*?\b(dashboard|console|chamber|spatial|vna|ldv|scanner|scope|oscilloscope|clock|frequency|runs|training|challenges?)\b(?: page| screen| tab)/);
+    if (pg) { const m: Record<string, string> = { dashboard: 'dashboard', console: 'dashboard', chamber: 'chamber', spatial: 'spatial', vna: 'vna', ldv: 'ldv', scanner: 'ldv', scope: 'scope', oscilloscope: 'scope', clock: 'clock', frequency: 'clock', runs: 'runs', training: 'training', challenge: 'challenges', challenges: 'challenges' }; return A(`go_${m[pg[1]]}`); }
+  }
   if (/\b(pump down|pump the chamber|evacuate|get (us |it )?(to|into) (a )?(deep |high )?vacuum|deep vacuum)\b/.test(q) && !/\b(what|why|how|is|explain)\b/.test(q)) return T('pump_down');
   if (/\bcalibrate\b.*\bvna\b|\bvna\b.*\bcalibrat/.test(q) && !/\b(what|why|how|explain)\b/.test(q)) return T('calibrate_vna');
   if (/\bhome\b.*\bstage\b|\bstage\b.*\bhome\b/.test(q) && !/\b(what|why|how|explain)\b/.test(q)) return T('home_stage');

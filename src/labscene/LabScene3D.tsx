@@ -129,7 +129,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     const camsObj = lab.cameras.map(c => { const k = new THREE.PerspectiveCamera(c.fov, 16 / 9, 0.1, 60); k.position.set(...c.pos); k.lookAt(...c.target); return k; });
     let view: number | 'grid' | null = null; let activeCam: THREE.PerspectiveCamera = cam;
     const sci = new Scientist(); sci.reduced = reducedRef.current; lab.scene.add(sci.root); sci.setWorld(lab.anchors); sci.attachPhone(lab.phone);
-    const foley = new Foley(); sci.onStep = () => foley.footstep(); sci.onEvent = n => { if (n === 'knob') lab.turnKnob('vna', 0.5); if (n === 'pickup') foley.latch(); if (n === 'hangup') foley.latch(); };
+    const foley = new Foley(); const fwd = new THREE.Vector3(); sci.onStep = () => foley.footstep(); sci.onEvent = n => { if (n === 'knob') { lab.turnKnob('vna', 0.5); foley.click(); } if (n === 'pickup') foley.latch(); if (n === 'hangup') foley.latch(); };
     const sys = createTechnicianSystem({
       stateRef, dispatch: a => dispatchRef.current?.(a), helpersRef: helpers, sci: sci as any, phone: lab.phone, foley, say: r => speak(r as any),
       settings: settingsRef.current, onUpdate: () => setLogN(Math.random()),
@@ -218,7 +218,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
       if (document.hidden || !visible) return;
       const s = stateRef.current; const t = now / 1000;
       lab.update(s, dt, t);
-      sci.reduced = reducedRef.current; sci.root.visible = showSciRef.current; sci.laserOn = !!(s.ldv?.power && s.ldv?.shutter); foley.muted = !soundRef.current; if (showSciRef.current) sci.update(dt, cam.position);
+      sci.reduced = reducedRef.current; sci.root.visible = showSciRef.current; sci.laserOn = !!(s.ldv?.power && s.ldv?.shutter); foley.muted = !soundRef.current; if (!foley.muted) { const sp = sci.root.position, dx = sp.x - cam.position.x, dz = sp.z - cam.position.z; foley.dist = Math.hypot(dx, sp.y - cam.position.y, dz); fwd.set(0, 0, -1).applyQuaternion(cam.quaternion); foley.pan = foley.dist > 0.01 ? Math.max(-1, Math.min(1, (dx * -fwd.z + dz * fwd.x) / Math.max(0.01, Math.hypot(dx, dz)) * 0.9)) : 0; foley.clockDist = Math.hypot(0.9 - cam.position.x, 2.5 - cam.position.y, -2.58 - cam.position.z); foley.setLab({ power: !!s.facility?.power, roughing: !!(s.chamber?.roughing && !s.chamber?.vent), turbo: !!(s.chamber?.turbo && !s.chamber?.vent), rack: !!s.facility?.power }); } if (showSciRef.current) sci.update(dt, cam.position);
       brainAcc += dt; if (brainAcc > 0.25) { brainAcc = 0; const r = tech.observe(extractFactsPlus(s), now); if (r) { sys.remark(r); setLogN(tech.log.length + Math.random()); } }
       sys.tick(t, dt);
       if (sys.call.state === 'connected' && sci.mode === 'task') lab.screensaver.wake();
