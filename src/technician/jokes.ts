@@ -14,7 +14,7 @@ export const NEW_JOKES: Joke[] = [
   { topic: 'general', text: "I named the sphere Sphere. I'm not proud of the creativity, but it's consistent." },
   { topic: 'general', text: "Peer review is just a polite way of saying 'show me the error bars'." },
   { topic: 'general', text: "If you ever feel unimportant, remember: someone calibrated a ruler so you could measure things." },
-  { topic: 'general', text: "My wireframe body is great for weight loss. Zero filled polygons." },
+  { topic: 'general', text: "I used to be a wireframe. Now I'm fully rendered, and somehow I still can't find my keys." },
   { topic: 'general', text: "I'm outstanding in my field. The field is a magnetic one, and I'm shielded from it." },
   { topic: 'general', text: "Replication is the sincerest form of science." },
   { topic: 'general', text: "The best lab safety tip: if you wonder whether you need goggles, you need goggles." },

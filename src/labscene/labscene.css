@@ -89,3 +89,18 @@
 @keyframes ls-ring { 0%,100% { transform: translateX(-50%) rotate(0); } 25% { transform: translateX(-50%) rotate(-0.8deg); } 75% { transform: translateX(-50%) rotate(0.8deg); } }
 @media (prefers-reduced-motion: reduce) { .ls-incoming { animation: none; } }
 @media (max-width: 640px) { .ls-desk, .ls-desk-toggle { top: 96px; } .ls-desk { width: calc(100% - 20px); max-height: 40%; } }
+
+/* Security-camera views: grey, contrasty picture with scan lines, a name, a live time stamp and a REC light. */
+.ls-stage[data-cctv-on] canvas { filter: grayscale(0.85) contrast(1.35) brightness(0.8) sepia(0.3) hue-rotate(60deg); cursor: default; }
+.ls-cctv { position: absolute; inset: 0; z-index: 4; pointer-events: none; font: 600 clamp(10px, 1.5vw, 15px)/1 ui-monospace, Menlo, monospace; color: #eafff0; text-shadow: 0 0 3px #000, 0 1px 2px #000; display: grid; grid-template: 1fr / 1fr; }
+.ls-cctv.is-grid { grid-template: 1fr 1fr / 1fr 1fr; }
+.ls-cctv-cell { position: relative; border: 1px solid #0007; background: repeating-linear-gradient(0deg, #0000 0 2px, #0000002e 2px 3px), radial-gradient(ellipse at center, #0000 55%, #0000007a 100%); }
+.ls-cctv-cell.is-off { background: #04070b; display: grid; place-items: center; }
+.ls-cctv-name { position: absolute; left: 10px; top: 8px; letter-spacing: .06em; }
+.ls-cctv-time { position: absolute; right: 10px; bottom: 8px; letter-spacing: .04em; }
+.ls-cctv-rec { position: absolute; right: 10px; top: 8px; display: inline-flex; gap: 6px; align-items: center; color: #ffd0d0; }
+.ls-cctv-rec i { width: 9px; height: 9px; border-radius: 50%; background: #ff2a2a; animation: ls-rec 1.4s steps(2, start) infinite; }
+.ls-cctv-nosig { opacity: .55; letter-spacing: .2em; }
+.ls-cctv-exit { position: absolute; left: 10px; bottom: 8px; pointer-events: auto; }
+@keyframes ls-rec { 50% { opacity: .1; } }
+@media (prefers-reduced-motion: reduce) { .ls-cctv-rec i { animation: none; } }
