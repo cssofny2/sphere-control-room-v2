@@ -2,11 +2,13 @@
 // gesture, says what he is doing, runs a registry action (which enforces the interlocks), then waits
 // until the real state shows the effect. Nothing here knows about three.js or React: the scientist,
 // the clock and the confirmation prompt are all passed in, so the whole thing runs under test.
+import { DESK_TOOLS } from './deskTools';
 import { ACTION_BY_ID, evaluate, execute, riskOf, waitFor, type Clock, type Ctx, type Risk, type Station, realClock } from './actions';
 
-export type Step = { label: string; narration?: string; action: string; params?: Record<string, unknown>; station?: Station; timeoutMs?: number };
+export type StepCtx = { cancelled: () => boolean };
+export type Step = { label: string; narration?: string; action: string; params?: Record<string, unknown>; station?: Station; timeoutMs?: number; /** A step that is not a lab action (using the computer). Runs after he has walked to `station`. */ custom?: (c: StepCtx) => Promise<void> };
 export type TaskStatus = 'queued' | 'running' | 'awaiting-confirm' | 'done' | 'blocked' | 'failed' | 'cancelled';
-export type Task = { id: number; def: string; title: string; params: Record<string, unknown>; steps: Step[]; index: number; status: TaskStatus; reason?: string };
+export type Task = { id: number; def: string; title: string; params: Record<string, unknown>; steps: Step[]; index: number; status: TaskStatus; reason?: string; quiet?: boolean };
 
 export type Actor = {
   goTo(station: Station): Promise<boolean>;
@@ -115,13 +117,14 @@ export function createTaskRunner(deps: RunnerDeps) {
 
   async function runTask(t: Task, my: number) {
     t.status = 'running'; notify(); deps.actor.lock(true);
-    say(`Okay, ${t.title.charAt(0).toLowerCase() + t.title.slice(1)}.`, `You asked me to: ${t.title}.`);
+    if (!t.quiet) say(`Okay, ${t.title.charAt(0).toLowerCase() + t.title.slice(1)}.`, `You asked me to: ${t.title}.`);
     try {
       for (let i = 0; i < t.steps.length; i++) {
         if (my !== epoch) return;
         const st = t.steps[i]; t.index = i; notify();
         if (st.narration) say(st.narration, `Step ${i + 1} of ${t.steps.length} of "${t.title}": ${st.label}.`);
         if (st.station) { await deps.actor.goTo(st.station); if (my !== epoch) return; }
+        if (st.custom) { await st.custom({ cancelled: () => my !== epoch }); if (my !== epoch) return; continue; }
         const ev = evaluate(state(), st.action, st.params || {});
         if (ev.ok === false) { say(`I can't do that: ${ev.reason}`, `The "${st.label}" step was blocked by an interlock: ${ev.reason}`); finish(t, 'blocked', ev.reason); return; }
         if (ev.needsConfirm) {
@@ -137,7 +140,7 @@ export function createTaskRunner(deps: RunnerDeps) {
         if (my !== epoch) return;
         if (w === 'timeout') { const why = `Timed out waiting for: ${st.label}.`; say(`That is taking too long. ${why}`, why); finish(t, 'failed', why); return; }
       }
-      say(`${t.title}: done.`, `All ${t.steps.length} step${t.steps.length === 1 ? '' : 's'} finished and the lab state confirms it.`);
+      if (t.quiet) deps.log(`${t.title}: finished.`, `${t.title} finished.`); else say(`${t.title}: done.`, `All ${t.steps.length} step${t.steps.length === 1 ? '' : 's'} finished and the lab state confirms it.`);
       finish(t, 'done');
     } finally { if (my === epoch) deps.actor.lock(false); }
   }
@@ -162,8 +165,8 @@ export function createTaskRunner(deps: RunnerDeps) {
       queue.push(task); notify(); void loop(); return { ok: true, task };
     },
     /** Queue an ad-hoc task made of registry steps (used for single tool calls). */
-    enqueueSteps(title: string, steps: Step[]): Task {
-      const task: Task = { id: nextId++, def: 'adhoc', title, params: {}, steps, index: 0, status: 'queued' };
+    enqueueSteps(title: string, steps: Step[], opts: { quiet?: boolean } = {}): Task {
+      const task: Task = { id: nextId++, def: 'adhoc', title, params: {}, steps, index: 0, status: 'queued', quiet: !!opts.quiet };
       queue.push(task); notify(); void loop(); return task;
     },
     /** Cancel one task (default: the current one) and everything queued behind it is kept. */
@@ -197,6 +200,7 @@ export type TaskRunner = ReturnType<typeof createTaskRunner>;
 export function runnerTools(base: { name: string; description: string; input_schema: unknown }[]) {
   return [
     ...base,
+    ...(DESK_TOOLS as unknown as { name: string; description: string; input_schema: unknown }[]),
     { name: 'run_task', description: `Do a multi-step job the way a technician would: ${TASKS.map(t => `${t.id} (${t.description})`).join(' ')} Returns immediately; the job runs while you keep talking.`,
       input_schema: { type: 'object', properties: { task: { type: 'string', description: 'Task id', enum: TASKS.map(t => t.id) }, x: { type: 'number', description: 'X in mm (move_stage)', minimum: -35, maximum: 35 }, y: { type: 'number', description: 'Y in mm (move_stage)', minimum: -35, maximum: 35 }, z: { type: 'number', description: 'Z in mm (move_stage)', minimum: -35, maximum: 35 }, kind: { type: 'string', description: 'Scan type for start_scan', enum: ['axis', 'grid'] }, format: { type: 'string', description: 'Export format', enum: ['csv', 'json'] } }, required: ['task'], additionalProperties: false } },
     { name: 'cancel_task', description: 'Cancel the task Dr. Wire is doing right now.', input_schema: { type: 'object', properties: {}, additionalProperties: false } },

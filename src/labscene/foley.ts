@@ -40,6 +40,22 @@ export class Foley {
     burst();
   }
   stopRing() { this.ringing = false; window.clearTimeout(this.ringTimer); }
+  /** One key press on a mechanical keyboard. Plays whenever the audio is unlocked (it only happens while he is working at the computer). */
+  typeKey(ch: string) {
+    const c = this.ensure(); if (!c || !this.master || c.state !== 'running') return;
+    const t = c.currentTime, big = ch === ' ' || ch === '\n';
+    const n = Math.floor(c.sampleRate * (big ? 0.05 : 0.028)), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, big ? 2.2 : 3.2);
+    const src = c.createBufferSource(); src.buffer = buf;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = (big ? 900 : 2200) * (0.85 + Math.random() * 0.4); bp.Q.value = 1.1;
+    const g = c.createGain(); g.gain.value = (big ? 0.55 : 0.4) * (0.75 + Math.random() * 0.4);
+    src.connect(bp); bp.connect(g); g.connect(this.master); src.start(t);
+  }
+  /** New-mail alert: a bright three-note chime that is easy to notice. */
+  mailAlert() {
+    const c = this.ensure(); if (!c) return; const t = c.currentTime + 0.02;
+    this.tone([988], t, 0.16, 0.16); this.tone([1319], t + 0.18, 0.16, 0.16); this.tone([1568, 784], t + 0.36, 0.34, 0.16);
+  }
   /** Short up-down tone that marks pick-up and hang-up. */
   blip(up: boolean) { const c = this.ensure(); if (!c) return; const t = c.currentTime + 0.01; this.tone(up ? [660] : [440], t, 0.12, 0.1); this.tone(up ? [880] : [330], t + 0.14, 0.14, 0.1); }
   dispose() { this.stopRing(); try { void this.ctx?.close(); } catch { /* ignore */ } this.ctx = null; this.master = null; }

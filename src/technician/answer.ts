@@ -19,13 +19,16 @@ export function search(question: string, kb: KBEntry[] = KNOWLEDGE, limit = 3): 
     const kwTokens = new Set(e.keywords.flatMap(k => tokens(k)));
     const titleTokens = new Set(tokens(e.title));
     const textTokens = tokens(e.text);
-    for (const k of e.keywords) if (k.length > 2 && q.includes(k)) { score += 6; strong++; }
+    let phrase = 0; const matched = new Set<string>();
+    for (const k of e.keywords) if (k.length > 2 && q.includes(k)) { score += 6; strong++; phrase++; }
     for (const t of new Set(qt)) {
-      if (kwTokens.has(t)) { score += 3; strong++; }
-      if (titleTokens.has(t)) { score += 2; strong++; }
+      if (kwTokens.has(t)) { score += 3; strong++; matched.add(t); }
+      if (titleTokens.has(t)) { score += 2; strong++; matched.add(t); }
       const n = textTokens.filter(x => x === t).length; if (n) score += Math.min(2, n);
     }
-    if (strong && score >= 5) hits.push({ entry: e, score });
+    // A single shared word in a long question ("boiling POINT of liquid nitrogen") is not an answer: unless a whole keyword phrase matched, most of the question has to be covered.
+    const distinct = new Set(qt).size; const covered = phrase > 0 || matched.size >= 2 || (matched.size >= 1 && distinct <= 2);
+    if (strong && score >= 5 && covered) hits.push({ entry: e, score });
   }
   return hits.sort((a, b) => b.score - a.score).slice(0, limit);
 }

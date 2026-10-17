@@ -14,6 +14,7 @@ import type { Quality } from './labUtil';
 import { DEFAULT_SETTINGS, type Settings, type Technician } from '../technician/dialogue';
 import { createTechnicianSystem, type TechnicianSystem } from '../technician/system';
 import { CallBar, CallConsent, TaskChip } from '../technician/CallUI';
+import { DeskPanel, IncomingCall } from '../technician/DeskPanel';
 import type { Ctx } from '../technician/actions';
 import { extractFactsPlus } from '../technician/facts';
 import TechnicianPanel from '../technician/TechnicianPanel';
@@ -31,6 +32,7 @@ const PRESETS: Record<string, CamPreset> = {
   stage: { pos: [1.35, 1.75, 0.3], target: [0, 1.0, 0.05] },
   rack: { pos: [-1.0, 1.5, 2.6], target: [-3.0, 1.1, -0.4] },
   bench: { pos: [1.6, 1.7, 1.5], target: [2.8, 1.0, -1.8] },
+  screens: { pos: [2.95, 1.45, -0.55], target: [2.95, 1.2, -2.05] },
   phone: { pos: [2.0, 1.6, -0.2], target: [1.3, 1.25, -2.4] },
 };
 
@@ -113,6 +115,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     const tech = sys.tech;
     api.current = { lab, cam, controls, sci, tech, sys, foley };
     setSysReady(sys);
+    lab.setDesk(sys.desk.state); const unDesk = sys.desk.subscribe(() => lab.setDesk(sys.desk.state));
     lab.setCutaway(true);
     if (urlParam('labdebug') !== null) (window as any).__lab = { lab, sci, cam, controls, tech, sys, foley };
 
@@ -204,7 +207,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     return () => {
       cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); window.clearTimeout(bubbleTimer.current);
       canvas.removeEventListener('pointermove', onMove); canvas.removeEventListener('pointerleave', onLeave); canvas.removeEventListener('pointerdown', onDown); canvas.removeEventListener('pointerup', onUp);
-      sys.dispose(); controls.dispose(); sci.dispose(); foley.dispose(); lab.dispose(); composer?.dispose(); renderer.dispose(); renderer.forceContextLoss();
+      unDesk(); sys.dispose(); controls.dispose(); sci.dispose(); foley.dispose(); lab.dispose(); composer?.dispose(); renderer.dispose(); renderer.forceContextLoss();
       if (canvas.parentNode === host) host.removeChild(canvas); api.current = {}; if ((window as any).__lab) delete (window as any).__lab;
     };
   }, [speak, stateRef]);
@@ -230,7 +233,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     const onKey = (e: KeyboardEvent) => { if (e.altKey && e.code === 'KeyP' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); toggleCallRef.current(); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const views = useMemo(() => [['overview', 'Overview'], ['chamber', 'Chamber'], ['stage', 'Stage close-up'], ['rack', 'Instrument rack'], ['bench', 'Workstation']], []);
+  const views = useMemo(() => [['overview', 'Overview'], ['chamber', 'Chamber'], ['stage', 'Stage close-up'], ['rack', 'Instrument rack'], ['bench', 'Workstation'], ['screens', 'Screens']], []);
 
   if (failed) return <div className="ls-root"><div className="ls-fallback">The realistic 3D lab needs WebGL, which isn't available in this browser. Use the Engineering model view instead.</div></div>;
   return (
@@ -261,6 +264,8 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
         )}
         {!photo && consentOpen && <CallConsent onStart={startCall} onCancel={() => setConsentOpen(false)} />}
         {!photo && sysReady && <TaskChip sys={sysReady} />}
+        {!photo && sysReady && <IncomingCall sys={sysReady} />}
+        {!photo && sysReady && <DeskPanel sys={sysReady} />}
         {!photo && sysReady && <CallBar sys={sysReady} />}
         {photo && <div className="ls-photo"><Btn f={() => api.current.snapshot?.()}>Save PNG</Btn><Btn f={() => setPhoto(false)}>Exit photo mode</Btn></div>}
         {!photo && part && (

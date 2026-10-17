@@ -7,6 +7,12 @@
   "functions": {
     "api/technician.ts": {
       "maxDuration": 60
+    },
+    "api/lookup.ts": {
+      "maxDuration": 30
+    },
+    "api/email.ts": {
+      "maxDuration": 30
     }
   }
 }

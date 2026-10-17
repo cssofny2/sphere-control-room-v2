@@ -11,5 +11,5 @@
     "types": ["node"],
     "allowJs": false
   },
-  "include": ["api", "src/technician/server.ts", "src/technician/persona.ts", "src/technician/knowledge.generated.ts", "src/technician/actions.ts", "src/technician/taskRunner.ts"]
+  "include": ["api", "src/technician/server.ts", "src/technician/persona.ts", "src/technician/knowledge.generated.ts", "src/technician/actions.ts", "src/technician/taskRunner.ts", "src/technician/deskTools.ts", "src/technician/guards.ts", "src/technician/lookupServer.ts", "src/technician/mailServer.ts"]
 }
