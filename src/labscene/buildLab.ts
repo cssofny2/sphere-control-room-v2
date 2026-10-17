@@ -4,6 +4,7 @@ import { canvasTex, glowTex, roughnessMapTex, type CanvasTex, type Quality } fro
 import { buildDetail, type PhoneRig, type Pickable } from './labDetail';
 import { drawDesk, drawScreensaver } from './deskRender';
 import { buildCameraProps, CAMERAS, type LabCamera } from './cctv';
+import { mergeStaticMeshes, type MergeStats } from './staticMerge';
 import type { DeskState } from '../technician/desk';
 
 // A bright, realistic-looking laboratory: stainless thermal-vacuum chamber with door and
@@ -28,6 +29,8 @@ export type Lab = {
   screensaver: { wake: () => void; setAfter: (sec: number) => void; readonly active: boolean };
   /** The three fixed security cameras in the room (the housings are real objects in the scene). */
   cameras: LabCamera[]; hideCameraHousing: (id: number | null) => void;
+  /** How many meshes the static-geometry merge fused (draw-call saving). */
+  mergeStats: MergeStats;
 };
 
 export function buildLab(renderer: THREE.WebGLRenderer): Lab {
@@ -383,5 +386,9 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   detailUpdate = detail.update;
   const dispose = () => { camProps.dispose(); detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, deskTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
   void target; void sl; void wl; void back; void left; void bez; void win; void dRing; void dBody; void topPort; void leftPort1; void leftPort2; void rightPort; void capOut; void cap; void liner; void shell; void fl;
-  return { scene, update, setCutaway, dispose, spherePos, setDesk: (st: DeskState) => { deskSt = st; }, screensaver: { wake: () => { ssWake = lastT; }, setAfter: (sec: number) => { ssAfter = sec; }, get active() { return ssOn; } }, cameras: CAMERAS, hideCameraHousing: (id: number | null) => camProps.hideOnly(id), anchors: { ...anchors, ...detail.anchors }, phone: detail.phone, pickables: detail.pickables, setQuality: (q: Quality) => { detail.setQuality(q); key.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024); key.shadow.map?.dispose(); (key.shadow as any).map = null; }, turnKnob: detail.turnKnob };
+  // Fuse the static parts of the room into a few big meshes. Everything that moves or toggles is listed here and left alone.
+  const dynamicParts: THREE.Object3D[] = [yCar, xCar, column, ...bellows, post, sphere, sphereGlow, ghost, doorPivot, bench, turboFan, rough, laser, laserGlow, dot, halo, rfPulse, ...knobs.map(k => k.mesh), ...panels.map(p => p.led), ...isoLeds, ...detail.dynamic];
+  const noMerge = typeof location !== 'undefined' && /[?&]nomerge\b/.test(location.search);
+  const mergeStats = noMerge ? { before: 0, after: 0, groups: 0 } : mergeStaticMeshes(scene, { regionRoots: detail.pickables.map(p => p.root), dynamic: dynamicParts, track });
+  return { scene, update, setCutaway, dispose, spherePos, mergeStats, setDesk: (st: DeskState) => { deskSt = st; }, screensaver: { wake: () => { ssWake = lastT; }, setAfter: (sec: number) => { ssAfter = sec; }, get active() { return ssOn; } }, cameras: CAMERAS, hideCameraHousing: (id: number | null) => camProps.hideOnly(id), anchors: { ...anchors, ...detail.anchors }, phone: detail.phone, pickables: detail.pickables, setQuality: (q: Quality) => { detail.setQuality(q); key.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024); key.shadow.map?.dispose(); (key.shadow as any).map = null; }, turnKnob: detail.turnKnob };
 }

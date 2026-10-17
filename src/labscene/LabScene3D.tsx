@@ -114,8 +114,8 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
   useEffect(() => {
     const host = canvasHost.current; if (!host) return;
     let renderer: THREE.WebGLRenderer;
-    try { renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' }); } catch { setFailed(true); return; }
-    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+    try { const hiDpiTouch = (window.devicePixelRatio || 1) >= 2 && !!window.matchMedia?.('(pointer: coarse)').matches; renderer = new THREE.WebGLRenderer({ antialias: !hiDpiTouch, powerPreference: 'high-performance' }); /* phones and tablets: no 4x MSAA on a dense screen, it costs a lot of fill for little gain */ } catch { setFailed(true); return; }
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap; renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true;   // shadows are refreshed every few frames (see the loop), not every frame
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95; renderer.outputColorSpace = THREE.SRGBColorSpace;
     const canvas = renderer.domElement; canvas.setAttribute('role', 'img'); canvas.setAttribute('tabindex', '0');
     canvas.setAttribute('aria-label', '3D laboratory: thermal-vacuum chamber with XYZ stage and sphere, instrument rack, wall phone and Dr. Wire the lab technician, who wears the S.P.H.E.R.E. logo on his coat. Drag to orbit, scroll to zoom. Click a part to look at it.');
@@ -139,28 +139,30 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     setSysReady(sys);
     lab.setDesk(sys.desk.state); const unDesk = sys.desk.subscribe(() => lab.setDesk(sys.desk.state));
     lab.setCutaway(true);
-    if (urlParam('labdebug') !== null) (window as any).__lab = { lab, sci, cam, controls, tech, sys, foley };
+    if (urlParam('labdebug') !== null) (window as any).__lab = { lab, sci, cam, controls, tech, sys, foley, renderer };
 
     // ── quality, post-processing ──
+    let shadowTick = 99, scaledDown = false, bubbleMeasure = 99, bubbleW = 0, bubbleH = 0, hostW = host.clientWidth || 640, hostH = host.clientHeight || 360;
     let eff: Quality = 'high'; let composer: EffectComposer | null = null; let renderPass: RenderPass | null = null; let frames = 0, ema = 0.016, lastRender = 0;
     const size = () => ({ w: host.clientWidth || 640, h: host.clientHeight || 360 });
     const ensureComposer = () => {
       if (composer) return composer; const { w, h } = size();
       try {
         composer = new EffectComposer(renderer); renderPass = new RenderPass(lab.scene, cam); composer.addPass(renderPass);
-        composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.4, 2.6));
-        composer.addPass(new OutputPass()); composer.addPass(new SMAAPass()); composer.setSize(w, h);
+        composer.addPass(new UnrealBloomPass(new THREE.Vector2(Math.round(w / 2), Math.round(h / 2)), 0.35, 0.4, 2.6));   // bloom at half resolution: same look, a quarter of the pixels
+        composer.addPass(new OutputPass()); if ((window.devicePixelRatio || 1) < 1.5) composer.addPass(new SMAAPass()); composer.setSize(w, h);   // SMAA is redundant on high-DPI screens
       } catch (e) { console.warn('post-processing unavailable', e); composer = null; }
       return composer;
     };
     const applyQuality = (q: Quality) => {
       eff = q; lab.setQuality(q); sci.setLOD(q === 'high'); setEffQuality(q);
-      renderer.setPixelRatio(q === 'high' ? Math.min(window.devicePixelRatio || 1, 2) : 1);
-      if (q === 'high') { ensureComposer(); const { w, h } = size(); composer?.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); composer?.setSize(w, h); }
+      renderer.setPixelRatio(q === 'high' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1);
+      if (q === 'high') { ensureComposer(); const { w, h } = size(); composer?.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); composer?.setSize(w, h); }
+      renderer.shadowMap.needsUpdate = true;
       resize();
     };
     const pickQuality = (sel: QualitySel): Quality => sel === 'high' ? 'high' : sel === 'low' ? 'low' : ((navigator.hardwareConcurrency || 4) <= 2 || window.matchMedia?.('(pointer: coarse)').matches ? 'low' : 'high');
-    api.current.setQ = sel => { frames = 0; ema = 0.016; applyQuality(pickQuality(sel)); };
+    api.current.setQ = sel => { frames = 0; ema = 0.016; scaledDown = false; applyQuality(pickQuality(sel)); };
 
     let tween: { t: number; fp: THREE.Vector3; ft: THREE.Vector3; tp: THREE.Vector3; tt: THREE.Vector3 } | null = null;
     api.current.go = (k: string) => {
@@ -173,7 +175,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
       view = v; activeCam = typeof v === 'number' ? camsObj[v - 1] || cam : cam; if (renderPass) renderPass.camera = activeCam;
       controls.enabled = v === null; lab.hideCameraHousing(typeof v === 'number' ? v : null); setCamView(v); resize();
     };
-    const resize = () => { const { w, h } = size(); renderer.setSize(w, h, false); for (const k of [cam, ...camsObj]) { k.aspect = w / h; k.updateProjectionMatrix(); } composer?.setSize(w, h); };
+    const resize = () => { const { w, h } = size(); hostW = w; hostH = h; bubbleMeasure = 99; renderer.setSize(w, h, false); for (const k of [cam, ...camsObj]) { k.aspect = w / h; k.updateProjectionMatrix(); } composer?.setSize(w, h); };
     const ro = new ResizeObserver(resize); ro.observe(host); resize();
     applyQuality(pickQuality(qualitySelRef.current));
     { const sid = getSelected(); const pd = sid ? PART_BY_ID[sid] : null; if (pd) { api.current.go?.(pd.view); setPart({ label: pd.label, help: pd.help }); } } // coming from the schematic: look at the part chosen there
@@ -224,8 +226,14 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
       else if (followRef.current && showSciRef.current) { const h = sci.position; controls.target.lerp(v3.set(h.x, 1.1, h.z), Math.min(1, dt * 2)); }
       controls.update();
       // Auto quality: if the first seconds run slowly, drop the heavy effects for good.
-      if (qualitySelRef.current === 'auto' && eff === 'high') { frames++; ema += (dt - ema) * 0.05; if (frames > 150 && ema > 0.045) applyQuality('low'); }
+      // The first seconds are the measurement: if frames take longer than ~26 ms (under 38 fps) the heavy effects go for good, and if even Low is slow the resolution drops a notch.
+      if (qualitySelRef.current === 'auto') {
+        frames++; ema += (dt - ema) * 0.08;
+        if (eff === 'high' && frames > 90 && ema > 0.026) { frames = 0; ema = 0.016; applyQuality('low'); }
+        else if (eff === 'low' && !scaledDown && frames > 120 && ema > 0.045) { scaledDown = true; renderer.setPixelRatio(0.75); resize(); }
+      }
       if (eff === 'low' && now - lastRender < 30) return; lastRender = now;
+      if (++shadowTick >= (eff === 'low' ? 3 : 2)) { shadowTick = 0; renderer.shadowMap.needsUpdate = true; }   // shadow map refreshed every 2nd (High) or 3rd (Low) frame
       if (view === 'grid') {
         const { w, h } = size(); const tw = Math.floor(w / 2), th = Math.floor(h / 2);
         renderer.setScissorTest(false); renderer.setViewport(0, 0, w, h); renderer.setClearColor(0x04070b, 1); renderer.clear(); renderer.setScissorTest(true);
@@ -234,7 +242,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
       } else if (eff === 'high' && composer) composer.render(); else renderer.render(lab.scene, activeCam);
       // keep the speech bubble above his head
       const el = bubbleEl.current;
-      if (el) { const hw = sci.headWorld.project(activeCam); const w = host.clientWidth, h = host.clientHeight; const ok = hw.z < 1 && showSciRef.current; el.style.visibility = ok ? 'visible' : 'hidden'; const bw = el.offsetWidth, bh = el.offsetHeight; const x = Math.min(w - bw / 2 - 8, Math.max(bw / 2 + 8, (hw.x * 0.5 + 0.5) * w)); const y = Math.max(bh + 12, (-hw.y * 0.5 + 0.5) * h - 10); el.style.transform = `translate(${x - bw / 2}px, ${y - bh - 10}px)`; }
+      if (el) { const hw = sci.headWorld.project(activeCam); const w = hostW, h = hostH; const ok = hw.z < 1 && showSciRef.current; el.style.visibility = ok ? 'visible' : 'hidden'; if (++bubbleMeasure > 20 || !bubbleW) { bubbleMeasure = 0; bubbleW = el.offsetWidth; bubbleH = el.offsetHeight; } const bw = bubbleW, bh = bubbleH; /* sizes are cached: reading them every frame forces a layout pass */ const x = Math.min(w - bw / 2 - 8, Math.max(bw / 2 + 8, (hw.x * 0.5 + 0.5) * w)); const y = Math.max(bh + 12, (-hw.y * 0.5 + 0.5) * h - 10); el.style.transform = `translate(${x - bw / 2}px, ${y - bh - 10}px)`; }
     };
     raf = requestAnimationFrame(loop);
     return () => {

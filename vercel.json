@@ -13,6 +13,9 @@
     },
     "api/email.ts": {
       "maxDuration": 30
+    },
+    "api/tts.ts": {
+      "maxDuration": 20
     }
   }
 }

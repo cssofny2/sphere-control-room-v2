@@ -45,7 +45,7 @@ export function createTechnicianSystem(o: SystemOpts) {
   const now = o.now || (() => performance.now());
   const tech = createTechnician({ settings: o.settings });
   const broker = createConfirmBroker();
-  const speech = o.speech || createSpeech('browser');
+  const speech = o.speech || createSpeech('studio');
   const ctx: Ctx = { getState: () => o.stateRef.current, dispatch: o.dispatch, helpers: undefined };
   Object.defineProperty(ctx, 'helpers', { get: () => o.helpersRef.current });
   let speakingNow = false, pulse = 0, current: Task | null = null, queue: Task[] = [];

@@ -50,6 +50,11 @@ export default {
 - **Cameras:** `cctv.ts` defines `CAMERAS` and builds the housings; `LabScene3D` renders the chosen camera (or all three with scissor viewports) and shows the on-screen display.
 - **Appearance:** `Scientist.ts` (solid materials, RoundedBox and ellipsoid parts) and `logoTex.ts` (logo patch, badge and pocket textures drawn on canvas).
 
+## v4 additions (1.4.0)
+- **Studio voice:** `ttsServer.ts` (`api/tts.ts`) calls ElevenLabs (`ELEVENLABS_API_KEY`, optional `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL`) or OpenAI (`OPENAI_API_KEY`, optional `TECHNICIAN_TTS_VOICE`, `TECHNICIAN_TTS_MODEL`). `cloudSpeech.ts` wraps the browser `SpeechIO`: it probes `GET /api/tts`, plays chunks of audio and falls back to the browser voice on any problem. Cost guard: `TECHNICIAN_TTS_DAILY_CAP_USD`, `TECHNICIAN_TTS_RATE_PER_MIN`.
+- **Static merge:** `staticMerge.ts` fuses static opaque meshes per (region root, material, shadow flags). Anything that moves or toggles must be listed in `dynamicParts` in `buildLab.ts` (or `Detail.dynamic` in `labDetail.ts`) or flagged `userData.noMerge`; pickable roots are never merged across. `?nomerge` in the URL turns the merge off for comparison, and `tests/e2e/perf.e2e.py` guards it.
+- **Render loop:** manual shadow-map updates (every 2nd or 3rd frame), half-resolution bloom, cached bubble sizes, earlier automatic quality step-down.
+
 ## Safety rules built in
 - Mail from anyone who is not on the allow-list is dropped. Replies go only to the stored sender of the message being answered, once per message, at most 10 an hour and 30 a day. The browser cannot choose the recipient.
 - Email text and web pages are data. They can never start a lab action or a purchase.

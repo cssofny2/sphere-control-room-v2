@@ -24,6 +24,8 @@ export type Pickable = { name: string; label: string; help: string; root: THREE.
 export type Detail = {
   update: (s: any, dt: number, t: number) => void; setQuality: (q: Quality) => void; phone: PhoneRig; pickables: Pickable[];
   turnKnob: (panel: string, delta: number) => void; anchors: Record<string, THREE.Vector3>; dispose: () => void;
+  /** Objects that move or toggle on their own. The static-geometry merge must leave these (and their children) alone. */
+  dynamic: THREE.Object3D[];
 };
 
 let areaInit = false;
@@ -245,5 +247,6 @@ export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.
   const update = (s: any, dt: number, t: number) => { for (const u of updaters) u(s, dt, t); };
   const anchors = { phone: phone.anchor.clone().setY(1.3), clock: new THREE.Vector3(0.9, 2.5, -2.5) };
   const dispose = () => { texs.forEach(x => { try { x.dispose(); } catch { /* already gone */ } }); };
-  return { update, setQuality, phone, pickables, turnKnob, anchors, dispose };
+  const dynamic: THREE.Object3D[] = [fx, fanRot, hHour, hMin, hSec, handset, cord, ringLamp, ...tags.map(g => g.m)];
+  return { update, setQuality, phone, pickables, turnKnob, anchors, dispose, dynamic };
 }

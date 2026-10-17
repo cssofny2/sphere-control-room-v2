@@ -2,6 +2,17 @@
 
 Versions follow semantic versioning. The version lives in `package.json` and is shown in the top-left corner of the app next to the S.P.H.E.R.E. logo.
 
+## [1.4.0] - 2026-10-17
+
+### Added
+- Natural "studio" voice for Dr. Wire: a neural text-to-speech service (`/api/tts`, ElevenLabs or OpenAI) plays instead of the browser voice when a key is set on the server (`ELEVENLABS_API_KEY` or `OPENAI_API_KEY`). It is off until then. If the service is off, busy, slow or offline, Dr. Wire keeps talking with the browser voice, so a call never goes silent. The first phrase is kept short so the voice starts quickly, the next one is fetched while the current one plays, and repeated lines are cached in memory. A "Studio voice" switch appears in the call panel when it is available.
+- The studio endpoint has the same guards as the other endpoints: same-origin only, a per-client rate limit, a daily spend cap (`TECHNICIAN_TTS_DAILY_CAP_USD`, default 2 USD), short bodies, and text and audio are never logged.
+- Performance test (`tests/e2e/perf.e2e.py`) that checks the draw-call saving and that the merged scene looks identical, including the moving parts.
+
+### Changed
+- Much smoother 3D lab: the static parts of the room are fused into a few meshes per material (about 830 down to about 290 draw calls per frame, half the triangles), the shadow map refreshes every second or third frame instead of every frame, the bloom runs at half resolution, SMAA is skipped on high-DPI screens, and phones and tablets skip 4x MSAA. Quality drops sooner on a slow device (below about 38 frames a second) and, if it is still slow, the resolution steps down.
+- The speech bubble no longer forces a page layout on every frame.
+
 ## [1.3.0] - 2026-10-17
 
 ### Added
