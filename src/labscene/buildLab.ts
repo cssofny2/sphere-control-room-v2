@@ -272,15 +272,15 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   add(box(1.9, 0.04, 0.7), M.alu, wsG, 0, 0.3, 0);
   // Two large LCD monitors: left = his browser / email, right = the SPHERE acquisition software. Each is 0.74 m wide with a 1024 x 600 texture.
   const monTex = canvasTex(1024, 600, () => {}), deskTex = canvasTex(1024, 600, () => {});
-  const SCR_W = 0.74, SCR_H = 0.43;
+  const SCR_W = 0.96, SCR_H = 0.56;
   const makeMonitor = (x: number, yaw: number, tex: CanvasTex) => {
     const g = new THREE.Group(); g.position.set(x, 0, -0.16); g.rotation.y = yaw; wsG.add(g);
-    add(box(SCR_W + 0.04, SCR_H + 0.04, 0.035), M.black, g, 0, 1.2, 0);
-    add(box(0.05, 0.22, 0.04), M.dark, g, 0, 1.0, -0.02); add(box(0.3, 0.015, 0.2), M.dark, g, 0, 0.9375, 0.0);
-    add(new THREE.PlaneGeometry(SCR_W, SCR_H), track(new THREE.MeshBasicMaterial({ map: tex.tex, toneMapped: false })), g, 0, 1.2, 0.019, false);
+    add(box(SCR_W + 0.04, SCR_H + 0.04, 0.035), M.black, g, 0, 1.25, 0);
+    add(box(0.05, 0.3, 0.04), M.dark, g, 0, 1.06, -0.02); add(box(0.3, 0.015, 0.2), M.dark, g, 0, 0.9375, 0.0);
+    add(new THREE.PlaneGeometry(SCR_W, SCR_H), track(new THREE.MeshBasicMaterial({ map: tex.tex, toneMapped: false })), g, 0, 1.25, 0.019, false);
   };
-  makeMonitor(-0.43, 0.11, deskTex); makeMonitor(0.36, -0.11, monTex);
-  add(box(0.4, 0.015, 0.13), M.dark, wsG, -0.02, 0.93, 0.2); add(box(0.2, 0.38, 0.4), M.alu, wsG, 0.88, 1.12, -0.05);
+  makeMonitor(-0.5, 0.13, deskTex); makeMonitor(0.5, -0.13, monTex);
+  add(box(0.4, 0.015, 0.13), M.dark, wsG, -0.02, 0.93, 0.2); add(box(0.2, 0.38, 0.4), M.alu, wsG, 0.88, 0.51, -0.05);
   add(new THREE.CylinderGeometry(0.04, 0.035, 0.09, 16), M.white, wsG, 0.5, 0.97, 0.3);
   const chair = new THREE.Group(); chair.position.set(2.9, 0, -1.15); scene.add(chair); add(box(0.45, 0.06, 0.45), M.dark, chair, 0, 0.5, 0); add(box(0.45, 0.45, 0.06), M.dark, chair, 0, 0.78, 0.2); add(new THREE.CylinderGeometry(0.03, 0.03, 0.45, 12), M.alu, chair, 0, 0.25, 0); for (let i = 0; i < 5; i++) { const a = i * 1.2566; add(box(0.28, 0.025, 0.04), M.dark, chair, Math.cos(a) * 0.14, 0.03, Math.sin(a) * 0.14).rotation.y = -a; }
 
@@ -367,7 +367,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     { const blink = Math.floor(t * 2) % 2, minute = Math.floor(Date.now() / 60000); if (deskRev !== deskSt.rev) ssWake = t;
       const idleNow = deskSt.screen.kind === 'idle' && t - ssWake > ssAfter; if (idleNow !== ssOn) { ssOn = idleNow; deskRev = -1; }
       if (ssOn) { if (t - ssT > 0.08) { ssT = t; deskTex.redraw((c, w, h) => { c.setTransform(1, 0, 0, 1, 0, 0); drawScreensaver(c, w, h, t); }); } }
-      else if (deskRev !== deskSt.rev || deskBlink !== blink || deskMin !== minute) { deskRev = deskSt.rev; deskBlink = blink; deskMin = minute; deskTex.redraw((c, w, h) => { c.setTransform(1, 0, 0, 1, 0, 0); drawDesk(c, w, h, deskSt, blink === 1, new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })); }); } }
+      else if (deskRev !== deskSt.rev || deskBlink !== blink || deskMin !== minute) { deskRev = deskSt.rev; deskBlink = blink; deskMin = minute; deskTex.redraw((c, w, h) => { c.setTransform(1, 0, 0, 1, 0, 0); drawDesk(c, w, h, deskSt, blink === 1, new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })); }); } }
     camProps.tick(t);
     acc += dt; if (acc > 0.25) { acc = 0; panels.forEach(p => drawScreen(p, s)); drawMonitor(s); drawGauge(s); }
   };

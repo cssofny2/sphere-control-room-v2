@@ -78,7 +78,22 @@ export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.
     add(box(1.1, 0.7, 0.025), std({ color: 0xc89a62, roughness: 0.95 }), g, 0, 0, 0, false);
     const cols = [0xfff176, 0xffab91, 0x80deea, 0xc5e1a5];
     for (let i = 0; i < 7; i++) add(box(0.14, 0.14, 0.004), basic({ color: cols[i % 4] }), g, -0.42 + (i % 4) * 0.28 + (i > 3 ? 0.12 : 0), i > 3 ? -0.15 : 0.14, 0.016, false).rotation.z = (i - 3) * 0.06; }
-  // wall clock (shows the real time)
+  // wall calendar (Eastern date, redraws when the date changes)
+  const MONTHS = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+  const drawCalendar = (c: CanvasRenderingContext2D, W: number, H: number, e: { y: number; mo: number; d: number; wd: string }) => {
+    c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = '#fbfbf8'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#b3262e'; c.fillRect(0, 0, W, H * 0.2); c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `800 ${H * 0.095}px system-ui,sans-serif`; c.fillText(`${MONTHS[e.mo - 1]} ${e.y}`, W / 2, H * 0.105);
+    c.fillStyle = '#2b2f36'; c.font = `600 ${H * 0.045}px system-ui,sans-serif`; const dn = ['S', 'M', 'T', 'W', 'T', 'F', 'S']; const cw = W / 7; dn.forEach((x, i) => c.fillText(x, cw * (i + 0.5), H * 0.255));
+    const first = new Date(Date.UTC(e.y, e.mo - 1, 1)).getUTCDay(), days = new Date(Date.UTC(e.y, e.mo, 0)).getUTCDate(); const rh = H * 0.115;
+    for (let d = 1; d <= days; d++) { const i = first + d - 1, col = i % 7, row = Math.floor(i / 7), cx = cw * (col + 0.5), cy = H * 0.33 + rh * (row + 0.5);
+      if (d === e.d) { c.fillStyle = '#b3262e'; c.beginPath(); c.arc(cx, cy, Math.min(cw, rh) * 0.46, 0, 7); c.fill(); c.fillStyle = '#fff'; c.font = `800 ${H * 0.058}px system-ui,sans-serif`; }
+      else { c.fillStyle = col === 0 || col === 6 ? '#7a808a' : '#2b2f36'; c.font = `500 ${H * 0.052}px system-ui,sans-serif`; }
+      c.fillText(String(d), cx, cy + 1); }
+  };
+  const calTex = canvasTex(512, 560, () => {}); keepTex(calTex.tex);
+  { const g = new THREE.Group(); g.position.set(1.28, 2.36, -2.585); room.add(g); add(box(0.37, 0.43, 0.012), M.white, g, 0, 0, -0.004, false); add(box(0.04, 0.03, 0.02), M.dark, g, 0, 0.225, 0, false);
+    const m = new THREE.Mesh(track(new THREE.PlaneGeometry(0.35, 0.41)), basic({ map: calTex.tex })); m.position.z = 0.004; g.add(m); }
+  // wall clock (Eastern time)
   const clk = new THREE.Group(); clk.position.set(0.9, 2.5, -2.58); room.add(clk);
   add(new THREE.CylinderGeometry(0.16, 0.16, 0.03, 40), M.white, clk, 0, 0, 0, false).rotation.x = Math.PI / 2;
   add(new THREE.TorusGeometry(0.16, 0.012, 8, 40), M.dark, clk, 0, 0, 0.01, false);
@@ -231,7 +246,12 @@ export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.
   updaters.push((s, dt, t) => { for (let i = 0; i < ND; i++) { const d = dv[i]; d.y += Math.sin(t * 0.3 + d.p) * 0.0006 + 0.0004; d.x += Math.sin(t * 0.21 + d.p * 2) * 0.0007; if (d.y > 2.8) d.y = 0.5; dp[i * 3] = d.x; dp[i * 3 + 1] = d.y; dp[i * 3 + 2] = d.z; } dGeo.attributes.position.needsUpdate = true; dMat.opacity = s.ldv?.shutter && s.ldv?.power ? 0.9 : 0.5; void dt; });
 
   // ── clock hands, picking, quality ──
-  updaters.push(() => { const d = new Date(); const sec = d.getSeconds() + d.getMilliseconds() / 1000, min = d.getMinutes() + sec / 60, hr = (d.getHours() % 12) + min / 60; hSec.rotation.z = -sec / 60 * Math.PI * 2; hMin.rotation.z = -min / 60 * Math.PI * 2; hHour.rotation.z = -hr / 12 * Math.PI * 2; });
+  // Eastern time (America/New_York: EST in winter, EDT in summer) regardless of the visitor's own time zone.
+  const etFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'long', timeZoneName: 'short' });
+  const easternNow = (ms = Date.now()) => { const o: Record<string, string> = {}; for (const p of etFmt.formatToParts(new Date(ms))) o[p.type] = p.value; return { h: +o.hour, m: +o.minute, s: +o.second, y: +o.year, mo: +o.month, d: +o.day, wd: o.weekday, zone: o.timeZoneName }; };
+  let calKey = '';
+  updaters.push(() => { const ms = Date.now(); const e = easternNow(ms); const sec = e.s + (ms % 1000) / 1000, min = e.m + sec / 60, hr = (e.h % 12) + min / 60; hSec.rotation.z = -sec / 60 * Math.PI * 2; hMin.rotation.z = -min / 60 * Math.PI * 2; hHour.rotation.z = -hr / 12 * Math.PI * 2;
+    const k = `${e.y}-${e.mo}-${e.d}`; if (k !== calKey) { calKey = k; calTex.redraw((c, W, H) => drawCalendar(c, W, H, e)); } });
   const pickables: Pickable[] = [
     { name: 'chamber', label: 'Thermal-vacuum chamber', help: 'ov.chamber', root: ctx.parts.chamber, view: 'chamber' },
     { name: 'stage', label: 'XYZ stage and sphere', help: 'ov.stage', root: ctx.parts.stage, view: 'stage' },
@@ -240,7 +260,7 @@ export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.
     { name: 'rack', label: 'Instrument rack', help: 'ov.equipment', root: rack, view: 'rack' },
     { name: 'workstation', label: 'Workstation', help: 'ov.workstation', root: wsG, view: 'bench' },
     { name: 'phone', label: 'Lab phone: call Dr. Wire', help: 'ov.overview', root: phoneBase, view: 'phone' },
-    { name: 'clock', label: 'Wall clock (real time)', help: 'ov.sim_time', root: clk, view: 'overview' },
+    { name: 'clock', label: 'Wall clock (Eastern time)', help: 'ov.sim_time', root: clk, view: 'overview' },
   ];
   const setQuality = (q: Quality) => { fx.visible = q === 'high'; };
   const turnKnob = (panel: string, delta: number) => { nudge[panel] = (nudge[panel] || 0) + delta; };
