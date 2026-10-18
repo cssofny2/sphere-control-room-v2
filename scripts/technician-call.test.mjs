@@ -104,3 +104,28 @@ const flush = async () => { for (let i = 0; i < 20; i++) await new Promise(r => 
   assert.deepEqual(I.parseCommand('move the stage x 7', st).params, { x: 7, y: 2, z: 3 }); assert.equal(I.parseCommand('why do we pump down?'), null);
   assert.equal(I.parseCommand('emergency stop').type, 'estop'); assert.equal(I.parseCommand('cancel the task').type, 'cancel'); assert.equal(I.parseCommand('start an axis scan').params.kind, 'axis');
   assert.ok(I.isYes('Yes please') && I.isNo("no, don't") && !I.isYes('maybe')); console.log('PASS spoken command parsing'); }
+
+// 13. personal and everyday conversation inside a live call (no AI service needed)
+{ const X = setup(); await X.call.start();
+  const last = () => X.call.captions.filter(c => c.who === 'wire').slice(-1)[0].text;
+  await X.call.submit('how much do you make an hour?'); assert.match(last(), /forty-six/i);
+  await X.call.submit('do you have a dog?'); assert.match(last(), /Hertz|beagle/i);
+  await X.call.submit('are you a real person?'); assert.match(last(), /simulated|AI/i);
+  await X.call.submit('what is the pressure?'); assert.match(last(), /760/);   // lab questions still go to the lab
+  await X.call.submit('how was your weekend?'); assert.ok(last().length > 20);
+  const n = X.call.captions.filter(c => c.who === 'wire').length; await X.call.submit('calibrate the VNA'); await flush(); assert.ok(X.call.captions.filter(c => c.who === 'wire').length > n);
+  console.log('PASS call: pay, pets, "are you real", weekend and lab questions each get the right kind of answer'); }
+
+// 14. he asks back, reacts to the operator's answer, and weather asks for a city
+{ const X = setup(); await X.call.start();
+  const last = () => X.call.captions.filter(c => c.who === 'wire').slice(-1)[0].text;
+  await X.call.submit("how's the weather?"); assert.match(last(), /city/i);
+  await X.call.submit('Rochester'); assert.ok(X.call.captions.some(c => c.who === 'wire' && /Okay, Rochester/.test(c.text)));
+  await X.call.submit('tell me about your family'); assert.match(last(), /Maria|Theo/);
+  console.log('PASS call: weather asks for a city; family question is answered'); }
+
+// 15. scripted fault lines are spoken as sentences (no "Cause:" / "Fix:" labels read aloud)
+{ const F2 = await loadTypeScript(new URL('../src/technician/fluent.ts', import.meta.url));
+  const t = F2.fluent('I think we have a vacuum leak. Cause: gas is getting in. Effect: pressure keeps rising. Check: watch the pressure rate. Fix: clear the leak fault. We do not know yet.');
+  assert.ok(!/(Cause|Effect|Check|Fix):/.test(t) && /don't know/.test(t), t); assert.equal(F2.fluent(t), t);
+  console.log('PASS fluent: labels become sentences, contractions are used, and it is idempotent'); }

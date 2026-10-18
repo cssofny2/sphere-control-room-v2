@@ -2,6 +2,18 @@
 
 Versions follow semantic versioning. The version lives in `package.json` and is shown in the top-left corner of the app next to the S.P.H.E.R.E. logo.
 
+## [1.7.0] - 2026-10-17
+
+### Added
+- Dr. Wire's everyday conversation is about ten times larger: 134 topics, nearly 400 differently worded answers and over 600 example questions, all answered offline and in character. They cover work and schedule (when he gets off, starts, takes lunch, weekends, on call, commute), pay (hourly rate, salary, raise, benefits, overtime), his life (age, home, family, pets, hobbies, favorites), how he feels, manners (compliments, thanks, apologies, rudeness), what you tell him about your own day (tired, hungry, stressed, birthday, good or bad news), short back-channel replies ("cool", "really?"), and everyday world questions. The full list is in `docs/dr-wire-conversation.md`.
+- He keeps a conversation going: he sometimes asks something back ("What about you?"), reacts to your answer (dogs, kids, coffee, sports), and then steers gently back to the lab. He never asks back during alarms or while busy, rotates his wording, and acknowledges when you ask the same thing twice. Weather asks for your city and then looks it up.
+- "When do you get off work" now has time-aware, natural answers (nearly done, plenty of day left, already ended).
+- One consistent character (`personaBible.ts`) shared by the offline answers and the AI persona, so improvised answers cannot contradict the scripted ones. Asked sincerely whether he is a real person, he says he is a simulated technician.
+
+### Changed
+- Everything he says now passes through a fluency layer: contractions, "Cause / Effect / Check / Fix" labels turned into spoken sentences, and a lead-in or closing question on longer explanations.
+- The AI persona prompt now asks for connected, flowing speech instead of lists of facts.
+
 ## [1.6.0] - 2026-10-17
 
 ### Fixed

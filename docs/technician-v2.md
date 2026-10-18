@@ -74,3 +74,12 @@ export default {
 - Startup order follows the wall poster and is built from the live state, so finished steps are skipped. It stops before the laser shutter by design.
 - Eastern time clock and calendar: `labDetail.ts` formats `Date.now()` with `Intl.DateTimeFormat` and `timeZone: 'America/New_York'`.
 - Audio: `foley.ts` is fed `dist`, `pan` and `clockDist` by the scene each frame and the instrument state through `setLab`.
+
+## v7 additions (1.7.0): conversation
+- `chatter.ts` is the engine; the topics are data in `chatBankWork.ts`, `chatBankPersonal.ts` and `chatBankSocial.ts`, ordered in `chatBank.ts` (first match wins). Each topic has a pattern, example questions, two or more answers, and optional questions to ask back.
+- Pattern text is written with `i.?m`, `what.?s`, `don.?t`; `spoken()` widens each to accept "I am", "what is", "do not" and the apostrophe-free forms speech recognition returns.
+- Guards: anything that mentions an instrument (`LAB` regex) or parses as a lab command skips the chat bank. Back-channel replies ("cool", "really") only match whole short utterances.
+- Memory is per call: answer rotation, a repeat acknowledgement, and a cool-down on asking back. Nothing is stored.
+- `personaBible.ts` holds his fixed background (pay, schedule, family). The offline answers and the AI prompt both read it. Asked sincerely, he says he is a simulated technician.
+- `fluent.ts` runs over everything he says (`reply`, `narrate`): contractions, "Cause:/Fix:" labels folded into sentences, and a lead-in or closing question on explanations.
+- The published list of topics is generated: `node scripts/build-conversation-doc.mjs` writes `docs/dr-wire-conversation.md`; `npm test` fails if it is stale. To add a topic, add it to a bank file with at least two examples, then regenerate.
