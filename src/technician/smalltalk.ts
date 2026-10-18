@@ -5,7 +5,7 @@
 export type Shift = { start: number; end: number; lunch: number };   // hours on a 24 h clock, local time
 export const DEFAULT_SHIFT: Shift = { start: 8, end: 17, lunch: 12.5 };
 
-export type Pending = { topic: 'day' } | { topic: 'lunch' } | { topic: 'food_place' } | null;
+export type Pending = { topic: 'day' } | { topic: 'lunch' } | { topic: 'food_place' } | { topic: 'chat'; id: string } | { topic: 'weather' } | null;
 export type TalkCtx = { now: Date; shift?: Shift; alarms?: number; busy?: boolean; ready?: boolean; pick?: (n: number) => number; lunchOffered?: boolean };
 export type TalkResult = { text: string; ask?: Pending; intent?: { type: 'food'; place: string } | { type: 'lunch_declined' } };
 
@@ -27,14 +27,17 @@ function hm(mins: number): string {
   if (h <= 0) return `${m} minute${m === 1 ? '' : 's'}`;
   return m ? `${h} hour${h === 1 ? '' : 's'} and ${m} minute${m === 1 ? '' : 's'}` : `${h} hour${h === 1 ? '' : 's'}`;
 }
-const hourWord = (h: number) => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); const h12 = hh % 12 || 12; return mm ? `${h12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}` : `${NUMW[h12]} ${hh < 12 ? 'AM' : 'PM'}`; };
+export const hourWord = (h: number) => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); const h12 = hh % 12 || 12; return mm ? `${h12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}` : `${NUMW[h12]} ${hh < 12 ? 'AM' : 'PM'}`; };
 
-export function shiftAnswer(d: Date, sh: Shift = DEFAULT_SHIFT): string {
-  const now = hrs(d);
-  if (now < sh.start) return `My shift starts at ${hourWord(sh.start)} and runs until ${hourWord(sh.end)}, but I'm here already, so call me whenever.`;
-  if (now >= sh.end) return `My shift ended at ${hourWord(sh.end)}, but I'm still here if you need me. Normally I'm on from ${hourWord(sh.start)} to ${hourWord(sh.end)}.`;
-  const left = (sh.end - now) * 60;
-  return `I'm here until ${hourWord(sh.end)} today, so about ${hm(left)} to go.`;
+export function shiftAnswer(d: Date, sh: Shift = DEFAULT_SHIFT, pick: (n: number) => number = n => Math.floor(Math.random() * n)): string {
+  const now = hrs(d); const v = <T,>(xs: T[]) => xs[pick(xs.length) % xs.length];
+  const end = hourWord(sh.end), start = hourWord(sh.start);
+  if (now < sh.start) return v([`My shift starts at ${start} and runs until ${end}, but I'm here already, so call me whenever.`, `I'm not officially on until ${start}, but I came in early. I'm here until ${end} today as usual.`]);
+  if (now >= sh.end) return v([`My shift ended at ${end}, but I'm still here if you need me. Normally I'm on from ${start} to ${end}.`, `I was supposed to clock out at ${end}, but I'm happy to stay a little longer. Normally I'm here from ${start} to ${end}.`]);
+  const left = (sh.end - now) * 60; const t = hm(left);
+  if (left <= 45) return v([`Almost done. I get off at ${end}, so about ${t} to go, and then it's home to the family.`, `Not long now: I'm here until ${end}, which is about ${t} from now. I'm already thinking about dinner.`]);
+  if (left <= 150) return v([`I'm here until ${end} today, so about ${t} to go. After that it's dinner, the dog and the couch.`, `I get off at ${end}, which is about ${t} from now. Not bad, really.`]);
+  return v([`I'm here until ${end} today, so about ${t} to go. Plenty of day left.`, `I clock out at ${end}, so I've got about ${t} left on the shift. Plenty of time to get things done.`, `I'm on until ${end} today. That's about ${t} from now, so we've got time.`]);
 }
 
 const pickOf = (c: TalkCtx, n: number) => (c.pick ? c.pick(n) : Math.floor(Math.random() * n)) % n;
@@ -75,6 +78,7 @@ const NO = /^\s*(no|nope|nah|not now|not today|i'?m good|i'?m fine|maybe later|i
 /** Handles the operator's answer to a question Dr. Wire asked. Returns null if it is not an answer to it. */
 export function answerPending(p: Pending, text: string, c: TalkCtx): TalkResult | null {
   if (!p) return null;
+  if (p.topic === 'chat' || p.topic === 'weather') return null;   // answered by the chat engine (chatter.ts)
   if (p.topic === 'day') return dayReply(text, c);
   const place = placeFrom(text);
   if (p.topic === 'lunch') {
@@ -94,7 +98,7 @@ export function smallTalk(text: string, c: TalkCtx): TalkResult | null {
   const q = text.toLowerCase().replace(/[?!.,]/g, ' ').replace(/\s+/g, ' ').trim();
   if (/\b(what('?s| is) the time|what time is it|do you (have|got) the time|time (is it|now)|current time|got the time)\b/.test(q)) return { text: timeAnswer(c.now) };
   if (/\b(what('?s| is) (the )?(date|day)( today)?|what day is it|today'?s date|which day is it)\b/.test(q)) return { text: dateAnswer(c.now) };
-  if (/\b(until|till|til|when|what time)\b.*\b(work(ing)?|leav(e|ing)|off|shift|go(ing)? home|clock out|done|finish)\b|\b(work(ing)?|shift|leav(e|ing))\b.*\b(until|till|til|how long|what time|when)\b|how much longer.*(work|shift|today)|how long (are|will) you (be )?(here|around|working|in|there)|are you (here|around|in) (until|till)|when do you (get off|leave|go home|finish)/.test(q) && !/\b(vna|ldv|scan|laser|pump|stage|chamber)\b/.test(q)) return { text: shiftAnswer(c.now, c.shift) };
+  if (/\b(until|till|til|when|what time)\b.*\b(work(ing)?|leav(e|ing)|off|shift|go(ing)? home|clock out|done|finish)\b|\b(work(ing)?|shift|leav(e|ing))\b.*\b(until|till|til|how long|what time|when)\b|how much longer.*(work|shift|today)|how long (are|will) you (be )?(here|around|working|in|there)|are you (here|around|in) (until|till)|when do you (get off|leave|go home|finish)/.test(q) && !/\b(vna|ldv|scan|laser|pump|stage|chamber)\b/.test(q)) return { text: shiftAnswer(c.now, c.shift, c.pick) };
   if (/\bhow('?s| is| are)\b.*\b(you|your (day|morning|afternoon|evening|shift)|things|it going)\b|\bhow('?s| is) your day\b|\bhow do you do\b|\bhow have you been\b|\bwhat'?s up\b|\bhow'?s it going\b/.test(q)) return { text: howAreYou(c), ask: { topic: 'day' } };
   if (/\b(have you (eaten|had lunch)|had lunch|hungry|lunch time|time for lunch|grab (some )?(lunch|food|a bite)|grab something|get something to eat|something for lunch|get (some )?(lunch|food))\b/.test(q) && !/\b(order|doordash)\b/.test(q)) return { text: "I could eat. Want to grab something for lunch? I can put in an order from the computer.", ask: { topic: 'lunch' } };
   if (/^(hi|hello|hey|good (morning|afternoon|evening)|howdy|yo)\b/.test(q) && q.split(' ').length <= 4) return { text: `Good ${partOfDay(c.now) === 'night' ? 'evening' : partOfDay(c.now)}! What can I do for you?` };

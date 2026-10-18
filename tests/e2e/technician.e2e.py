@@ -218,6 +218,19 @@ def scenario_startup():
         check("lab is up and the shutter is still closed", state is None or (all(state[:6]) and not state[6]), state)
         check("no console errors", not s.errs, s.errs[:3]); s.close()
 
-ALL = {"startup": scenario_startup, "call": scenario_call, "voice": scenario_voice, "task": scenario_task, "blocked": scenario_blocked, "mic-denied": scenario_denied, "mobile": scenario_mobile, "reduced": scenario_reduced, "android": scenario_android, "nowebgl": scenario_nowebgl}
+def scenario_chat():
+    with sync_playwright() as p:
+        s = Session(p)
+        start_call(s, mic=False); s.wait_for("document.querySelector('[data-call-bar]')?.dataset.callState === 'connected'", 90, "connected")
+        def say(q):
+            s.sc.locator("[data-call-input]").fill(q); s.sc.locator("[data-call-send]").click(); s.pg.wait_for_timeout(700)
+        def last():
+            return s.js("(() => { const els = [...document.querySelectorAll('[data-lab-scene] [data-call-caption], [data-lab-scene] [data-caption]')]; return els.length ? els[els.length - 1].textContent : document.querySelector('[data-lab-scene]')?.innerText || ''; })()")
+        say("how much do you make an hour?"); check("he answers the hourly pay question in character", "forty-six" in (s.sc.inner_text() or "").lower(), None)
+        say("do you have a dog?"); check("he talks about his dog", "hertz" in (s.sc.inner_text() or "").lower() or "beagle" in (s.sc.inner_text() or "").lower(), None)
+        say("are you a real person?"); check("he is honest that he is a simulated technician", "simulated" in (s.sc.inner_text() or "").lower() or " ai" in (s.sc.inner_text() or "").lower(), None)
+        check("no console errors", not s.errs, s.errs[:3]); s.close()
+
+ALL = {"chat": scenario_chat, "startup": scenario_startup, "call": scenario_call, "voice": scenario_voice, "task": scenario_task, "blocked": scenario_blocked, "mic-denied": scenario_denied, "mobile": scenario_mobile, "reduced": scenario_reduced, "android": scenario_android, "nowebgl": scenario_nowebgl}
 for name in (WANT or ALL):
     print("== " + name); ALL[name]()

@@ -11,6 +11,8 @@ import type { Flows } from './flows';
 import { ACTION_BY_ID } from './actions';
 import type { ConfirmBroker, Step, TaskRunner } from './taskRunner';
 import type { SpeechIO } from './speech';
+import { createChatter } from './chatBank';
+import { fluent } from './fluent';
 import { askName, clarify, dontKnow, lookUpLead, meet, noName, parseName, withName } from './manner';
 
 export type CallState = 'idle' | 'connecting' | 'ringing' | 'connected' | 'ended';
@@ -71,6 +73,7 @@ export function createCallController(deps: CallDeps) {
   let pttBuf = '', pttActive = false, resumeTimer: ReturnType<typeof setTimeout> | null = null;
   const unsub: (() => void)[] = [];
   let busyTurn = false; const turnQueue: string[] = [];
+  const chatter = createChatter();
   let pending: Pending = null, lunchOffered = false, incoming: { message: string } | null = null;
   // Who he is talking to. The name lives only in memory for this page; it is never written to storage.
   let callerName: string | null = null, namePending: 'ask' | 'confirm' | null = null, nameDeclined = false, sinceName = 2;
@@ -109,13 +112,16 @@ export function createCallController(deps: CallDeps) {
   }));
 
   // ——— turns ———
-  const reply = (text: string, kind: Bubble['kind'] = 'answer', mood: Bubble['mood'] = 'neutral') => {
+  const reply = (raw: string, kind: Bubble['kind'] = 'answer', mood: Bubble['mood'] = 'neutral') => {
+    const text = fluent(raw, { pick: rngPick });
     cap('wire', text); deps.say({ text, focus: 'none', mood, kind }); speakChunk(text);
   };
 
   // ——— everyday talk and his computer ———
+  const rngPick = deps.rng ? (n: number) => Math.floor(deps.rng!() * n) : undefined;
   const wall = () => (deps.clock ? deps.clock() : new Date());
   const talkCtx = () => { const f = deps.facts(); return { now: wall(), shift: deps.shift, alarms: f.alarms.length, busy: !!deps.runner.current, lunchOffered, pick: deps.rng ? (n: number) => Math.floor(deps.rng!() * n) : undefined }; };
+  const chatCtx = () => { const f = deps.facts(); return { now: wall(), shift: deps.shift, alarms: f.alarms.length, busy: !!deps.runner.current, name: callerName, pick: rngPick }; };
   const named = (text: string) => { const w = withName(text, callerName, sinceName, deps.rng ? (n: number) => Math.floor(deps.rng!() * n) : undefined); sinceName = w.used ? 0 : sinceName + 1; return w.text; };
   const applyTalk = (r: TalkResult) => {
     reply(named(r.text)); pending = r.ask ?? null; if (r.ask?.topic === 'lunch' || /lunch/i.test(r.text)) lunchOffered = true;
@@ -206,7 +212,7 @@ export function createCallController(deps: CallDeps) {
     }
     const a = deps.tech.ask(text, deps.facts(), now());
     if (!a.known && deps.flows && text.trim().split(/\s+/).length >= 2) { runLookup(text.replace(/[?]+$/, '')); return; }
-    reply(a.known ? named(a.remark.text) : a.remark.text, 'answer', a.known ? 'neutral' : 'worried');
+    reply(a.known ? named(fluent(a.remark.text, { kind: a.sources.some(x => /live-state|memory|safety|jokes/.test(x)) ? 'plain' : 'explain', pick: rngPick })) : a.remark.text, 'answer', a.known ? 'neutral' : 'worried');
   }
 
   async function handle(text: string) {
@@ -240,11 +246,21 @@ export function createCallController(deps: CallDeps) {
     }
     // Something he asked the operator a moment ago (how is your day, lunch?).
     const tc = talkCtx();
-    if (pending) { const p = pending; pending = null; const r = answerPending(p, text, tc); if (r) { applyTalk(r); return; } }
+    if (pending) {
+      const p = pending; pending = null;
+      if (p.topic === 'chat') { const f = chatter.follow(text, chatCtx()); if (f) { reply(named(f)); return; } }
+      else if (p.topic === 'weather') {
+        const city = text.replace(/^(i'?m|i am|we'?re|it'?s|im|i live|we live|in|at|here in|currently)\s+(in\s+)?/i, '').replace(/[.?!]+$/, '').trim();
+        if (city && city.split(/\s+/).length <= 5 && !/^(what|why|how|can|could|never ?mind|nothing|no)\b/i.test(city) && !parseCommand(text, deps.getState())) { reply(`Okay, ${city}. Let me check the forecast.`); runLookup(`weather forecast today in ${city}`); return; }
+      }
+      else { const r = answerPending(p, text, tc); if (r) { applyTalk(r); return; } }
+    }
     // Everyday questions have exact answers (the clock, his shift), so they never go to the AI.
     const st = smallTalk(text, tc); if (st) { applyTalk(st); return; }
     // Jobs at the computer are handled here so the confirmation and the hand-off are always the same.
     const intent = parseCommand(text, deps.getState());
+    // Personal and everyday questions (pay, family, plans, favorites) have consistent in-character answers; the lab commands above them take priority.
+    if (!intent || intent.type === 'lookup') { const ch = chatter.reply(text, chatCtx()); if (ch) { reply(named(ch.text)); pending = ch.ask ?? null; return; } }
     if (intent?.type === 'food') { if (intent.place) runFood(intent.place, intent.request); else { reply("Sure. Where from? I can do McDonald's on DoorDash, or tell me another place."); pending = { topic: 'food_place' }; } return; }
     if (intent?.type === 'part') { runPart(intent.part, intent.qty, intent.urgent); return; }
     if (intent?.type === 'lookup') { runLookup(intent.query); return; }
@@ -279,7 +295,7 @@ export function createCallController(deps: CallDeps) {
   async function start(opts: { mic?: boolean; opening?: string } = {}) {
     if (state !== 'idle' && state !== 'ended') return;
     if (incoming) { opts = { ...opts, opening: opts.opening ?? incoming.message }; incoming = null; }
-    captions = []; history = []; pending = null; namePending = null; capId = 0; interimId = 0; notice = ''; llmDown = false; textOnly = false; muted = false; epoch++; micState = 'off'; deps.tech.memory.questions += 0;
+    captions = []; history = []; pending = null; chatter.reset(); namePending = null; capId = 0; interimId = 0; notice = ''; llmDown = false; textOnly = false; muted = false; epoch++; micState = 'off'; deps.tech.memory.questions += 0;
     state = 'connecting'; emit();
     const wantMic = opts.mic !== false;
     const m = wantMic ? await deps.requestMic() : ({ ok: false, reason: 'off' } as const);   // must run inside the click that started the call
@@ -337,7 +353,7 @@ export function createCallController(deps: CallDeps) {
     /** Clears an ended call so the bar can close. */
     reset() { if (state === 'ended') { state = 'idle'; captions = []; notice = ''; connectedAt = 0; emit(); } },
     /** Dr. Wire says something on his own initiative (task narration, alerts) while the call is up. */
-    narrate(text: string, kind: Bubble['kind'] = 'status', bubble = true) { if (bubble) deps.say({ text, focus: 'none', mood: 'neutral', kind }); if (state === 'connected') { cap('wire', text); speakChunk(text); } },
+    narrate(raw: string, kind: Bubble['kind'] = 'status', bubble = true) { const text = fluent(raw, { pick: rngPick }); if (bubble) deps.say({ text, focus: 'none', mood: 'neutral', kind }); if (state === 'connected') { cap('wire', text); speakChunk(text); } },
     setMuted(m: boolean) { muted = m; if (m) deps.speech.stopListening(); else if (state === 'connected' && micState === 'ok' && micInput === 'open' && !deps.speech.isSpeaking()) deps.speech.listen(); emit(); },
     setMicInput(m: MicInput) { micInput = m; if (m === 'push') deps.speech.stopListening(); else if (state === 'connected' && micState === 'ok' && !muted) deps.speech.listen(); emit(); },
     setSpeaker(on: boolean) { speakerOn = on; if (!on) { epoch++; deps.speech.cancel(); } emit(); },
