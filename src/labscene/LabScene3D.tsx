@@ -3,7 +3,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import './labscene.css';
@@ -116,7 +115,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     let renderer: THREE.WebGLRenderer;
     try { const hiDpiTouch = (window.devicePixelRatio || 1) >= 2 && !!window.matchMedia?.('(pointer: coarse)').matches; renderer = new THREE.WebGLRenderer({ antialias: !hiDpiTouch, powerPreference: 'high-performance' }); /* phones and tablets: no 4x MSAA on a dense screen, it costs a lot of fill for little gain */ } catch { setFailed(true); return; }
     renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap; renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true;   // shadows are refreshed every few frames (see the loop), not every frame
-    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95; renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.82; renderer.outputColorSpace = THREE.SRGBColorSpace;
     const canvas = renderer.domElement; canvas.setAttribute('role', 'img'); canvas.setAttribute('tabindex', '0');
     canvas.setAttribute('aria-label', '3D laboratory: thermal-vacuum chamber with XYZ stage and sphere, instrument rack, wall phone and Dr. Wire the lab technician, who wears the S.P.H.E.R.E. logo on his coat. Drag to orbit, scroll to zoom. Click a part to look at it.');
     host.appendChild(canvas);
@@ -149,7 +148,6 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
       if (composer) return composer; const { w, h } = size();
       try {
         composer = new EffectComposer(renderer); renderPass = new RenderPass(lab.scene, cam); composer.addPass(renderPass);
-        composer.addPass(new UnrealBloomPass(new THREE.Vector2(Math.round(w / 2), Math.round(h / 2)), 0.35, 0.4, 2.6));   // bloom at half resolution: same look, a quarter of the pixels
         composer.addPass(new OutputPass()); if ((window.devicePixelRatio || 1) < 1.5) composer.addPass(new SMAAPass()); composer.setSize(w, h);   // SMAA is redundant on high-DPI screens
       } catch (e) { console.warn('post-processing unavailable', e); composer = null; }
       return composer;

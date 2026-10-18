@@ -4,6 +4,7 @@ import { canvasTex, glowTex, roughnessMapTex, type CanvasTex, type Quality } fro
 import { buildDetail, type PhoneRig, type Pickable } from './labDetail';
 import { drawDesk, drawScreensaver } from './deskRender';
 import { buildCameraProps, CAMERAS, type LabCamera } from './cctv';
+import { buildProps } from './labProps';
 import { mergeStaticMeshes, type MergeStats } from './staticMerge';
 import type { DeskState } from '../technician/desk';
 
@@ -37,7 +38,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   const scene = new THREE.Scene();
   const disposables: { dispose: () => void }[] = [];
   const track = <T extends { dispose: () => void }>(o: T): T => { disposables.push(o); return o; };
-  const bg = new THREE.Color('#eef2f6');
+  const bg = new THREE.Color('#dfe5ec');
   scene.background = bg; scene.fog = new THREE.Fog(bg, 11, 24);
 
   // ── image-based light so metal has something to reflect ──
@@ -45,18 +46,18 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environment = envTex; scene.environmentIntensity = 0.75; disposables.push({ dispose: () => { envTex.dispose(); pmrem.dispose(); } });
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0xcdd6e0, 0.9); scene.add(hemi);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0xbfc9d4, 0.78); scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffffff, 2.3); key.position.set(3.5, 6, 4.5); key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048); key.shadow.camera.left = -6; key.shadow.camera.right = 6; key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
   key.shadow.camera.near = 1; key.shadow.camera.far = 18; key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02; key.shadow.radius = 3;
   scene.add(key);
   const fill = new THREE.DirectionalLight(0xdbe8ff, 0.7); fill.position.set(-5, 3, 2); scene.add(fill);
-  const lamp = new THREE.PointLight(0xfff1dc, 2.2, 3.2, 2); lamp.position.set(0.05, CH_Y + 0.32, 0.1); scene.add(lamp);
+  const lamp = new THREE.PointLight(0xfff1dc, 0.6, 3.2, 2); lamp.position.set(0.05, CH_Y + 0.32, 0.1); scene.add(lamp);
 
   // ── materials ──
   const M = {
     steel: track(new THREE.MeshStandardMaterial({ color: 0xcfd4da, metalness: 1, roughness: 0.38, roughnessMap: roughnessMapTex(23) })),
-    liner: track(new THREE.MeshStandardMaterial({ color: 0xe6ebf0, metalness: 1, roughness: 0.14, side: THREE.DoubleSide })),
+    liner: track(new THREE.MeshStandardMaterial({ color: 0xe6ebf0, metalness: 1, roughness: 0.42, side: THREE.DoubleSide })),
     shell: track(new THREE.MeshPhysicalMaterial({ color: 0xdde2e8, metalness: 1, roughness: 0.55, roughnessMap: roughnessMapTex(11), anisotropy: 0.3, anisotropyRotation: Math.PI / 2, side: THREE.DoubleSide })),
     alu: track(new THREE.MeshStandardMaterial({ color: 0xdfe3e8, metalness: 0.9, roughness: 0.38 })),
     dark: track(new THREE.MeshStandardMaterial({ color: 0x22262b, metalness: 0.5, roughness: 0.5 })),
@@ -70,7 +71,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     glass: track(new THREE.MeshPhysicalMaterial({ color: 0xcfe6ff, metalness: 0, roughness: 0.04, transparent: true, opacity: 0.2, clearcoat: 1, depthWrite: false })),
     rubber: track(new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.9 })),
     red: track(new THREE.MeshStandardMaterial({ color: 0xd62d2d, metalness: 0.3, roughness: 0.4 })),
-    wall: track(new THREE.MeshStandardMaterial({ color: 0xf7f9fb, roughness: 0.95 })),
+    wall: track(new THREE.MeshStandardMaterial({ color: 0xe4e9ef, roughness: 0.95 })),
     laminate: track(new THREE.MeshStandardMaterial({ color: 0xf1f3f5, roughness: 0.4 })),
   };
   // Parts of the shell that get cut away in cutaway mode.
@@ -87,9 +88,9 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   // ── room ──
   const room = new THREE.Group(); scene.add(room);
   const floorTex = canvasTex(512, 512, (c, w, h) => {
-    c.fillStyle = '#d9dfe6'; c.fillRect(0, 0, w, h);
+    c.fillStyle = '#b9c1ca'; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 2600; i++) { c.fillStyle = `rgba(${150 + Math.random() * 60},${160 + Math.random() * 50},${170 + Math.random() * 50},${Math.random() * 0.12})`; c.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
-    c.strokeStyle = '#c3cad2'; c.lineWidth = 3; c.strokeRect(0, 0, w, h);
+    c.strokeStyle = '#98a1ab'; c.lineWidth = 3; c.strokeRect(0, 0, w, h);
   });
   floorTex.tex.wrapS = floorTex.tex.wrapT = THREE.RepeatWrapping; floorTex.tex.repeat.set(16, 12);
   const floorMat = track(new THREE.MeshStandardMaterial({ map: floorTex.tex, roughness: 0.32, metalness: 0.05 }));
@@ -362,7 +363,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     const crit = (s.alarms || []).some((a: any) => !a.acknowledged && a.severity === 'critical'), warn = (s.alarms || []).some((a: any) => !a.acknowledged);
     const lvl = !s.facility.power ? -1 : crit ? 2 : warn || c.doorOpen || !c.faraday || !c.isolation ? 1 : 0; const blink = lvl === 2 ? (Math.sin(t * 9) > 0 ? 1 : 0.15) : 1;
     beacon.forEach((m, i) => { m.emissiveIntensity = (lvl === i ? 1.6 * blink : 0.08); });
-    lamp.intensity = c.doorOpen ? 3.2 : 2.2;
+    lamp.intensity = c.doorOpen ? 1.0 : 0.5;
     // slow refresh of the canvases
     { const blink = Math.floor(t * 2) % 2, minute = Math.floor(Date.now() / 60000); if (deskRev !== deskSt.rev) ssWake = t;
       const idleNow = deskSt.screen.kind === 'idle' && t - ssWake > ssAfter; if (idleNow !== ssOn) { ssOn = idleNow; deskRev = -1; }
@@ -384,11 +385,12 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     vna: { power: false }, ldv: { power: false }, clock: { power: false }, scope: { power: false }, facility: { power: false }, experiment: {}, alarms: [],
   }, 0.016, 0);
   detailUpdate = detail.update;
-  const dispose = () => { camProps.dispose(); detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, deskTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
+  const dispose = () => { props.dispose(); camProps.dispose(); detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, deskTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
   void target; void sl; void wl; void back; void left; void bez; void win; void dRing; void dBody; void topPort; void leftPort1; void leftPort2; void rightPort; void capOut; void cap; void liner; void shell; void fl;
   // Fuse the static parts of the room into a few big meshes. Everything that moves or toggles is listed here and left alone.
   const dynamicParts: THREE.Object3D[] = [yCar, xCar, column, ...bellows, post, sphere, sphereGlow, ghost, doorPivot, bench, turboFan, rough, laser, laserGlow, dot, halo, rfPulse, ...knobs.map(k => k.mesh), ...panels.map(p => p.led), ...isoLeds, ...detail.dynamic];
   const noMerge = typeof location !== 'undefined' && /[?&]nomerge\b/.test(location.search);
+  const props = buildProps({ scene, room, M, track, add, box });
   const mergeStats = noMerge ? { before: 0, after: 0, groups: 0 } : mergeStaticMeshes(scene, { regionRoots: detail.pickables.map(p => p.root), dynamic: dynamicParts, track });
   return { scene, update, setCutaway, dispose, spherePos, mergeStats, setDesk: (st: DeskState) => { deskSt = st; }, screensaver: { wake: () => { ssWake = lastT; }, setAfter: (sec: number) => { ssAfter = sec; }, get active() { return ssOn; } }, cameras: CAMERAS, hideCameraHousing: (id: number | null) => camProps.hideOnly(id), anchors: { ...anchors, ...detail.anchors }, phone: detail.phone, pickables: detail.pickables, setQuality: (q: Quality) => { detail.setQuality(q); key.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024); key.shadow.map?.dispose(); (key.shadow as any).map = null; }, turnKnob: detail.turnKnob };
 }

@@ -2,6 +2,15 @@
 
 Versions follow semantic versioning. The version lives in `package.json` and is shown in the top-left corner of the app next to the S.P.H.E.R.E. logo.
 
+## [1.6.0] - 2026-10-17
+
+### Fixed
+- High quality is no longer washed out: the bloom pass that smeared every bright metal highlight into a white haze is removed, the exposure is lower, the chamber lamp and ceiling light panels are dimmer so the polished chamber liner no longer flares, and the walls and floor are a little darker so there is contrast to see.
+
+### Added
+- A right-hand wall and many more lab objects: fume hood with a sash and exhaust duct, a bench with a sink, tap, towel dispenser and reagent shelf, an eyewash and drench shower, a tall chemical storage cabinet, a rolling tool chest, waste and recycling bins, stools, a gas cylinder rack, a coat rack with a spare lab coat, a wet-floor sign, an anti-fatigue mat, overhead ductwork, a cable tray, sprinkler heads, exit signs, a first-aid kit, a fire alarm pull station, an extinguisher and a hazards poster. All of it is merged into the static scene, so the draw-call cost stays small.
+- Dr. Wire looks more lifelike: skin with pores and colour variation, flushed cheeks and a five o'clock shadow, sheen on skin and hair, strand-textured hair with a fringe and fuller back, limbal rings and catchlights in the eyes, nostrils, shaped lips, fingernails, woven-cloth bump on the lab coat, shirt and trousers, shirt buttons and a belt buckle.
+
 ## [1.5.0] - 2026-10-17
 
 ### Added

@@ -237,7 +237,7 @@ export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.
     const g = new THREE.Group(); g.position.set(0, 3.0, z); fx.add(g); fixtures.push(g);
     add(box(2.4, 0.05, 0.22), M.alu, g, 0, 0, 0, false); add(box(2.3, 0.01, 0.17), basic({ color: new THREE.Color(4, 4, 4) }), g, 0, -0.03, 0, false);
     for (const x of [-1.0, 1.0]) add(new THREE.CylinderGeometry(0.004, 0.004, 0.8, 6), M.steel, g, x, 0.42, 0, false);
-    const al = new THREE.RectAreaLight(0xffffff, 2.2, 2.3, 0.17); al.position.set(0, -0.04, 0); al.rotation.x = -Math.PI / 2; g.add(al);
+    const al = new THREE.RectAreaLight(0xffffff, 1.1, 2.3, 0.17); al.position.set(0, -0.04, 0); al.rotation.x = -Math.PI / 2; g.add(al);
   }
   // dust motes drifting in the light
   const ND = 140, dp = new Float32Array(ND * 3), dv = Array.from({ length: ND }, () => ({ x: (Math.random() - 0.5) * 3.4, y: 0.5 + Math.random() * 2.2, z: (Math.random() - 0.5) * 3.4, p: Math.random() * 6 }));
