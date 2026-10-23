@@ -1,8 +1,9 @@
 {
   "name": "sphere-metrology-lab",
   "private": true,
-  "version": "1.7.0",
-  "author": "Michael P. Goodman",
+  "version": "2.0.0",
+  "homepage": "https://lab.spheredesci.org",
+  "author": "Michael P. Goodman <https://michaelpgoodman.com> (https://orcid.org/0009-0008-3796-5857)",
   "type": "module",
   "engines": {
     "node": "24.x"

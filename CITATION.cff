@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+title: "SPHERE Virtual Lab (SPHEREVL) & Control Room v2: Interactive 3D Acoustic Metrology Simulator"
+message: "If you use this software or simulation architecture in your research, please cite it using the metadata below."
+type: software
+version: 2.0.0
+date-released: "2026-10-22"
+url: "https://lab.spheredesci.org"
+repository-code: "https://github.com/cssofny2/sphere-control-room-v2"
+abstract: "Interactive 3D metrology simulation environment and instrument telemetry suite for Project S.P.H.E.R.E. (Protocol LOC-1), modeling >230 kHz acoustic resonance in a hollow copper sphere with VNA, 3D LDV, Rubidium frequency reference, and TOST equivalence bounds."
+license: MIT
+authors:
+  - family-names: "Goodman"
+    given-names: "Michael P."
+    orcid: "https://orcid.org/0009-0008-3796-5857"
+    affiliation: "SPHERE Research, LLC"
+    website: "https://michaelpgoodman.com"
+keywords:
+  - "Decentralized Science (DeSci)"
+  - "Precision Metrology"
+  - "Acoustic Resonance"
+  - "Laser Doppler Vibrometry (LDV)"
+  - "Vector Network Analyzer (VNA)"
+  - "Equivalence Testing (TOST)"
+  - "Protocol LOC-1"
+  - "SPHEREVL"

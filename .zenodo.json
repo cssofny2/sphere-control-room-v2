@@ -1,0 +1,32 @@
+{
+  "title": "SPHERE Virtual Lab (SPHEREVL) & Control Room v2: Interactive 3D Acoustic Metrology, LDV & VNA Telemetry Simulator for Protocol LOC-1",
+  "upload_type": "software",
+  "license": "MIT",
+  "version": "2.0.0",
+  "publication_date": "2026-10-22",
+  "description": "<p><strong>SPHERE Virtual Lab (SPHEREVL) / Control Room v2</strong> is an open-source, interactive 3D metrology simulation environment and instrument telemetry suite engineered for <a href=\"https://spheredesci.org\">Project S.P.H.E.R.E.</a> and <strong>Protocol LOC-1</strong>.</p><p>Deployed live at <a href=\"https://lab.spheredesci.org\">https://lab.spheredesci.org</a> and documented at <a href=\"https://spheredesci.org/vl/\">https://spheredesci.org/vl/</a>, this application simulates non-contact high-Q acoustic resonance tracking above 230 kHz in a precision-machined hollow copper sphere. It models phase-locked Vector Network Analyzer (VNA) sweeps, 3D Laser Doppler Vibrometry (LDV) modal readouts, Rubidium atomic frequency reference timing, matched reference artifact common-mode drift cancellation, and Two One-Sided Tests (TOST) statistical equivalence evaluation.</p>",
+  "communities": [
+    {
+      "identifier": "spheredesci"
+    }
+  ],
+  "creators": [
+    {
+      "name": "Goodman, Michael P.",
+      "affiliation": "SPHERE Research, LLC",
+      "orcid": "0009-0008-3796-5857"
+    }
+  ],
+  "keywords": [
+    "Decentralized Science (DeSci)",
+    "Precision Metrology",
+    "Acoustic Resonance",
+    "Laser Doppler Vibrometry (LDV)",
+    "Vector Network Analyzer (VNA)",
+    "Equivalence Testing (TOST)",
+    "Rubidium Frequency Standard",
+    "Hollow Copper Sphere",
+    "Protocol LOC-1",
+    "SPHEREVL"
+  ]
+}

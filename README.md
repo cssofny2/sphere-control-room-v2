@@ -96,3 +96,13 @@ CR-101 does not deliver the dedicated CR-102 runner, its complete cancellation/f
 - Simulator output is illustrative and is not experimental evidence.
 - Data exports are generated locally in the browser.
 - The tutorial-video panel requires internet access to load embedded videos.
+
+## Scientific Citation & Open Science Registry
+
+- **Live 3D Simulator:** https://lab.spheredesci.org
+- **SPHEREVL Documentation & Overview:** https://spheredesci.org/vl/
+- **Protocol LOC-1 Whitepaper:** https://spheredesci.org/whitepaper/
+- **Zenodo Community Archive:** https://zenodo.org/communities/spheredesci/
+- **Principal Architect:** Michael P. Goodman (SPHERE Research, LLC) — ORCID: [0009-0008-3796-5857](https://orcid.org/0009-0008-3796-5857)
+
+Citation metadata is provided in [`CITATION.cff`](CITATION.cff) and `.zenodo.json`.
