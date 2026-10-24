@@ -37,10 +37,13 @@
       "@context": "https://schema.org",
       "@graph": [
             {
-                  "@type": "Organization",
+                  "@type": ["Organization", "EducationalOrganization"],
                   "@id": "https://spheredesci.org/#org",
                   "name": "SPHERE Research, LLC",
-                  "url": "https://spheredesci.org/"
+                  "url": "https://spheredesci.org/",
+                  "description": "Publisher of Project S.P.H.E.R.E. (Spatial Positioning Harmonic Empirical Resonance Experiment) and its educational metrology lab simulator.",
+                  "logo": "https://lab.spheredesci.org/apple-touch-icon.png",
+                  "knowsAbout": ["metrology", "resonance measurement", "vector network analyzer", "laser Doppler vibrometer", "oscilloscope", "vacuum chamber"]
             },
             {
                   "@type": "Person",
@@ -62,12 +65,13 @@
                   }
             },
             {
-                  "@type": "WebApplication",
+                  "@type": ["WebApplication", "SoftwareApplication"],
                   "@id": "https://lab.spheredesci.org/#app",
                   "url": "https://lab.spheredesci.org/",
                   "name": "S.P.H.E.R.E. Metrology Lab",
                   "alternateName": "SPHERE Lab",
                   "description": "Free interactive simulator of the S.P.H.E.R.E. metrology lab: vacuum chamber, XYZ stage, VNA, laser vibrometer and a talking technician. Educational only.",
+                  "applicationSubCategory": "Metrology laboratory simulator and digital twin (VNA, oscilloscope, LDV alignment scenarios)",
                   "applicationCategory": "EducationalApplication",
                   "operatingSystem": "Any (modern web browser)",
                   "browserRequirements": "Requires JavaScript. WebGL recommended for the 3D lab.",
