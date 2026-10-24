@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useReducer, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
+import React, { memo, useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import WorkspaceHeader from './WorkspaceHeader';
 import LabOverview from './overview/LabOverview';
 import HelpDialog from './overview/HelpDialog';
 // The realistic WebGL lab loads on demand so three.js stays out of the main bundle.
 // The chunk also carries the audio engine (Foley) and the technician voice system, so none of it downloads until the 3D view is allowed to mount.
+import { useShallow } from 'zustand/react/shallow';
+import { dispatch, initLabStores, resetLabStores, useEnvironmentStore, useInstrumentStore, useLab } from './state/labStores';
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
 const Schematic = lazy(() => import('./engineering/Schematic'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
@@ -626,8 +628,12 @@ const stage = { ...state.stage };
   return next;
 }
 
+initLabStores(reducer, initialState);
+
 export default function MetrologyLab() {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  // The shell still needs the whole picture (header, alarms, validation); instrument panels subscribe to their own slice.
+  const state: any = useLab(s => s);
+  useEffect(() => () => resetLabStores(), []);
   useEffect(() => { try { if (new URLSearchParams(window.location.search).has('labdebug')) (window as any).__dispatch = dispatch; } catch { /* ignore */ } }, [dispatch]);
   const [journalFilter, setJournalFilter] = useState("all");
   const [journalSearch, setJournalSearch] = useState("");
@@ -900,6 +906,10 @@ export default function MetrologyLab() {
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${state.experiment.id || "sphere-session"}.json`; a.click(); URL.revokeObjectURL(a.href);
   };
   labHelpersRef.current = { performSweep, exportCsv, exportJson };
+  // performSweep closes over fresh state each tick; panels get a stable trampoline so memo() can skip them.
+  const performSweepRef = useRef(performSweep);
+  performSweepRef.current = performSweep;
+  const stableSweep = useCallback(() => performSweepRef.current(), []);
 
   const exportJournalCsv = () => {
     const rows = [
@@ -1123,9 +1133,9 @@ export default function MetrologyLab() {
           {active === "overview" && <LabOverview state={state} dispatch={dispatch} quality={recordQuality} reduced={FX.reduced || FX.hide} lab={{ getSubsystemVisualState, visualToken, fmtPressure, WARMUP_SECONDS, resolveHelp }} />}
           {active === "chamber" && <Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "spatial" && <SpatialField state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
-          {active === "vna" && <Vna state={state} dispatch={dispatch} sweep={performSweep} f0={f0} HelpInfo={HelpInfo} />}
+          {active === "vna" && <Vna sweep={stableSweep} HelpInfo={HelpInfo} />}
           {active === "ldv" && <Ldv state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
-          {active === "scope" && <Scope state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
+          {active === "scope" && <Scope HelpInfo={HelpInfo} />}
           {active === "clock" && <Clock state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "runs" && <Runs state={state} dispatch={dispatch} exportCsv={exportCsv} exportJson={exportJson} sweep={performSweep} HelpInfo={HelpInfo} />}
           {active === "training" && <TrainingMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
@@ -3012,15 +3022,19 @@ function ScanAutomationPanel({state,dispatch}){
   </div>;
 }
 
-function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
+const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo: any }) {
+  const vna = useInstrumentStore(useShallow(s => ({ power: s.vna.power, rf: s.vna.rf, sweeping: s.vna.sweeping, calibrated: s.vna.calibrated, calibrationType: s.vna.calibrationType, acquisitionPhase: s.vna.acquisitionPhase, sweepProgress: s.vna.sweepProgress, sweepMode: s.vna.sweepMode, triggerMode: s.vna.triggerMode, traceMath: s.vna.traceMath, center: s.vna.center, span: s.vna.span, ifbw: s.vna.ifbw, trace: s.vna.trace, resonanceHold: s.vna.resonanceHold, recordPacket: s.vna.recordPacket, spatialCommitPulse: s.vna.spatialCommitPulse, lastMetrics: s.vna.lastMetrics, fitVisible: s.vna.fitVisible })));
+  const facilityPower = useEnvironmentStore(s => s.facility.power);
+  const pressure = useEnvironmentStore(s => s.chamber.pressure);
+  const status = useLab(s => instStatus(s, "vna"));
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
-  const trace = state.vna.trace;
+  const trace = vna.trace;
   const min = trace.length ? trace.reduce((a,b)=>a.s11 < b.s11 ? a : b) : null;
   const [prog, setProg] = useState(null);
   const raf = useRef(0);
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
   const startSweep = () => {
-    if (!state.vna.power || !state.vna.rf || state.vna.sweeping) { sweep(); return; }
+    if (!vna.power || !vna.rf || vna.sweeping) { sweep(); return; }
     sweep();
     if (FX.reduced) { setProg(null); return; }
     const t0 = performance.now(), duration = 1650;
@@ -3034,24 +3048,24 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
     raf.current = requestAnimationFrame(step);
   };
 
-  const acqState = state.vna.sweeping ? "active" : state.vna.acquisitionPhase === "complete" ? "stable" : state.vna.power && state.vna.rf ? "ready" : "standby";
+  const acqState = vna.sweeping ? "active" : vna.acquisitionPhase === "complete" ? "stable" : vna.power && vna.rf ? "ready" : "standby";
   return (
     <div className="space-y-4">
-      <div className={`rounded-lg border p-3 ${visualClass(acqState)}`}><div className="flex flex-wrap items-center gap-3"><StatusLED status={acqState}/><div className="flex-1"><div className="text-xs font-bold uppercase">VNA Acquisition · {(state.vna.acquisitionPhase || "idle").replaceAll("_"," ")}</div><div className="mt-1 h-1.5 overflow-hidden rounded bg-black/60"><div className="h-full bg-cyan-300 transition-[width]" style={{width:`${Math.round((state.vna.sweepProgress||0)*100)}%`}}/></div></div>{state.vna.lastMetrics && <div className="grid grid-cols-4 gap-2 font-mono text-[9px]"><span>f₀ {state.vna.lastMetrics.f0.toFixed(2)} Hz</span><span>MIN {state.vna.lastMetrics.minS11.toFixed(2)} dB</span><span>Q {state.vna.lastMetrics.q}</span><span>{state.vna.lastMetrics.quality}</span></div>}</div></div>
+      <div className={`rounded-lg border p-3 ${visualClass(acqState)}`}><div className="flex flex-wrap items-center gap-3"><StatusLED status={acqState}/><div className="flex-1"><div className="text-xs font-bold uppercase">VNA Acquisition · {(vna.acquisitionPhase || "idle").replaceAll("_"," ")}</div><div className="mt-1 h-1.5 overflow-hidden rounded bg-black/60"><div className="h-full bg-cyan-300 transition-[width]" style={{width:`${Math.round((vna.sweepProgress||0)*100)}%`}}/></div></div>{vna.lastMetrics && <div className="grid grid-cols-4 gap-2 font-mono text-[9px]"><span>f₀ {vna.lastMetrics.f0.toFixed(2)} Hz</span><span>MIN {vna.lastMetrics.minS11.toFixed(2)} dB</span><span>Q {vna.lastMetrics.q}</span><span>{vna.lastMetrics.quality}</span></div>}</div></div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold flex items-center">Keysight E5080B VNA Hardware Front Panel <HelpInfo termKey="vna" /></h1>
           <p className="mt-1 text-sm text-zinc-400">Photorealistic vector network analyzer simulation featuring touchscreen display, softkeys, and physical port connectors.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={startSweep} disabled={!state.vna.power} className="rounded border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-40">{state.vna.sweeping ? "Acquiring…" : "Trigger Sweep"}</button>
+          <button onClick={startSweep} disabled={!vna.power} className="rounded border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-40">{vna.sweeping ? "Acquiring…" : "Trigger Sweep"}</button>
           <button onClick={() => dispatch({ type: "CAPTURE_REFERENCE" })} disabled={!trace.length} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-100 hover:bg-zinc-700">Capture Ref</button>
-          <button onClick={() => set("ui", { calModalOpen: true })} disabled={!state.vna.power} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-100 hover:bg-zinc-700">Calibrate Wizard</button>
+          <button onClick={() => set("ui", { calModalOpen: true })} disabled={!vna.power} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-100 hover:bg-zinc-700">Calibrate Wizard</button>
         </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.55fr_.8fr]">
-        <div data-status={instStatus(state, "vna")} className="rounded-xl border-4 border-zinc-700 bg-gradient-to-b from-zinc-800 to-zinc-950 p-4 shadow-2xl"><div className="absolute right-4 top-1 z-10 bg-black/70 px-1 rounded"><StatusLED status={instStatus(state, "vna")} /></div>
+        <div data-status={status} className="rounded-xl border-4 border-zinc-700 bg-gradient-to-b from-zinc-800 to-zinc-950 p-4 shadow-2xl"><div className="absolute right-4 top-1 z-10 bg-black/70 px-1 rounded"><StatusLED status={status} /></div>
           <div className="flex justify-between items-center mb-3 border-b border-zinc-700 pb-2">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_2px_rgba(16,185,129,0.7)]" />
@@ -3063,9 +3077,9 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
           <div className="rounded border-2 border-zinc-600 bg-black p-3 shadow-inner">
             <div className="flex justify-between items-center border-b border-zinc-800 pb-2 mb-2 text-xs font-bold uppercase text-zinc-300">
               <span className="flex items-center text-sky-400"><Radio className="h-4 w-4 mr-2" /> S11 Log Magnitude (CH1) <HelpInfo termKey="s11" /></span>
-              <span className={`text-[10px] ${state.vna.calibrated ? "text-emerald-400" : "text-amber-400"}`}>{state.vna.calibrated ? `CAL VALID (${state.vna.calibrationType})` : "UNCAL"}</span>
+              <span className={`text-[10px] ${vna.calibrated ? "text-emerald-400" : "text-amber-400"}`}>{vna.calibrated ? `CAL VALID (${vna.calibrationType})` : "UNCAL"}</span>
             </div>
-            <div className="relative h-[320px] overflow-hidden"><S11Plot trace={trace} progress={prog} />{prog != null && <AnimatedScanCursor p={prog} />}{state.vna.resonanceHold && <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-400/50 bg-amber-950/85 px-2 py-1 font-mono text-[9px] text-amber-200">RESONANCE HOLD</div>}{state.vna.fitVisible && min && <div className="absolute right-3 top-2 z-10"><TelemetryReadout label="Fit f₀" value={min.freq.toFixed(2)} unit="Hz" sub={`${min.s11.toFixed(1)} dB`} /></div>}{state.vna.recordPacket && <div className="absolute bottom-3 right-3 rounded border border-blue-400/50 bg-blue-950/90 px-3 py-2 text-[10px] text-blue-200 animate-pulse">DATA PACKET → RUN RECORD</div>}{state.vna.spatialCommitPulse && <div className="absolute bottom-3 left-3 rounded-full border-2 border-cyan-300 bg-cyan-400/20 px-3 py-1 text-[9px] text-cyan-100">SPATIAL POINT COMMITTED</div>}</div>
+            <div className="relative h-[320px] overflow-hidden"><S11Plot trace={trace} progress={prog} />{prog != null && <AnimatedScanCursor p={prog} />}{vna.resonanceHold && <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-400/50 bg-amber-950/85 px-2 py-1 font-mono text-[9px] text-amber-200">RESONANCE HOLD</div>}{vna.fitVisible && min && <div className="absolute right-3 top-2 z-10"><TelemetryReadout label="Fit f₀" value={min.freq.toFixed(2)} unit="Hz" sub={`${min.s11.toFixed(1)} dB`} /></div>}{vna.recordPacket && <div className="absolute bottom-3 right-3 rounded border border-blue-400/50 bg-blue-950/90 px-3 py-2 text-[10px] text-blue-200 animate-pulse">DATA PACKET → RUN RECORD</div>}{vna.spatialCommitPulse && <div className="absolute bottom-3 left-3 rounded-full border-2 border-cyan-300 bg-cyan-400/20 px-3 py-1 text-[9px] text-cyan-100">SPATIAL POINT COMMITTED</div>}</div>
           </div>
 
           <div className="mt-4 flex justify-between items-center pt-3 border-t border-zinc-700">
@@ -3084,8 +3098,8 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => set("vna", { power: !state.vna.power })} className={`px-4 py-1.5 rounded text-xs font-bold border ${state.vna.power ? "bg-emerald-600 border-emerald-400 text-white" : "bg-zinc-800 border-zinc-600 text-zinc-400"}`}>
-                Power {state.vna.power ? "ON" : "OFF"}
+              <button onClick={() => set("vna", { power: !vna.power })} className={`px-4 py-1.5 rounded text-xs font-bold border ${vna.power ? "bg-emerald-600 border-emerald-400 text-white" : "bg-zinc-800 border-zinc-600 text-zinc-400"}`}>
+                Power {vna.power ? "ON" : "OFF"}
               </button>
             </div>
           </div>
@@ -3096,18 +3110,18 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
             <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-2 flex items-center justify-between">
               <span>VNA Stimulus & Sweep Controls</span> <HelpInfo termKey="span" />
             </div>
-            <div className="flex items-center justify-between text-xs py-1"><span>VNA Power</span><input type="checkbox" checked={state.vna.power} disabled={!state.facility.power} onChange={v => set("vna", { power: v.target.checked, rf: v.target.checked ? state.vna.rf : false })} /></div>
-            <div className="flex items-center justify-between text-xs py-1"><span>RF Output</span><input type="checkbox" checked={state.vna.rf} disabled={!state.vna.power} onChange={v => set("vna", { rf: v.target.checked })} /></div>
+            <div className="flex items-center justify-between text-xs py-1"><span>VNA Power</span><input type="checkbox" checked={vna.power} disabled={!facilityPower} onChange={v => set("vna", { power: v.target.checked, rf: v.target.checked ? vna.rf : false })} /></div>
+            <div className="flex items-center justify-between text-xs py-1"><span>RF Output</span><input type="checkbox" checked={vna.rf} disabled={!vna.power} onChange={v => set("vna", { rf: v.target.checked })} /></div>
 
             <label className="block text-xs text-zinc-400">Sweep Mode
-              <select value={state.vna.sweepMode} onChange={e => set("vna", { sweepMode: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-zinc-200">
+              <select value={vna.sweepMode} onChange={e => set("vna", { sweepMode: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-zinc-200">
                 <option value="continuous">Linear Frequency Sweep</option>
                 <option value="log">Logarithmic Frequency Sweep</option>
               </select>
             </label>
 
             <label className="block text-xs text-zinc-400">Trigger Mode
-              <select value={state.vna.triggerMode} onChange={e => set("vna", { triggerMode: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-zinc-200">
+              <select value={vna.triggerMode} onChange={e => set("vna", { triggerMode: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-zinc-200">
                 <option value="internal">Internal Trigger</option>
                 <option value="external">External TTL Trigger</option>
                 <option value="manual">Manual Trigger</option>
@@ -3115,7 +3129,7 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
             </label>
 
             <label className="block text-xs text-zinc-400">Trace Math
-              <select value={state.vna.traceMath} onChange={e => set("vna", { traceMath: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-zinc-200">
+              <select value={vna.traceMath} onChange={e => set("vna", { traceMath: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-zinc-200">
                 <option value="live">Live Trace</option>
                 <option value="ref">Reference Trace</option>
                 <option value="diff">Live Minus Reference (Live - Ref)</option>
@@ -3124,13 +3138,13 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
             </label>
 
             <label className="block text-xs text-zinc-400">Center Hz <HelpInfo termKey="center_freq" />
-              <input type="number" value={state.vna.center} onChange={e => set("vna", { center: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-sky-200 text-xs" />
+              <input type="number" value={vna.center} onChange={e => set("vna", { center: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-sky-200 text-xs" />
             </label>
             <label className="block text-xs text-zinc-400">Span Hz <HelpInfo termKey="span" />
-              <input type="number" value={state.vna.span} onChange={e => set("vna", { span: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-sky-200 text-xs" />
+              <input type="number" value={vna.span} onChange={e => set("vna", { span: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-sky-200 text-xs" />
             </label>
             <label className="block text-xs text-zinc-400">IFBW (Hz) <HelpInfo termKey="ifbw" />
-              <input type="number" value={state.vna.ifbw} onChange={e => set("vna", { ifbw: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-sky-200 text-xs" />
+              <input type="number" value={vna.ifbw} onChange={e => set("vna", { ifbw: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-sky-200 text-xs" />
             </label>
           </div>
 
@@ -3142,7 +3156,7 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
               <>
                 <FitRow label="Fitted f₀" value={`${min.freq.toFixed(3)} Hz`} />
                 <FitRow label="Minimum S11" value={`${min.s11.toFixed(2)} dB`} />
-                <FitRow label="Q factor" value={(state.chamber.pressure > 1 ? 1200 : 4500).toLocaleString()} />
+                <FitRow label="Q factor" value={(pressure > 1 ? 1200 : 4500).toLocaleString()} />
               </>
             ) : <p className="text-xs text-zinc-500">Enable the VNA and capture a trace.</p>}
           </div>
@@ -3150,7 +3164,7 @@ function Vna({ state, dispatch, sweep, f0, HelpInfo }) {
       </div>
     </div>
   );
-}
+});
 
 function FitRow({ label, value }) {
   return (
@@ -3224,7 +3238,10 @@ function Ldv({ state, dispatch, HelpInfo }) {
   );
 }
 
-function Scope({ state, dispatch, HelpInfo }) {
+const Scope = memo(function Scope({ HelpInfo }: { HelpInfo: any }) {
+  const scope = useInstrumentStore(useShallow(s => ({ power: s.scope.power, running: s.scope.running, timebase: s.scope.timebase, scale: s.scope.scale, trace: s.scope.trace })));
+  const facilityPower = useEnvironmentStore(s => s.facility.power);
+  const status = useLab(s => instStatus(s, "scope"));
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
   return (
     <div className="space-y-4">
@@ -3234,7 +3251,7 @@ function Scope({ state, dispatch, HelpInfo }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.5fr_.8fr]">
-        <div data-status={instStatus(state, "scope")} className="rounded-xl border-4 border-zinc-700 bg-gradient-to-b from-zinc-800 to-zinc-950 p-4 shadow-2xl"><div className="absolute right-4 top-1 z-10 bg-black/70 px-1 rounded"><StatusLED status={instStatus(state, "scope")} /></div>
+        <div data-status={status} className="rounded-xl border-4 border-zinc-700 bg-gradient-to-b from-zinc-800 to-zinc-950 p-4 shadow-2xl"><div className="absolute right-4 top-1 z-10 bg-black/70 px-1 rounded"><StatusLED status={status} /></div>
           <div className="flex justify-between items-center mb-3 border-b border-zinc-700 pb-2">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_8px_2px_rgba(245,158,11,0.7)]" />
@@ -3245,7 +3262,7 @@ function Scope({ state, dispatch, HelpInfo }) {
 
           <div className="rounded border-2 border-zinc-600 bg-black p-3 shadow-inner">
             <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3">CH1 · Analog Acquisition (Time Domain)</div>
-            <div className="h-[280px]"><ScopePlot trace={state.scope.trace} scale={state.scope.scale} timebase={state.scope.timebase} /></div>
+            <div className="h-[280px]"><ScopePlot trace={scope.trace} scale={scope.scale} timebase={scope.timebase} /></div>
           </div>
         </div>
 
@@ -3254,20 +3271,20 @@ function Scope({ state, dispatch, HelpInfo }) {
             <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center justify-between">
               <span>Oscilloscope Acquisition</span> <HelpInfo termKey="timebase" />
             </div>
-            <div className="flex items-center justify-between text-xs"><span>Scope Power</span><input type="checkbox" checked={state.scope.power} disabled={!state.facility.power} onChange={v => set("scope", { power: v.target.checked })} /></div>
-            <div className="flex items-center justify-between text-xs"><span>Run / Stop</span><input type="checkbox" checked={state.scope.running} disabled={!state.scope.power} onChange={v => set("scope", { running: v.target.checked })} /></div>
+            <div className="flex items-center justify-between text-xs"><span>Scope Power</span><input type="checkbox" checked={scope.power} disabled={!facilityPower} onChange={v => set("scope", { power: v.target.checked })} /></div>
+            <div className="flex items-center justify-between text-xs"><span>Run / Stop</span><input type="checkbox" checked={scope.running} disabled={!scope.power} onChange={v => set("scope", { running: v.target.checked })} /></div>
             <label className="block text-xs text-zinc-400">Timebase µs/div <HelpInfo termKey="timebase" />
-              <input type="number" value={state.scope.timebase} onChange={e => set("scope", { timebase: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-sky-200 font-mono" />
+              <input type="number" value={scope.timebase} onChange={e => set("scope", { timebase: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-sky-200 font-mono" />
             </label>
             <label className="block text-xs text-zinc-400">CH1 V/div <HelpInfo termKey="v_div" />
-              <input type="number" step="0.1" value={state.scope.scale} onChange={e => set("scope", { scale: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-sky-200 font-mono" />
+              <input type="number" step="0.1" value={scope.scale} onChange={e => set("scope", { scale: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-sky-200 font-mono" />
             </label>
           </div>
         </div>
       </div>
     </div>
   );
-}
+});
 
 function Clock({ state, dispatch, HelpInfo }) {
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
