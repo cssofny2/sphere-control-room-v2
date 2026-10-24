@@ -35,10 +35,10 @@ console.log('PASS title, description, canonical, robots, Open Graph, Twitter, ic
 
 // structured data
 {
-  const ld = JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html)[1]); const g = Object.fromEntries(ld['@graph'].map(n => [n['@type'], n]));
+  const ld = JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html)[1]); const g = Object.fromEntries(ld['@graph'].flatMap(n => [].concat(n['@type']).map(t => [t, n])));
   const app = g.WebApplication; assert.equal(app.softwareVersion, VERSION); assert.equal(app.applicationCategory, 'EducationalApplication'); assert.equal(app.isAccessibleForFree, true); assert.equal(app.dateModified, '2026-10-16');
   assert.equal(g.Person.name, 'Michael P. Goodman'); assert.equal(g.Organization.name, 'SPHERE Research, LLC'); assert.equal(app.author['@id'], g.Person['@id']); assert.equal(app.copyrightHolder['@id'], g.Organization['@id']); assert.equal(app.copyrightYear, 2026);
-  assert.equal(app.url, SITE.url); assert.ok(app.image.startsWith(SITE.url)); console.log('PASS JSON-LD parses and credits Michael P. Goodman and SPHERE Research, LLC with the right version');
+  assert.ok(g.SoftwareApplication === app && g.EducationalOrganization === g.Organization, 'SoftwareApplication and EducationalOrganization types present'); assert.equal(app.url, SITE.url); assert.ok(app.image.startsWith(SITE.url)); console.log('PASS JSON-LD parses and credits Michael P. Goodman and SPHERE Research, LLC with the right version');
 }
 // static copy has credit
 assert.ok(/Designed and developed by Michael P\. Goodman/.test(html) && /SPHERE Research, LLC/.test(html) && html.includes(`v${VERSION}`)); console.log('PASS crawler-visible text carries the version, credit and copyright');
