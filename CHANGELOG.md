@@ -2,6 +2,12 @@
 
 Versions follow semantic versioning. The version lives in `package.json` and is shown in the top-left corner of the app next to the S.P.H.E.R.E. logo.
 
+## [2.0.0] - 2026-10-24
+
+### Changed
+- The realistic 3D lab (Three.js) and its audio and technician-voice code now download only after the 2D operator dashboard has painted and the browser is idle, so the dashboard is no longer competing with the 3D assets for the initial load. A "Loading Lab Environment…" skeleton shows meanwhile.
+- Academic release metadata (Zenodo and ORCID) is included in `package.json` and `CITATION.cff`.
+
 ## [1.7.0] - 2026-10-17
 
 ### Added

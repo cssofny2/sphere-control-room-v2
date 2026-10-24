@@ -18,5 +18,5 @@ md += `Also handled earlier, with exact answers from the clock: the time, the da
 for (const c of Object.keys(LABEL)) { if (!by[c]) continue; md += `## ${LABEL[c]}\n\n`;
   for (const t of by[c]) { const a = typeof t.a === 'function' ? t.a(ctx) : t.a; md += `### ${t.id}\n- Ask: ${t.ex.map(e => `"${e}"`).join(', ')}\n- Sample answer: ${a[0]}\n- Answers: ${a.length}${t.back?.length ? `; asks back: "${t.back[0]}"` : ''}\n\n`; } }
 const out = new URL('../docs/dr-wire-conversation.md', import.meta.url);
-if (process.argv.includes('--check')) { let cur = ''; try { cur = readFileSync(out, 'utf8'); } catch { /* missing */ } if (cur !== md) { console.error('docs/dr-wire-conversation.md is out of date: run node scripts/build-conversation-doc.mjs'); process.exit(1); } console.log('PASS conversation list is up to date'); }
+if (process.argv.includes('--check')) { let cur = ''; try { cur = readFileSync(out, 'utf8'); } catch { /* missing */ } if (cur.replace(/\r\n/g, '\n') !== md) { console.error('docs/dr-wire-conversation.md is out of date: run node scripts/build-conversation-doc.mjs'); process.exit(1); } console.log('PASS conversation list is up to date'); }
 else { writeFileSync(out, md); console.log(`wrote docs/dr-wire-conversation.md (${B.ALL_TOPICS.length} topics, ${variants} answers, ${examples} questions)`); }
