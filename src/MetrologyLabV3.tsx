@@ -4,6 +4,7 @@ import WorkspaceHeader from './WorkspaceHeader';
 import LabOverview from './overview/LabOverview';
 import HelpDialog from './overview/HelpDialog';
 // The realistic WebGL lab loads on demand so three.js stays out of the main bundle.
+// The chunk also carries the audio engine (Foley) and the technician voice system, so none of it downloads until the 3D view is allowed to mount.
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
 const Schematic = lazy(() => import('./engineering/Schematic'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
@@ -2759,7 +2760,25 @@ function ChamberLifecyclePanel({state,cv,setCv}){
   return <div className={`rounded-lg border p-3 ${visualClass(life.visual)}`} data-chamber-lifecycle={life.id}><div className="flex flex-wrap items-center gap-3"><StatusLED status={life.visual}/><div className="min-w-[220px] flex-1"><div className="text-xs font-bold uppercase tracking-wider">{life.label}</div><div className="mt-1 text-[11px] text-zinc-400">{life.detail}</div></div><div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px]"><span>P {fmtPressure(c.pressure)}</span><span>T {c.temperature.toFixed(2)} °C</span><span>Shield {c.faraday?"ON":"OFF"}</span><span>Isolation {c.isolation?"ON":"OFF"}</span></div></div>{issues.length>0&&<div className="mt-2 flex flex-wrap gap-1">{issues.map(x=><span key={x} className="rounded border border-amber-500/40 bg-amber-950/30 px-2 py-1 text-[9px] text-amber-200">▲ {x}</span>)}</div>}<div className="mt-3 grid gap-2 md:grid-cols-2"><div><div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Camera preset</div><div className="flex flex-wrap gap-1">{cams.map(x=><button key={x} onClick={()=>setCv({...cv,cam:x})} aria-pressed={cv.cam===x} className={`rounded border px-2 py-1 text-[9px] uppercase ${cv.cam===x?"border-sky-400 bg-sky-950 text-sky-200":"border-zinc-700 bg-zinc-900 text-zinc-400"}`}>{x}</button>)}</div></div><div><div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Viewing mode</div><div className="flex flex-wrap gap-1">{modes.map(x=><button key={x} onClick={()=>setCv({...cv,mode:x,shell:x==="transparent"?true:cv.shell,cut:x==="cutaway"})} aria-pressed={cv.mode===x} className={`rounded border px-2 py-1 text-[9px] uppercase ${cv.mode===x?"border-cyan-400 bg-cyan-950 text-cyan-200":"border-zinc-700 bg-zinc-900 text-zinc-400"}`}>{x}</button>)}</div></div></div></div>;}
 function PumpLifecyclePanel({state}){const p=getPumpLifecycle(state),t=visualToken(p.visual),c=state.chamber;const gauge=clamp((Math.log10(Math.max(c.pressure,1e-6))+6)/8.88,0,1);return <div className={`rounded-lg border p-3 ${visualClass(p.visual)}`} data-pump-phase={p.id}><div className="flex flex-wrap items-center gap-3"><div className="relative h-16 w-16 rounded-full border-4 border-zinc-700 bg-black"><div className="absolute left-1/2 top-1/2 h-6 w-0.5 origin-bottom bg-sky-300" style={{transform:`translate(-50%,-100%) rotate(${-130+gauge*260}deg)`}}/><div className="absolute inset-0 grid place-items-end pb-2 font-mono text-[8px] text-zinc-400">PRESS</div></div><div className="min-w-[190px] flex-1"><div className="flex items-center gap-2"><StatusLED status={p.visual}/><span className="text-xs font-bold uppercase">{p.label}</span></div><div className="mt-1 text-[11px] text-zinc-400">{p.detail}</div><div className="mt-2 font-mono text-[10px] text-sky-200">{fmtPressure(c.pressure)} · {c.pressureRate>0?"↑":"↓"} {Math.abs(c.pressureRate||0).toExponential(1)} Torr/s</div></div><div className="grid min-w-[180px] gap-2"><div><div className="flex justify-between text-[9px] text-zinc-400"><span>ROUGHING</span><span>{(c.roughingRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-slate-400 transition-[width]" style={{width:`${c.roughingRpm||0}%`}}/></div></div><div><div className="flex justify-between text-[9px] text-zinc-400"><span>TURBO</span><span>{(c.turboRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-cyan-400 transition-[width]" style={{width:`${c.turboRpm||0}%`}}/></div></div></div></div></div>}
 function StageMotionPanel({state}){const sm=getStageMotionState(state),t=visualToken(sm),p=state.stage;const ax=p.actualX??p.x,ay=p.actualY??p.y,az=p.actualZ??p.z;return <div className={`rounded-lg border p-3 ${visualClass(sm)}`}><div className="flex items-center justify-between"><div><div className="text-xs font-bold uppercase">XYZ Motion State</div><div className="text-[11px] text-zinc-400">Commanded versus actual position and settling indication.</div></div><StatusLED status={sm}/></div><div className="mt-2 grid grid-cols-2 gap-3 font-mono text-xs"><div>CMD {p.x.toFixed(1)} / {p.y.toFixed(1)} / {p.z.toFixed(1)}</div><div>ACT {ax.toFixed(1)} / {ay.toFixed(1)} / {az.toFixed(1)}</div></div><div className="mt-2 h-2 rounded bg-zinc-900 overflow-hidden"><div className="h-full bg-cyan-400" style={{width:`${Math.min(100,100-(Math.abs(p.x-ax)+Math.abs(p.y-ay)+Math.abs(p.z-az))*10)}%`}}/></div></div>;}
+// True only after the dashboard has painted and the browser is idle, so the 2D UI mounts before any 3D/audio bytes are requested.
+function useAfterFirstPaint() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const go = () => { if (!cancelled) setReady(true); };
+    const w = window as any;
+    const raf = requestAnimationFrame(() => {
+      if (w.requestIdleCallback) w.requestIdleCallback(go, { timeout: 1500 }); else setTimeout(go, 50);
+    });
+    return () => { cancelled = true; cancelAnimationFrame(raf); };
+  }, []);
+  return ready;
+}
+function LabEnvironmentSkeleton({ label = "Loading Lab Environment…" }) {
+  return <div role="status" aria-live="polite" className="grid h-[320px] w-full animate-pulse place-items-center rounded-lg border border-zinc-800 bg-zinc-900 text-xs text-zinc-400">{label}</div>;
+}
 function Chamber({ state, dispatch, HelpInfo }) {
+  const scene3dReady = useAfterFirstPaint();
   const [cv, setCv] = useState({ shell: true, cut: false, cam: "front", mode: "standard" });
   const [sceneView, setSceneView] = useState("lab");
   useEffect(() => { installLabSelectionSync(); }, []);
@@ -2833,11 +2852,11 @@ function Chamber({ state, dispatch, HelpInfo }) {
             <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">View</span>
             {[["lab", "Realistic lab"], ["engineering", "Engineering model"], ["schematic", "Engineering schematic"]].map(([k, l]) => <button key={k} type="button" aria-pressed={sceneView === k} onClick={() => setSceneView(k)} className={`rounded border px-3 py-1.5 text-xs font-semibold ${sceneView === k ? "border-sky-500 bg-sky-950/40 text-sky-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"}`}>{l}</button>)}
           </div>
-          {sceneView === "lab" && (
-            <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the 3D lab…</div>}>
+          {sceneView === "lab" && (!scene3dReady ? <LabEnvironmentSkeleton /> : (
+            <Suspense fallback={<LabEnvironmentSkeleton />}>
               <LabScene3D stateRef={labStateRef} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
             </Suspense>
-          )}
+          ))}
           {sceneView === "schematic" && (
             <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the engineering schematic…</div>}>
               <Schematic state={state} dispatch={dispatch} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} onShowInLab={() => setSceneView("lab")} />

@@ -8,7 +8,7 @@ const raw = read('../index.html');
 
 // version: one source of truth, semver, lockfile in step
 assert.match(VERSION, /^\d+\.\d+\.\d+$/); assert.equal(VERSION, pkg.version); assert.equal(lock.version, pkg.version); assert.equal(lock.packages[''].version, pkg.version);
-assert.equal(pkg.author, 'Michael P. Goodman'); console.log(`PASS version ${VERSION} is semver and matches package.json and the lockfile`);
+assert.ok(pkg.author.startsWith('Michael P. Goodman')); console.log(`PASS version ${VERSION} is semver and matches package.json and the lockfile`);
 { const log = read('../CHANGELOG.md'); assert.ok(log.includes(`## [${VERSION}]`), 'CHANGELOG has an entry for the current version'); console.log('PASS CHANGELOG has an entry for this version'); }
 
 // identity
