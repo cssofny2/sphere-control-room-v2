@@ -2,9 +2,9 @@ name: Foundation validation
 
 on:
   push:
-    branches: [main, feature/cr-102-cancellable-runner]
+    branches: [main]
   pull_request:
-    branches: [main, feature/cr-101-validated-plans]
+    branches: [main]
 
 permissions:
   contents: read

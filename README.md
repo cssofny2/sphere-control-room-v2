@@ -30,9 +30,8 @@ The compiled production files are written to `dist/`.
 - `src/MetrologyLabV3.tsx`: active v3 simulator, including Lab Overview and the interactive laboratory digital twin
 - `src/MetrologyLab.tsx`: retained earlier simulator (not imported by the entry point)
 - `src/main.tsx`: React entry point importing the v3 simulator
-- `src/index.css`: Tailwind directives and global styles
+- `src/index.css`: Tailwind (v4) import and global styles
 - `vite.config.ts`: Vite configuration
-- `tailwind.config.cjs`: Tailwind source scanning
 
 ## Spatial Field Explorer
 
@@ -106,3 +105,7 @@ CR-101 does not deliver the dedicated CR-102 runner, its complete cancellation/f
 - **Principal Architect:** Michael P. Goodman (SPHERE Research, LLC) — ORCID: [0009-0008-3796-5857](https://orcid.org/0009-0008-3796-5857)
 
 Citation metadata is provided in [`CITATION.cff`](CITATION.cff) and `.zenodo.json`.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Security reports: see [SECURITY.md](SECURITY.md). Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
