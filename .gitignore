@@ -10,3 +10,7 @@ vite.config.d.ts
 npm-debug.log*
 .DS_Store
 __pycache__/
+.env.local
+coverage/
+*.log
+performance-results/
