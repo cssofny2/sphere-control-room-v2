@@ -20,13 +20,22 @@ import TechnicianPanel from '../technician/TechnicianPanel';
 import { getSelected } from '../engineering/selection';
 import { PART_BY_ID } from '../engineering/parts';
 import type { Focus, Mood } from './scientistBrain';
+import { getEquipmentUse, EQUIP_COLOR, type EquipUse } from '../features/equipment';
+import { AlertGlyph } from '../features/AlertBadge';
 
 type Say = { text: string; focus: Focus; mood: Mood; kind: string };
 
-type Props = { stateRef: React.MutableRefObject<any>; reduced?: boolean; onHelp?: (key: string) => void; dispatch?: (action: any) => void; helpersRef?: React.MutableRefObject<Ctx['helpers'] | undefined> };
-type CamPreset = { pos: [number, number, number]; target: [number, number, number] };
+type Props = { stateRef: React.MutableRefObject<any>; reduced?: boolean; onHelp?: (key: string) => void; dispatch?: (action: any) => void; helpersRef?: React.MutableRefObject<Ctx['helpers'] | undefined>; command?: { cam?: string; mode?: string; n: number } };
+type CamPreset = { pos: [number, number, number]; target: [number, number, number]; fov?: number };
 const PRESETS: Record<string, CamPreset> = {
   overview: { pos: [3.3, 3.1, 4.4], target: [-0.1, 0.95, -0.2] },
+  front: { pos: [0, 1.15, 3.4], target: [0, 1.1, 0] },
+  top: { pos: [0.01, 5.6, 0.35], target: [0, 1.0, 0] },
+  // Inside the chamber, looking at the sphere on its stage: wide lens, so the laser port, RF connector, gauge and door window are all in view.
+  inside: { pos: [0.24, 1.24, 0.5], target: [0, 1.06, -0.12], fov: 72 },
+  laser: { pos: [1.1, 2.4, 1.7], target: [0, 1.45, 0] },
+  rf: { pos: [-1.7, 1.5, 1.5], target: [-0.7, 1.1, 0.15] },
+  pumps: { pos: [1.9, 1.0, 1.9], target: [0.5, 0.35, 0.1] },
   chamber: { pos: [2.3, 1.9, 2.5], target: [0, 1.0, 0] },
   stage: { pos: [1.35, 1.75, 0.3], target: [0, 1.0, 0.05] },
   rack: { pos: [-1.0, 1.5, 2.6], target: [-3.0, 1.1, -0.4] },
@@ -69,7 +78,9 @@ function loadSettings(): Settings {
 }
 const urlParam = (k: string) => { try { return new URLSearchParams(window.location.search).get(k); } catch { return null; } };
 
-function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }: Props) {
+const PIN_SHORT: Record<string, string> = { breaker: 'Power', clock: 'Clock', vna: 'VNA', rf: 'RF line', scope: 'Scope', ldv: 'Laser', rough: 'Roughing', turbo: 'Turbo', vent: 'Vent', thermo: 'Thermostat', faraday: 'Faraday', isolation: 'Isolation', stage: 'Stage', door: 'Door', daq: 'Workstation' };
+
+function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef, command }: Props) {
   const dispatchRef = useRef(dispatch); dispatchRef.current = dispatch;
   const helpersRefLocal = useRef<Ctx['helpers'] | undefined>(undefined); const helpers = helpersRef || helpersRefLocal;
   const wrap = useRef<HTMLDivElement>(null);
@@ -99,6 +110,11 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
   const [sysReady, setSysReady] = useState<TechnicianSystem | null>(null);
   const [consentOpen, setConsentOpen] = useState(false);
   const [camView, setCamView] = useState<number | 'grid' | null>(null);
+  const [hud, setHud] = useState(true);
+  const [camName, setCamName] = useState('overview');
+  const [rows, setRows] = useState<EquipUse[]>([]);
+  const hudRef = useRef(true); hudRef.current = hud;
+  const pinEls = useRef<Record<string, HTMLDivElement | null>>({});
   const [clockTxt, setClockTxt] = useState('');
   const counter = useRef(0);
 
@@ -121,9 +137,9 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     host.appendChild(canvas);
     let lab: Lab;
     try { lab = buildLab(renderer); } catch (e) { console.error(e); setFailed(true); host.removeChild(canvas); renderer.dispose(); return; }
-    const cam = new THREE.PerspectiveCamera(38, 16 / 9, 0.1, 60); cam.position.set(...PRESETS.overview.pos);
+    const cam = new THREE.PerspectiveCamera(38, 16 / 9, 0.05, 60); cam.position.set(...PRESETS.overview.pos);
     const controls = new OrbitControls(cam, canvas); controls.target.set(...PRESETS.overview.target); controls.enableDamping = true; controls.dampingFactor = 0.08;
-    controls.minDistance = 0.6; controls.maxDistance = 9; controls.maxPolarAngle = Math.PI * 0.49; controls.update();
+    controls.minDistance = 0.25; controls.maxDistance = 9; controls.maxPolarAngle = Math.PI * 0.49; controls.update();
     // The three installed security cameras: fixed viewpoints (CAM 1 to 3), or all of them tiled. The orbit camera is left untouched underneath.
     const camsObj = lab.cameras.map(c => { const k = new THREE.PerspectiveCamera(c.fov, 16 / 9, 0.1, 60); k.position.set(...c.pos); k.lookAt(...c.target); return k; });
     let view: number | 'grid' | null = null; let activeCam: THREE.PerspectiveCamera = cam;
@@ -162,12 +178,12 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     const pickQuality = (sel: QualitySel): Quality => sel === 'high' ? 'high' : sel === 'low' ? 'low' : ((navigator.hardwareConcurrency || 4) <= 2 || window.matchMedia?.('(pointer: coarse)').matches ? 'low' : 'high');
     api.current.setQ = sel => { frames = 0; ema = 0.016; scaledDown = false; applyQuality(pickQuality(sel)); };
 
-    let tween: { t: number; fp: THREE.Vector3; ft: THREE.Vector3; tp: THREE.Vector3; tt: THREE.Vector3 } | null = null;
+    let tween: { t: number; fp: THREE.Vector3; ft: THREE.Vector3; tp: THREE.Vector3; tt: THREE.Vector3; ff: number; tf: number } | null = null;
     api.current.go = (k: string) => {
-      const p = PRESETS[k]; if (!p) return; if (view !== null) api.current.setCamView?.(null); followRef.current && setFollow(false);
-      const tp = new THREE.Vector3(...p.pos), tt = new THREE.Vector3(...p.target);
-      if (reducedRef.current) { cam.position.copy(tp); controls.target.copy(tt); return; }
-      tween = { t: 0, fp: cam.position.clone(), ft: controls.target.clone(), tp, tt };
+      const p = PRESETS[k]; if (!p) return; if (view !== null) api.current.setCamView?.(null); followRef.current && setFollow(false); setCamName(k);
+      const tp = new THREE.Vector3(...p.pos), tt = new THREE.Vector3(...p.target), tf = p.fov ?? 38;
+      if (reducedRef.current) { cam.position.copy(tp); controls.target.copy(tt); cam.fov = tf; cam.updateProjectionMatrix(); return; }
+      tween = { t: 0, fp: cam.position.clone(), ft: controls.target.clone(), tp, tt, ff: cam.fov, tf };
     };
     api.current.setCamView = (v: number | 'grid' | null) => {
       view = v; activeCam = typeof v === 'number' ? camsObj[v - 1] || cam : cam; if (renderPass) renderPass.camera = activeCam;
@@ -209,7 +225,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
 
     let raf = 0, last = performance.now(), visible = true, brainAcc = 0;
     const io = new IntersectionObserver(es => { visible = es[0]?.isIntersecting ?? true; }, { threshold: 0.01 }); io.observe(host);
-    const v3 = new THREE.Vector3();
+    const v3 = new THREE.Vector3(), pinV = new THREE.Vector3(); let hudPoll = -1000, hudSig = '', activeIds = new Set<string>(), pinTick = 0;
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
       const dt = Math.min(0.1, (now - last) / 1000); last = now;
@@ -220,7 +236,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
       brainAcc += dt; if (brainAcc > 0.25) { brainAcc = 0; const r = tech.observe(extractFactsPlus(s), now); if (r) { sys.remark(r); setLogN(tech.log.length + Math.random()); } }
       sys.tick(t, dt);
       if (sys.call.state === 'connected' && sci.mode === 'task') lab.screensaver.wake();
-      if (tween) { tween.t = Math.min(1, tween.t + dt / 0.9); const e = tween.t * tween.t * (3 - 2 * tween.t); cam.position.lerpVectors(tween.fp, tween.tp, e); controls.target.lerpVectors(tween.ft, tween.tt, e); if (tween.t >= 1) tween = null; }
+      if (tween) { tween.t = Math.min(1, tween.t + dt / 0.9); const e = tween.t * tween.t * (3 - 2 * tween.t); cam.position.lerpVectors(tween.fp, tween.tp, e); controls.target.lerpVectors(tween.ft, tween.tt, e); if (Math.abs(tween.tf - tween.ff) > 0.01) { cam.fov = tween.ff + (tween.tf - tween.ff) * e; cam.updateProjectionMatrix(); } if (tween.t >= 1) tween = null; }
       else if (followRef.current && showSciRef.current) { const h = sci.position; controls.target.lerp(v3.set(h.x, 1.1, h.z), Math.min(1, dt * 2)); }
       controls.update();
       // Auto quality: if the first seconds run slowly, drop the heavy effects for good.
@@ -230,6 +246,10 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
         if (eff === 'high' && frames > 90 && ema > 0.026) { frames = 0; ema = 0.016; applyQuality('low'); }
         else if (eff === 'low' && !scaledDown && frames > 120 && ema > 0.045) { scaledDown = true; renderer.setPixelRatio(0.75); resize(); }
       }
+      // Live equipment: glow on what is working now, and screen pins that follow those parts around the picture.
+      if (now - hudPoll > 250) { hudPoll = now; const list = getEquipmentUse(s), sig = list.map(r => `${r.id}${r.active ? 1 : 0}${r.on ? 1 : 0}${r.level}${r.doing}`).join('|'); activeIds = new Set(list.filter(r => r.active).map(r => r.id)); if (sig !== hudSig) { hudSig = sig; setRows(list); } }
+      lab.setHighlights(hudRef.current ? activeIds : null, t);
+      if (hudRef.current && ++pinTick % 2 === 0) for (const id in lab.highlightAnchors) { const el = pinEls.current[id]; if (!el) continue; pinV.copy(lab.highlightAnchors[id]).project(activeCam); const vis = view !== 'grid' && pinV.z < 1 && Math.abs(pinV.x) < 1.04 && Math.abs(pinV.y) < 1.04; el.style.visibility = vis ? 'visible' : 'hidden'; if (vis) el.style.transform = `translate(${(pinV.x * 0.5 + 0.5) * hostW}px, ${(-pinV.y * 0.5 + 0.5) * hostH}px)`; }
       if (eff === 'low' && now - lastRender < 30) return; lastRender = now;
       if (++shadowTick >= (eff === 'low' ? 3 : 2)) { shadowTick = 0; renderer.shadowMap.needsUpdate = true; }   // shadow map refreshed every 2nd (High) or 3rd (Low) frame
       if (view === 'grid') {
@@ -257,6 +277,15 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
   const soundRef = useRef(false); soundRef.current = sound;
 
   useEffect(() => { api.current.lab?.setCutaway(cutaway); }, [cutaway]);
+  // Camera preset / viewing mode chosen in the Chamber page's view controls.
+  useEffect(() => {
+    if (!command) return;
+    if (command.cam) api.current.go?.(command.cam);
+    if (command.mode) {
+      const m = command.mode, lab = api.current.lab;
+      setCutaway(m === 'cutaway'); lab?.setShellStyle(m === 'transparent' ? 'glass' : m === 'blueprint' ? 'wire' : 'solid');
+    }
+  }, [command?.n]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!showSci) setBubble(null); }, [showSci]);
   useEffect(() => { api.current.setQ?.(qualitySel); }, [qualitySel]);
 
@@ -276,7 +305,8 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
     const onKey = (e: KeyboardEvent) => { if (e.altKey && e.code === 'KeyP' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); toggleCallRef.current(); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const views = useMemo(() => [['overview', 'Overview'], ['chamber', 'Chamber'], ['stage', 'Stage close-up'], ['rack', 'Instrument rack'], ['bench', 'Workstation'], ['screens', 'Screens']], []);
+  const views = useMemo(() => [['inside', 'Inside chamber'], ['overview', 'Overview'], ['chamber', 'Chamber'], ['stage', 'Stage close-up'], ['rack', 'Instrument rack'], ['bench', 'Workstation'], ['screens', 'Screens']], []);
+  const activeRows = rows.filter(r => r.active);
 
   if (failed) return <div className="ls-root"><div className="ls-fallback">The realistic 3D lab needs WebGL, which isn't available in this browser. Use the Engineering model view instead.</div></div>;
   return (
@@ -284,12 +314,13 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
       {!photo && (
         <div className="ls-bar" role="toolbar" aria-label="3D lab controls">
           <span className="ls-lbl">Camera</span>
-          {views.map(([k, l]) => <Btn key={k} f={() => api.current.go?.(k)}>{l}</Btn>)}
+          {views.map(([k, l]) => <Btn key={k} on={camName === k} f={() => api.current.go?.(k)}>{l}</Btn>)}
           <span className="ls-lbl" title="The three security cameras installed in the lab">Security cameras</span>
           {[1, 2, 3].map(n => <Btn key={n} on={camView === n} f={() => api.current.setCamView?.(camView === n ? null : n)} label={`Look through security camera ${n}`}>{`Cam ${n}`}</Btn>)}
           <Btn on={camView === 'grid'} f={() => api.current.setCamView?.(camView === 'grid' ? null : 'grid')} label="All security cameras at once">All cams</Btn>
           <span className="ls-lbl">View</span>
           <Btn on={cutaway} f={() => setCutaway(v => !v)}>Cutaway</Btn>
+          <Btn on={hud} f={() => setHud(v => !v)} label="Highlight the equipment that is working right now" title="Glow and name tags on the equipment in use, plus a live list">Live highlights</Btn>
           <Btn f={() => setPhoto(true)} label="Photo mode: hide the controls and save a picture">Photo mode</Btn>
           <label className="ls-lbl" htmlFor="ls-q">Quality</label>
           <select id="ls-q" className="ls-btn" value={qualitySel} onChange={e => setQualitySel(e.target.value as QualitySel)}><option value="auto">Auto</option><option value="high">High</option><option value="low">Low</option></select>
@@ -306,6 +337,21 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef }:
         {bubble && showSci && (
           <div ref={bubbleEl} className={`ls-bubble${bubble.kind === 'alert' ? ' is-alert' : ''}${bubble.kind === 'joke' ? ' is-joke' : ''}`} data-lab-bubble data-kind={bubble.kind} data-text={bubble.text} style={{ visibility: 'hidden' }}>
             <b>Dr. Wire</b><Typed text={bubble.text} />
+          </div>
+        )}
+        {!photo && hud && camView === null && rows.map(r => (
+          <div key={r.id} ref={el => { pinEls.current[r.id] = el; }} className={`ls-pin${r.active ? ' is-active' : ''}${r.level === 'error' ? ' is-error' : ''}`} style={{ ['--c' as any]: EQUIP_COLOR[r.group], visibility: 'hidden' }} aria-hidden="true">
+            <i /><span>{PIN_SHORT[r.id] || r.name}{r.active ? ' · in use' : ''}</span>
+          </div>
+        ))}
+        {!photo && hud && camView === null && rows.length > 0 && (
+          <div className={`ls-hud${camName === 'inside' ? ' is-inside' : ''}`} aria-label="Equipment in use right now" data-live-equipment>
+            <div className="ls-hud-h"><b>{camName === 'inside' ? 'INSIDE THE CHAMBER · LIVE' : 'LIVE EQUIPMENT'}</b><span>{activeRows.length} in use</span></div>
+            <ul>{(camName === 'inside' ? rows : [...activeRows, ...rows.filter(r => !r.active)]).map(r => (
+              <li key={r.id} className={`${r.active ? 'on' : ''} lv-${r.level}`} style={{ ['--c' as any]: EQUIP_COLOR[r.group] }} title={`${r.name}: ${r.doing} — ${r.why}`}>
+                <i aria-hidden="true" /><b>{r.name}</b>{(r.active || camName === 'inside') && <span>{r.doing}</span>}{r.level !== 'idle' && <em><AlertGlyph level={r.level} size={12} /></em>}
+              </li>
+            ))}</ul>
           </div>
         )}
         {camView !== null && <CctvOverlay view={camView} clock={clockTxt} labels={api.current.lab?.cameras ?? []} onExit={() => api.current.setCamView?.(null)} />}

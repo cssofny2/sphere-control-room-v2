@@ -140,4 +140,9 @@ export interface SimulationEvent {
   readonly y: number | null;
   readonly z: number | null;
   readonly runId: RunId | null;
+  /** Wall-clock stamp (ISO 8601) and local calendar date, so exported logs carry a real date and time. */
+  readonly iso?: string;
+  readonly date?: string;
+  /** Initials or nickname of the person at the bench when the event was recorded. */
+  readonly operator?: string;
 }

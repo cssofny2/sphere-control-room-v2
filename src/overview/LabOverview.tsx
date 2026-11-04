@@ -5,6 +5,10 @@ import {
 } from 'lucide-react';
 import './overview.css';
 import { HELP_KEYS, OVERVIEW_HELP, getHelp } from './overviewHelp';
+import { EquipArt, StageArt } from './OverviewArt';
+import { AlertBadge } from '../features/AlertBadge';
+import { getAlert, type AlertKey } from '../features/alerts';
+import { LabClock } from '../features/LabClock';
 
 /* ───────── Types ───────── */
 type Lab = {
@@ -27,7 +31,7 @@ type Route = { id: string; kind: RouteKind; d: string; from: string; to: string;
 
 /* ───────── Constants ───────── */
 const SCENE_W = 860;
-const SCENE_H = 720;
+const SCENE_H = 840;
 const ROUTE_COLOR: Record<RouteKind, string> = { clock: '#22d3ee', rf: '#e879f9', laser: '#facc15', laserReturn: '#fde68a', data: '#3b82f6', vacuum: '#94a3b8' };
 const ROUTE_NAME: Record<RouteKind, string> = { clock: 'Clock', rf: 'RF', laser: 'Laser', laserReturn: 'Return', data: 'Data', vacuum: 'Vacuum' };
 const ROUTE_HELP: Record<RouteKind, string> = { clock: 'ov.route_clock', rf: 'ov.route_rf', laser: 'ov.route_laser', laserReturn: 'ov.route_laser_return', data: 'ov.route_data', vacuum: 'ov.route_vacuum' };
@@ -37,6 +41,7 @@ const STATE_KEYS = ['offline', 'standby', 'ready', 'active', 'valid', 'stable', 
 const STATE_PRIORITY: Record<string, number> = { fault: 0, warning: 1, maintenance: 2, booting: 3, settling: 4, active: 5, ready: 6, valid: 7, stable: 7, standby: 8, offline: 9, selected: 10 };
 const TONE_HEX = { ok: '#34d399', warn: '#fbbf24', bad: '#fb7185', info: '#38bdf8', off: '#64748b' };
 const PREF_KEY = 'sphere-lab-overview-prefs';
+const ALERT_OF: Record<string, AlertKey> = { clock: 'clock', vna: 'vna', scope: 'scope', facility: 'facility', chamber: 'chamber', stage: 'stage', ldv: 'ldv', pumps: 'pumps', experiment: 'experiment', spatial: 'spatial' };
 
 /* ───────── Small helpers ───────── */
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -94,8 +99,6 @@ const Bar = ({ value, color }: { value: number; color?: string }) => (
 export default function LabOverview({ state, dispatch, lab, quality, reduced }: Props) {
   const prefs = useMemo(loadPrefs, []);
   const [selected, setSelected] = useState<string>('chamber');
-  const [view, setView] = useState<'flat' | 'tilt' | 'orbit'>(prefs.view || 'tilt');
-  const [orbit, setOrbit] = useState({ rx: 16, ry: -10 });
   const [layers, setLayers] = useState<Record<RouteKind, boolean>>({ ...ALL_LAYERS });
   const [problemsOnly, setProblemsOnly] = useState(false);
   const [showHelp, setShowHelp] = useState<boolean>(prefs.showHelp !== false);
@@ -103,10 +106,8 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
   const [feedTab, setFeedTab] = useState<'alarms' | 'events'>('alarms');
   const [eventFilter, setEventFilter] = useState<'all' | 'problems'>('all');
   const [query, setQuery] = useState('');
-  const [dragging, setDragging] = useState(false);
-  const moved = useRef(false);
 
-  useEffect(() => { savePrefs({ view, showHelp }); }, [view, showHelp]);
+  useEffect(() => { savePrefs({ showHelp }); }, [showHelp]);
 
   const open = useCallback((k: string) => dispatch({ type: 'SET_UI', patch: { helpModal: lab.resolveHelp(k) } }), [dispatch, lab]);
   const helpCtx = useMemo(() => ({ open }), [open]);
@@ -133,7 +134,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
 
   const equip: Equip[] = [
     {
-      id: 'clock', k: 'clock', name: '10 MHz Reference', help: 'ov.clock', page: 'clock', icon: TimerReset, x: 24, y: 20, w: 196, h: 150, main: clockText,
+      id: 'clock', k: 'clock', name: '10 MHz Reference', help: 'ov.clock', page: 'clock', icon: TimerReset, x: 24, y: 20, w: 196, h: 190, main: clockText,
       reads: [
         { l: 'Lock', h: 'ov.lock', v: clockText, tone: clockTone },
         { l: 'Warm-up', h: 'ov.warmup', v: `${Math.min(100, Math.round((ck.warmup / lab.WARMUP_SECONDS) * 100))}%` },
@@ -142,27 +143,25 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
       viz: <Bar value={ck.power ? ck.warmup / lab.WARMUP_SECONDS : 0} color={TONE_HEX.info} />,
     },
     {
-      id: 'vna', k: 'vna', name: 'E5080B VNA', help: 'ov.vna', page: 'vna', icon: Radio, x: 24, y: 194, w: 196, h: 158,
+      id: 'vna', k: 'vna', name: 'E5080B VNA', help: 'ov.vna', page: 'vna', icon: Radio, x: 24, y: 230, w: 196, h: 200,
       main: v.power ? `RF ${onOff(v.rf)}` : 'OFF',
       reads: [
         { l: 'RF output', h: 'ov.rf', v: v.power ? onOff(v.rf) : 'OFF', tone: v.power && v.rf ? 'ok' : 'off' },
         { l: 'Calibration', h: 'ov.calibration', v: v.calibrated ? 'VALID' : 'NONE', tone: v.calibrated ? 'ok' : v.power ? 'warn' : 'off' },
         { l: 'S11 trace', h: 'ov.s11', v: v.trace?.length ? `${v.trace.length} pts` : 'none', tone: v.trace?.length ? '' : 'off' },
       ],
-      viz: <Spark values={(v.trace || []).map((q: any) => q.s11)} color="#5fd4ff" />,
     },
     {
-      id: 'scope', k: 'scope', name: 'Oscilloscope', help: 'ov.scope', page: 'scope', icon: Activity, x: 24, y: 376, w: 196, h: 160,
+      id: 'scope', k: 'scope', name: 'Oscilloscope', help: 'ov.scope', page: 'scope', icon: Activity, x: 24, y: 450, w: 196, h: 196,
       main: sc.power ? (sc.running ? 'RUN' : 'STOP') : 'OFF',
       reads: [
         { l: 'Acquisition', h: 'ov.running', v: sc.power ? (sc.running ? 'RUN' : 'STOP') : 'OFF', tone: sc.power ? (sc.running ? 'ok' : 'warn') : 'off' },
         { l: 'Timebase', h: 'ov.timebase', v: `${sc.timebase} µs/div` },
         { l: 'Channels', h: 'ov.channels', v: `${channelsOn} / 4` },
       ],
-      viz: <Spark values={(sc.trace || []).map((q: any) => q.value)} color="#ffe066" />,
     },
     {
-      id: 'facility', k: 'facility', name: 'Power & Shielding', help: 'ov.facility', page: 'dashboard', icon: Power, x: 24, y: 560, w: 196, h: 138, main: `Breaker ${onOff(f.power)}`,
+      id: 'facility', k: 'facility', name: 'Power & Shielding', help: 'ov.facility', page: 'dashboard', icon: Power, x: 24, y: 666, w: 196, h: 150, main: `Breaker ${onOff(f.power)}`,
       reads: [
         { l: 'Breaker', h: 'ov.breaker', v: onOff(f.power), tone: f.power ? 'ok' : 'bad' },
         { l: 'Shielding', h: 'ov.faraday', v: onOff(c.faraday), tone: c.faraday ? 'ok' : 'warn' },
@@ -170,7 +169,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
       ],
     },
     {
-      id: 'chamber', k: 'chamber', name: 'Thermal-Vac Chamber', help: 'ov.chamber', page: 'chamber', icon: Thermometer, x: 332, y: 150, w: 224, h: 240,
+      id: 'chamber', k: 'chamber', name: 'Thermal-Vac Chamber', help: 'ov.chamber', page: 'chamber', icon: Thermometer, x: 332, y: 100, w: 224, h: 350,
       main: lab.fmtPressure(c.pressure),
       reads: [
         { l: 'Pressure', h: 'ov.pressure', v: `${pressureTrend} ${lab.fmtPressure(c.pressure)}`, tone: c.pressure < 1e-3 ? 'ok' : c.pressure > 700 ? '' : 'warn' },
@@ -189,7 +188,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
       ],
     },
     {
-      id: 'ldv', k: 'ldv', name: 'LDV Optical Head', help: 'ov.ldv', page: 'ldv', icon: ScanLine, x: 644, y: 20, w: 196, h: 140, main: l.power ? (l.shutter ? `Return ${returnPct}%` : 'Shutter closed') : 'OFF',
+      id: 'ldv', k: 'ldv', name: 'LDV Optical Head', help: 'ov.ldv', page: 'ldv', icon: ScanLine, x: 644, y: 20, w: 196, h: 196, main: l.power ? (l.shutter ? `Return ${returnPct}%` : 'Shutter closed') : 'OFF',
       reads: [
         { l: 'Shutter', h: 'ov.shutter', v: l.power ? (l.shutter ? 'OPEN' : 'CLOSED') : 'OFF', tone: l.power && l.shutter ? 'ok' : 'off' },
         { l: 'Return', h: 'ov.return_signal', v: `${returnPct}%`, tone: l.shutter && returnPct < 40 ? 'warn' : l.shutter ? 'ok' : 'off' },
@@ -198,21 +197,15 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
       viz: <Bar value={returnPct / 100} color="#e879f9" />,
     },
     {
-      id: 'pumps', k: 'pumps', name: 'Vacuum Pumps', help: 'ov.pumps', page: 'chamber', icon: Wind, x: 644, y: 250, w: 196, h: 166, main: c.turbo ? 'Turbo' : c.roughing ? 'Roughing' : 'Idle',
+      id: 'pumps', k: 'pumps', name: 'Vacuum Pumps', help: 'ov.pumps', page: 'chamber', icon: Wind, x: 644, y: 246, w: 196, h: 206, main: c.turbo ? 'Turbo' : c.roughing ? 'Roughing' : 'Idle',
       reads: [
         { l: 'Roughing', h: 'ov.roughing', v: `${Math.round(c.roughingRpm || 0)}%`, tone: c.roughing ? 'ok' : 'off' },
         { l: 'Turbo', h: 'ov.turbo', v: `${Math.round(c.turboRpm || 0)}%`, tone: c.turbo ? 'ok' : 'off' },
         { l: 'Phase', h: 'ov.pump_phase', v: String(c.pumpPhase || '—') },
       ],
-      viz: (
-        <div className="ov-pumps" aria-hidden="true">
-          <div className="ov-pump-col" style={{ '--c': '#94a3b8' } as React.CSSProperties}><i style={{ height: `${clamp(c.roughingRpm || 0, 0, 100)}%` }} /></div>
-          <div className="ov-pump-col" style={{ '--c': '#38bdf8' } as React.CSSProperties}><i style={{ height: `${clamp(c.turboRpm || 0, 0, 100)}%` }} /></div>
-        </div>
-      ),
     },
     {
-      id: 'experiment', k: 'experiment', name: 'Acquisition Workstation', help: 'ov.workstation', page: 'runs', icon: Cpu, x: 332, y: 450, w: 224, h: 148, main: ex.active ? ex.id || 'ACTIVE' : 'IDLE',
+      id: 'experiment', k: 'experiment', name: 'Acquisition Workstation', help: 'ov.workstation', page: 'runs', icon: Cpu, x: 332, y: 490, w: 224, h: 196, main: ex.active ? ex.id || 'ACTIVE' : 'IDLE',
       reads: [
         { l: 'Run', h: 'ov.run', v: ex.active ? String(ex.id || 'ACTIVE') : 'IDLE', tone: ex.active ? 'ok' : 'off' },
         { l: 'Records', h: 'ov.records', v: String(records.length) },
@@ -221,7 +214,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
       viz: <Bar value={ex.scanActive ? ex.scanProgress || 0 : 0} color="#34d399" />,
     },
     {
-      id: 'spatial', k: 'spatial', name: 'Data Quality Check', help: 'ov.quality', page: 'spatial', icon: ShieldCheck, x: 644, y: 450, w: 196, h: 148, main: records.length ? quality : 'NO DATA',
+      id: 'spatial', k: 'spatial', name: 'Data Quality Check', help: 'ov.quality', page: 'spatial', icon: ShieldCheck, x: 644, y: 490, w: 196, h: 196, main: records.length ? quality : 'NO DATA',
       reads: [
         { l: 'Accepted', h: 'ov.accepted', v: String(accepted), tone: accepted ? 'ok' : 'off' },
         { l: 'Suspect', h: 'ov.suspect', v: String(suspect), tone: suspect ? 'warn' : 'off' },
@@ -241,15 +234,15 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
   const stateMap = Object.fromEntries(equip.map(e => [e.id, stateOf(e)])) as Record<string, string>;
 
   const routes: Route[] = [
-    { id: 'clock-vna', kind: 'clock', d: 'M122 170 L122 194', from: 'clock', to: 'vna', on: ck.locked && v.power, label: '10 MHz reference to VNA', badge: [122, 182] },
-    { id: 'clock-scope', kind: 'clock', d: 'M24 95 L8 95 L8 456 L24 456', from: 'clock', to: 'scope', on: ck.locked && sc.power, label: '10 MHz reference to oscilloscope', badge: [8, 275] },
+    { id: 'clock-vna', kind: 'clock', d: 'M122 210 L122 230', from: 'clock', to: 'vna', on: ck.locked && v.power, label: '10 MHz reference to VNA', badge: [122, 220] },
+    { id: 'clock-scope', kind: 'clock', d: 'M24 115 L8 115 L8 548 L24 548', from: 'clock', to: 'scope', on: ck.locked && sc.power, label: '10 MHz reference to oscilloscope', badge: [8, 330] },
     { id: 'clock-ldv', kind: 'clock', d: 'M220 60 L644 60', from: 'clock', to: 'ldv', on: ck.locked && l.power, label: '10 MHz reference to LDV', badge: [432, 60] },
-    { id: 'rf', kind: 'rf', d: 'M220 273 C270 273 290 270 332 270', from: 'vna', to: 'chamber', on: v.power && v.rf, label: 'RF stimulus and return', badge: [276, 272] },
-    { id: 'laser', kind: 'laser', d: 'M700 160 C690 192 620 186 556 196', from: 'ldv', to: 'chamber', on: l.power && l.shutter, label: 'LDV forward beam', badge: [640, 184] },
-    { id: 'laser-return', kind: 'laserReturn', d: 'M556 218 C625 212 714 208 726 160', from: 'chamber', to: 'ldv', on: l.power && l.shutter, label: 'LDV reflected return', badge: [650, 212] },
-    { id: 'data', kind: 'data', d: 'M444 390 L444 450', from: 'chamber', to: 'experiment', on: ex.active || (v.trace?.length || 0) > 0, label: 'Measurement data to workstation', badge: [444, 420] },
-    { id: 'vacuum', kind: 'vacuum', d: 'M644 333 C600 333 585 312 556 308', from: 'pumps', to: 'chamber', on: c.roughing || c.turbo, label: 'Vacuum flow to pumps', badge: [600, 326] },
-    { id: 'data-quality', kind: 'data', d: 'M556 524 L644 524', from: 'experiment', to: 'spatial', on: ex.active || records.length > 0, label: 'Results to quality check', badge: [600, 524] },
+    { id: 'rf', kind: 'rf', d: 'M220 330 C270 330 290 300 332 300', from: 'vna', to: 'chamber', on: v.power && v.rf, label: 'RF stimulus and return', badge: [276, 318] },
+    { id: 'laser', kind: 'laser', d: 'M700 216 C690 240 620 230 556 232', from: 'ldv', to: 'chamber', on: l.power && l.shutter, label: 'LDV forward beam', badge: [640, 232] },
+    { id: 'laser-return', kind: 'laserReturn', d: 'M556 256 C625 252 714 246 726 216', from: 'chamber', to: 'ldv', on: l.power && l.shutter, label: 'LDV reflected return', badge: [650, 252] },
+    { id: 'data', kind: 'data', d: 'M444 450 L444 490', from: 'chamber', to: 'experiment', on: ex.active || (v.trace?.length || 0) > 0, label: 'Measurement data to workstation', badge: [444, 470] },
+    { id: 'vacuum', kind: 'vacuum', d: 'M644 349 C600 349 585 344 556 342', from: 'pumps', to: 'chamber', on: c.roughing || c.turbo, label: 'Vacuum flow to pumps', badge: [600, 348] },
+    { id: 'data-quality', kind: 'data', d: 'M556 588 L644 588', from: 'experiment', to: 'spatial', on: ex.active || records.length > 0, label: 'Results to quality check', badge: [600, 588] },
   ];
 
   const checks = [
@@ -281,48 +274,8 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
   ];
 
   /* ───── Interactions ───── */
-  const tilt = reduced ? {} : {
-    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
-      if (e.pointerType !== 'mouse') return;
-      const r = e.currentTarget.getBoundingClientRect();
-      const px = (e.clientX - r.left) / r.width - 0.5, py = (e.clientY - r.top) / r.height - 0.5;
-      e.currentTarget.style.setProperty('--tx', `${(-py * 7).toFixed(2)}deg`);
-      e.currentTarget.style.setProperty('--ty', `${(px * 9).toFixed(2)}deg`);
-    },
-    onPointerLeave: (e: React.PointerEvent<HTMLElement>) => {
-      e.currentTarget.style.setProperty('--tx', '0deg');
-      e.currentTarget.style.setProperty('--ty', '0deg');
-    },
-  };
-
-  const select = (id: string) => {
-    if (moved.current) { moved.current = false; return; }
-    setSelected(id);
-  };
-  const startDrag = (e: React.PointerEvent) => {
-    if (view !== 'orbit' || e.button !== 0) return;
-    const start = { x: e.clientX, y: e.clientY, rx: orbit.rx, ry: orbit.ry };
-    moved.current = false;
-    setDragging(true);
-    const move = (ev: PointerEvent) => {
-      const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
-      if (Math.abs(dx) + Math.abs(dy) > 4) moved.current = true;
-      setOrbit({ ry: clamp(start.ry + dx * 0.25, -38, 38), rx: clamp(start.rx - dy * 0.25, 0, 58) });
-    };
-    const up = () => {
-      setDragging(false);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-      window.setTimeout(() => { moved.current = false; }, 0);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-  };
-  const resetView = () => { setView('tilt'); setOrbit({ rx: 16, ry: -10 }); setLayers({ ...ALL_LAYERS }); setProblemsOnly(false); setSort('lab'); };
-  const rx = view === 'flat' ? 0 : view === 'tilt' ? 16 : orbit.rx;
-  const ry = view === 'flat' ? 0 : view === 'tilt' ? 0 : orbit.ry;
+  const select = (id: string) => setSelected(id);
+  const resetView = () => { setLayers({ ...ALL_LAYERS }); setProblemsOnly(false); setSort('lab'); };
 
   const sel = byId[selected] || byId.chamber;
   const selState = stateMap[sel.id];
@@ -361,14 +314,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
             </p>
           </div>
           <div className="ov-toolbar">
-            <div className="ov-group" role="group" aria-label="View mode">
-              <span className="ov-group-label">View<Q k="ov.view_modes" /></span>
-              {(['flat', 'tilt', 'orbit'] as const).map(m => (
-                <span key={m} className="ov-qwrap">
-                  <button type="button" className="ov-seg" aria-pressed={view === m} onClick={() => setView(m)}>{m === 'flat' ? 'Flat' : m === 'tilt' ? 'Tilted' : 'Orbit'}</button>
-                </span>
-              ))}
-            </div>
+            <LabClock variant="block" sim={f.simulationTime} className="ov-clock" />
             <span className="ov-qwrap"><button type="button" className="ov-btn" aria-pressed={problemsOnly} onClick={() => setProblemsOnly(x => !x)} style={problemsOnly ? { borderColor: '#fbbf24', color: '#fde68a' } : undefined}><AlertTriangle size={13} aria-hidden="true" /> Problems only</button><Q k="ov.problems_only" /></span>
             <span className="ov-qwrap"><button type="button" className="ov-btn" onClick={resetView}>Reset view</button><Q k="ov.reset_view" /></span>
             <span className="ov-qwrap"><button type="button" className="ov-btn" aria-pressed={showHelp} onClick={() => setShowHelp(x => !x)}>? Help icons: {showHelp ? 'On' : 'Off'}</button><Q k="ov.help_icons" /></span>
@@ -377,7 +323,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
 
         <div className="ov-tiles" role="list" aria-label="Lab summary">
           {tiles.map(t => (
-            <div key={t.k} role="listitem" className="ov-tile" style={{ '--c': t.hex, '--p': (t as any).ring ?? 0 } as React.CSSProperties} {...tilt}>
+            <div key={t.k} role="listitem" className="ov-tile" style={{ '--c': t.hex, '--p': (t as any).ring ?? 0 } as React.CSSProperties} >
               {(t as any).ring !== undefined && <div className="ov-ring" aria-hidden="true" />}
               <div className="ov-tile-top"><span className="ov-tile-icon" aria-hidden="true"><t.icon size={13} /></span><T k={t.k}>{t.label}</T></div>
               <div className="ov-tile-val">{t.val}</div>
@@ -403,12 +349,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
             </div>
             <div className="ov-scroll">
               <div className="ov-wrap">
-                <div
-                  className={`ov-stage${view === 'orbit' ? ' is-orbit' : ''}${dragging ? ' is-dragging' : ''}`}
-                  style={{ '--rx': `${rx}deg`, '--ry': `${ry}deg` } as React.CSSProperties}
-                  onPointerDown={startDrag}
-                  onDoubleClick={() => view === 'orbit' && setOrbit({ rx: 16, ry: -10 })}
-                >
+                <div className="ov-stage">
                   <div className="ov-plane">
                     <div className="ov-floor" aria-hidden="true" />
                     <svg className="ov-routes" viewBox={`0 0 ${SCENE_W} ${SCENE_H}`} preserveAspectRatio="none" aria-hidden="true">
@@ -417,18 +358,26 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
                         return <path key={r.id} d={r.d} className={`ov-route ${fault ? 'is-fault' : r.on ? 'is-on' : 'is-idle'}`} style={{ color: ROUTE_COLOR[r.kind], stroke: fault ? '#fb7185' : ROUTE_COLOR[r.kind] }}><title>{r.label}{fault ? ' (fault)' : r.on ? ' (active)' : ' (idle)'}</title></path>;
                       })}
                     </svg>
+                    {!reduced && <svg className="ov-packets" viewBox={`0 0 ${SCENE_W} ${SCENE_H}`} preserveAspectRatio="none" aria-hidden="true">
+                      {routes.filter(r => layers[r.kind] && r.on).map(r => [0, 1, 2].map(k => (
+                        <circle key={`${r.id}${k}`} r="3.4" fill={ROUTE_COLOR[r.kind]} style={{ filter: `drop-shadow(0 0 4px ${ROUTE_COLOR[r.kind]})` }}>
+                          <animateMotion dur="2.6s" begin={`${k * 0.87}s`} repeatCount="indefinite" path={r.d} keyPoints={r.kind === 'vacuum' ? '1;0' : '0;1'} keyTimes="0;1" calcMode="linear" />
+                        </circle>
+                      )))}
+                    </svg>}
                     {routes.filter(r => layers[r.kind]).map(r => (
                       <div key={r.id} className="ov-badge" style={{ left: `calc(var(--u) * ${r.badge[0]})`, top: `calc(var(--u) * ${r.badge[1]})` }}><Q k={ROUTE_HELP[r.kind]} /></div>
                     ))}
                     {cards.map(e => {
                       const vs = stateMap[e.id];
                       const t = lab.visualToken(vs);
-                      const isSel = selected === e.id || (e.id === 'chamber' && selected === 'stage' ? false : false);
-                      const dim = problemsOnly && vs !== 'fault' && vs !== 'warning' && vs !== 'maintenance';
+                      const isSel = selected === e.id;
+                      const al = getAlert(s, ALERT_OF[e.id] || 'facility');
+                      const dim = problemsOnly && vs !== 'fault' && vs !== 'warning' && vs !== 'maintenance' && al.level !== 'error' && al.level !== 'stuck' && al.level !== 'attention';
                       const Icon = e.icon;
                       return (
-                        <article key={e.id} data-equip={e.id} data-state={vs} className={`ov-card st-${vs}${isSel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}`}
-                          style={{ '--c': t.hex, left: `calc(var(--u) * ${e.x})`, top: `calc(var(--u) * ${e.y})`, width: `calc(var(--u) * ${e.w})`, height: `calc(var(--u) * ${e.h})` } as React.CSSProperties} {...tilt}>
+                        <article key={e.id} data-equip={e.id} data-state={vs} data-alert={al.level} className={`ov-card st-${vs} oa-${al.level}${isSel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}`}
+                          style={{ '--c': t.hex, left: `calc(var(--u) * ${e.x})`, top: `calc(var(--u) * ${e.y})`, width: `calc(var(--u) * ${e.w})`, height: `calc(var(--u) * ${e.h})` } as React.CSSProperties}>
                           <div className="ov-shadow" aria-hidden="true" />
                           <div className="ov-card-body">
                             <button type="button" className="ov-hit" aria-pressed={isSel} aria-label={`${e.name}: ${t.label}. ${e.main}. Select to inspect.`} onClick={() => select(e.id)} />
@@ -436,7 +385,8 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
                               <span className="ov-card-icon" aria-hidden="true"><Icon /></span>
                               <span className="ov-card-name">{e.name}</span><Q k={e.help} />
                             </div>
-                            <div className="ov-state-line"><span className="ov-chip"><i className="ov-led" aria-hidden="true" />{t.symbol} {t.label}</span><Q k={`ov.state_${vs}`} /></div>
+                            <div className="ov-state-line"><span className="ov-chip"><i className="ov-led" aria-hidden="true" />{t.symbol} {t.label}</span><Q k={`ov.state_${vs}`} /><span className="ov-alertpill"><AlertBadge info={al} compact name={e.name} /></span></div>
+                            <div className="ov-art-wrap"><EquipArt id={e.id} s={s} off={vs === 'offline'} /></div>
                             <dl className="ov-reads">
                               {e.reads.map(r => (
                                 <div className="ov-read" key={r.l}><dt>{r.l}<Q k={r.h} /></dt><dd className={r.tone ? `is-${r.tone}` : ''}>{r.v}</dd></div>
@@ -453,11 +403,11 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
                                     <span className="ov-card-name" style={{ display: 'inline-flex', alignItems: 'center' }}>XYZ Stage<Q k="ov.stage" /></span>
                                     <span className="ov-chip" style={{ '--c': stt.hex } as React.CSSProperties}><i className="ov-led" aria-hidden="true" />{stt.symbol} {stt.label}</span>
                                   </div>
-                                  <div className="ov-axis">
+                                  <div className="ov-stage-row"><StageArt s={s} off={sv === 'offline'} /><div className="ov-axis">
                                     {(['x', 'y', 'z'] as const).map(ax => (
                                       <div key={ax}><span>{ax.toUpperCase()} {num(st[ax])}</span><Bar value={(st[ax] + 35) / 70} color={stt.hex} /></div>
                                     ))}
-                                  </div>
+                                  </div></div>
                                   <div className="ov-hint" style={{ display: 'inline-flex', alignItems: 'center' }}><T k="ov.xyz">XYZ</T>&nbsp;in&nbsp;<T k="ov.mm">mm</T></div>
                                 </div>
                               );
@@ -590,7 +540,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
               return (
                 <button key={e.id} type="button" className={`ov-tr${selected === e.id ? ' is-selected' : ''}`} onClick={() => setSelected(e.id)} aria-pressed={selected === e.id}>
                   <span className="ov-name">{e.name}</span>
-                  <span className="ov-chip" style={{ '--c': t.hex, justifySelf: 'start' } as React.CSSProperties}><i className="ov-led" aria-hidden="true" />{t.symbol} {t.label}</span>
+                  <span className="ov-chip" style={{ '--c': t.hex, justifySelf: 'start' } as React.CSSProperties}><i className="ov-led" aria-hidden="true" />{t.symbol} {t.label}<AlertBadge info={getAlert(s, ALERT_OF[e.id] || 'facility')} compact name={e.name} /></span>
                   <span className="ov-val">{e.main}</span>
                   <span aria-hidden="true" style={{ justifySelf: 'end' }}><ChevronRight size={14} /></span>
                 </button>

@@ -30,6 +30,10 @@ export interface UIStore extends Slice {
 
 let reducerFn: Reducer | null = null;
 let initial: Slice = {};
+type Transition = (prev: Slice, next: Slice) => void;
+const transitionListeners = new Set<Transition>();
+/** Called once per dispatch with the state before and after (after all three stores are updated). Used by the live operation feed. */
+export function onLabTransition(cb: Transition) { transitionListeners.add(cb); return () => { transitionListeners.delete(cb); }; }
 
 export const useInstrumentStore = create<InstrumentStore>()(() => ({
   setVnaFrequency: (freq) => dispatch({ type: 'PATCH', domain: 'vna', patch: { center: freq } }),
@@ -85,6 +89,7 @@ export function dispatch(action: Action) {
   if (i) useInstrumentStore.setState(i);
   if (e) useEnvironmentStore.setState(e);
   if (u) useUIStore.setState(u);
+  if (transitionListeners.size && (i || e || u)) { const after = getLabState(); transitionListeners.forEach(f => f(prev, after)); }
 }
 
 /** Registers the reducer and seeds the stores. Idempotent; call once at module load. */

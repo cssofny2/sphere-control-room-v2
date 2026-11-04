@@ -56,29 +56,9 @@ export const OVERVIEW_HELP: Record<string, HelpEntry> = {
     desc: "A single running simulation that every page of the lab reads from. If you change something on the VNA page, this overview updates immediately, because they are looking at the same model.",
     why: "Nothing here is a real measurement. It is a safe practice version of the lab.",
   },
-  "ov.view_modes": {
-    title: "View mode",
-    desc: "Choose how the lab map is drawn: flat like a diagram, tilted like a table seen from above at an angle, or Orbit, where you can drag to turn the map yourself.",
-    why: "Tilted views make the depth of the boxes easier to see. Flat is easiest for reading small text.",
-    related: ["ov.view_flat", "ov.view_tilt", "ov.view_orbit", "ov.reset_view"],
-  },
-  "ov.view_flat": {
-    title: "Flat view",
-    desc: "Draws the lab map straight on with no tilt, like a normal diagram.",
-  },
-  "ov.view_tilt": {
-    title: "Tilted view",
-    desc: "Leans the map back a little so the boxes look like solid blocks standing on a table.",
-  },
-  "ov.view_orbit": {
-    title: "Orbit view",
-    desc: "Lets you turn the map yourself. Click and drag on the map to swing it left, right, up or down.",
-    tip: "Double-click the map, or press Reset view, to bring it back.",
-    related: ["ov.reset_view"],
-  },
   "ov.reset_view": {
     title: "Reset view",
-    desc: "Puts the map back to the normal tilt and clears any filters or hidden lines you set.",
+    desc: "Clears any filters or hidden lines you set on the map and puts the equipment table back in lab order.",
   },
   "ov.layers": {
     title: "Show or hide lines",
