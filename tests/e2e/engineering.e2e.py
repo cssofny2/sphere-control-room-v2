@@ -24,6 +24,8 @@ class S:
         self.pg.on("console", lambda m: self.errs.append(m.type + ": " + m.text) if m.type == "error" and "Failed to load resource" not in m.text else None)
         self.pg.goto(BASE + "?labdebug", wait_until="networkidle"); self.pg.wait_for_timeout(500)
         self.pg.locator(".workspace-view-select").first.select_option(index=2)
+        check("engineering model is selected by default", self.pg.get_by_role("button", name="Engineering model", exact=True).get_attribute("aria-pressed") == "true")
+        check("realistic lab is not selected by default", self.pg.get_by_role("button", name="Realistic lab", exact=True).get_attribute("aria-pressed") == "false")
         self.pg.get_by_role("button", name="Engineering schematic", exact=True).click()
         self.pg.wait_for_selector("[data-eng-schematic]", timeout=20000)
     def js(self, e): return self.pg.evaluate(e)
