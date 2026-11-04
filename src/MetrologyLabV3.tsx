@@ -2790,7 +2790,7 @@ function LabEnvironmentSkeleton({ label = "Loading Lab Environment…" }) {
 function Chamber({ state, dispatch, HelpInfo }) {
   const scene3dReady = useAfterFirstPaint();
   const [cv, setCv] = useState({ shell: true, cut: false, cam: "front", mode: "standard" });
-  const [sceneView, setSceneView] = useState("lab");
+  const [sceneView, setSceneView] = useState("engineering");
   useEffect(() => { installLabSelectionSync(); }, []);
   const labStateRef = useRef(state); labStateRef.current = state;
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
