@@ -311,10 +311,15 @@ export function createCallController(deps: CallDeps) {
     deps.beep(true); state = 'connected'; connectedAt = now(); emit();
     startPolling();
     const f = deps.facts(); const open = f.alarms.length;
+    // The operator profile (header button) already told him who is at the bench, so he greets them by name instead of asking.
+    let profileName: string | null = null;
+    try { const o = deps.getState?.()?.operator; profileName = ((o?.nickname || String(o?.name || '').split(' ')[0] || '') as string).trim() || null; } catch { /* no profile */ }
+    if (profileName && !callerName) { callerName = profileName; nameDeclined = false; sinceName = 0; }
+    const known = !!profileName && callerName === profileName;
     if (opts.opening) { reply(opts.opening, 'answer'); }
-    else if (open) reply(`Lab, Dr. Wire speaking. I can see ${open} open alarm${open > 1 ? 's' : ''}. ${callerName ? `${callerName}, is that you?` : 'Who am I speaking with?'}`, 'answer', 'worried');
-    else reply(callerName ? `Lab, Dr. Wire speaking. Is that ${callerName} again?` : `Lab, Dr. Wire speaking. ${askName()}`, 'answer', 'neutral');
-    if (!opts.opening && !nameDeclined) namePending = callerName ? 'confirm' : 'ask';
+    else if (open) reply(`Lab, Dr. Wire speaking. I can see ${open} open alarm${open > 1 ? 's' : ''}. ${known ? `Hi ${callerName}, what do you need?` : callerName ? `${callerName}, is that you?` : 'Who am I speaking with?'}`, 'answer', 'worried');
+    else reply(known ? `Lab, Dr. Wire speaking. Hi ${callerName}, what can I do for you?` : callerName ? `Lab, Dr. Wire speaking. Is that ${callerName} again?` : `Lab, Dr. Wire speaking. ${askName()}`, 'answer', 'neutral');
+    if (!opts.opening && !nameDeclined && !known) namePending = callerName ? 'confirm' : 'ask';
     if (micState === 'ok' && micInput === 'open') deps.speech.listen();
   }
 

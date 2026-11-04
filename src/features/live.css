@@ -1,0 +1,153 @@
+/* Live operation window: always-on floating panel with a live schematic, an action animation and a plain-English explanation. */
+.lw { position: fixed; right: 14px; bottom: 46px; z-index: 40; display: flex; flex-direction: column; width: min(392px, calc(100vw - 20px)); max-height: calc(100dvh - 110px); border: 1px solid #2f5f8a; border-radius: 12px; background: linear-gradient(180deg, #0f1a28f5, #0a1119f5); box-shadow: 0 18px 50px #000c, 0 0 0 1px #000, 0 0 30px #2563eb1f; color: #dbe8f6; backdrop-filter: blur(6px); }
+.lw.is-min { width: min(392px, calc(100vw - 20px)); }
+.lw-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border-bottom: 1px solid #1c2e44; border-radius: 12px 12px 0 0; background: linear-gradient(180deg, #13263a, #0e1b2a); cursor: grab; touch-action: none; user-select: none; }
+.lw.is-min .lw-head { border-bottom: 0; border-radius: 12px; }
+.lw-title { display: inline-flex; align-items: center; gap: 6px; color: #7dd3fc; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+.lw-rec { width: 7px; height: 7px; border-radius: 50%; background: #f43f5e; box-shadow: 0 0 8px #f43f5e; animation: lw-blink 1.4s ease-in-out infinite; }
+.lw-mini { min-width: 0; flex: 1; overflow: hidden; color: #cfe0f1; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.lw-head .lc-screen { margin-left: auto; }
+.lw.is-min .lw-head .lc-screen { margin-left: 0; }
+.lw-btn { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid #2a3b50; border-radius: 6px; background: #0b121a; color: #aebfd1; cursor: pointer; }
+.lw-btn:hover { background: #1d3550; color: #fff; }
+.lw-body { display: grid; gap: 8px; padding: 8px 10px 10px; overflow-y: auto; scrollbar-width: thin; }
+.lw-diagram { display: block; width: 100%; height: auto; border: 1px solid #16283a; border-radius: 8px; background: radial-gradient(ellipse at 50% 40%, #0c1826, #060b12); }
+.lw-using { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.lw-using-l { color: #738598; font: 700 9.5px/1 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.lw-pill { padding: 1px 8px; border: 1px solid #1f5a44; border-radius: 99px; background: #0a1f19; color: #86efac; font: 600 10.5px/1.5 ui-monospace, monospace; animation: lw-pillglow 2.2s ease-in-out infinite; }
+.lw-none { color: #738598; font-size: 11px; }
+.lw-card { display: grid; gap: 8px; grid-template-columns: 138px minmax(0, 1fr); padding: 8px; border: 1px solid #1c2e44; border-left: 3px solid #38bdf8; border-radius: 8px; background: #08101a; }
+.lw-card.lv-warning { border-left-color: #fbbf24; } .lw-card.lv-critical { border-left-color: #fb7185; }
+.lw-scene { align-self: start; border: 1px solid #16283a; border-radius: 6px; background: #050b12; overflow: hidden; }
+.as-scene { display: block; width: 100%; height: auto; }
+.lw-text { min-width: 0; font-size: 12px; line-height: 1.45; }
+.lw-text h4 { margin: 2px 0 3px; color: #f4f8ff; font-size: 13px; font-weight: 750; }
+.lw-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: #7f93a8; font: 600 10px/1.3 ui-monospace, monospace; }
+.lw-tag { padding: 0 6px; border-radius: 4px; background: #172433; color: #b4c5d8; letter-spacing: .05em; }
+.lw-tag.command { background: #12344d; color: #bae6fd; } .lw-tag.auto { background: #2b1f4a; color: #ddd6fe; }
+.lw-op { color: #7dd3fc; }
+.lw-now { padding: 0 6px; border-radius: 4px; background: #14532d; color: #bbf7d0; animation: lw-blink 1.1s ease-in-out infinite; }
+.lw-what { margin: 0 0 4px; color: #c9d8e8; }
+.lw-fx { display: grid; gap: 2px; margin: 0 0 4px; padding: 0; list-style: none; }
+.lw-fx li { position: relative; padding-left: 14px; color: #a9bbcd; }
+.lw-fx li::before { content: "→"; position: absolute; left: 0; color: #38bdf8; }
+.lw-watch { margin: 0; color: #fde68a; } .lw-watch b { color: #fcd34d; }
+.lw-link { margin-top: 4px; padding: 0; border: 0; background: none; color: #7db4ff; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.lw-link:hover { color: #bfdbfe; text-decoration: underline; }
+.lw-hist { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.lw-hist button { display: flex; gap: 8px; width: 100%; padding: 2px 6px; border: 0; border-left: 2px solid #28425e; background: transparent; color: #9fb3c8; font-size: 11px; text-align: left; cursor: pointer; }
+.lw-hist button:hover { background: #12202f; }
+.lw-hist button.is-sel { background: #12263a; color: #f1f7fd; }
+.lw-hist button.lv-warning { border-left-color: #fbbf24; } .lw-hist button.lv-critical { border-left-color: #fb7185; }
+.lw-hist time { flex: none; color: #647a90; font-family: ui-monospace, monospace; }
+.lw-hist span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 899px) { .lw { right: 8px; bottom: 42px; } .lw-card { grid-template-columns: minmax(0, 1fr); } .lw-scene { max-width: 200px; } }
+@media (max-height: 640px) { .lw { max-height: calc(100dvh - 90px); } }
+
+/* ───── live schematic ───── */
+.lw-edge { stroke-width: 1.4; opacity: .22; stroke-dasharray: 3 5; }
+.lw-edge.on { opacity: 1; stroke-width: 2.4; stroke-dasharray: 7 6; animation: lw-flow .9s linear infinite; filter: drop-shadow(0 0 3px currentColor); }
+.lw-edge.on.rev { animation-direction: reverse; }
+.lw-edge.hot { stroke-width: 3.4; }
+.lw-node rect { transition: stroke .3s; }
+.lw-led.blink { animation: lw-blink 1s ease-in-out infinite; }
+.lw-gas { animation: lw-drift 5s ease-in-out infinite; }
+.lw-gas.pump { animation: lw-suck 2.2s linear infinite; }
+.lw-gas.vent { animation: lw-rain 1.8s linear infinite; }
+.lw-shake { animation: lw-jitter .12s linear infinite; }
+.lw-sphere.hot { stroke: #fff; stroke-width: 2; }
+.lw-beam { animation: lw-beamflick .09s steps(2) infinite; }
+.lw-spot { animation: lw-beat 1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.lw-scanspot { animation: lw-scanx 1.5s ease-in-out infinite alternate; }
+.lw-rfwave { transform-box: fill-box; transform-origin: center; animation: lw-ripple 1.8s ease-out infinite; }
+.lw-in { animation: lw-flow .8s linear infinite; }
+.lw-door { transform-box: fill-box; transform-origin: 0 50%; transition: transform .5s; }
+.lw-door.open { transform: perspective(60px) rotateY(-60deg); }
+.lw-ring { animation: lw-ring 1.1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.lw-fan { transform-box: fill-box; transform-origin: center; animation: lw-spin 1.1s linear infinite; }
+.lw-fan.fast { animation-duration: .35s; }
+.lw-flash { opacity: 0; animation: lw-flashin 1s ease-out 1; pointer-events: none; }
+.lw-blink { animation: lw-blink .6s steps(2) infinite; }
+.lw-pulse { animation: lw-blink 1s ease-in-out infinite; }
+@keyframes lw-flow { to { stroke-dashoffset: -26; } }
+@keyframes lw-blink { 50% { opacity: .35; } }
+@keyframes lw-drift { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(7px, -5px); } }
+@keyframes lw-suck { 0% { transform: translate(0, 0); opacity: .8; } 100% { transform: translate(40px, 4px); opacity: 0; } }
+@keyframes lw-rain { 0% { transform: translate(0, -18px); opacity: 0; } 30% { opacity: .9; } 100% { transform: translate(0, 12px); opacity: 0; } }
+@keyframes lw-jitter { 0% { transform: translate(0, 0); } 50% { transform: translate(.9px, -.7px); } 100% { transform: translate(-.9px, .7px); } }
+@keyframes lw-beamflick { 50% { opacity: .75; } }
+@keyframes lw-beat { 0%, 100% { transform: scale(.8); } 50% { transform: scale(1.3); } }
+@keyframes lw-scanx { from { transform: translate(-7px, -4px); } to { transform: translate(7px, 5px); } }
+@keyframes lw-ripple { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(5); opacity: 0; } }
+@keyframes lw-ring { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@keyframes lw-spin { to { transform: rotate(360deg); } }
+@keyframes lw-flashin { 0% { opacity: .35; } 100% { opacity: 0; } }
+@keyframes lw-pillglow { 0%, 100% { box-shadow: 0 0 0 0 #34d39900; } 50% { box-shadow: 0 0 8px 0 #34d39966; } }
+
+/* ───── action scenes ───── */
+.as-fan { transform-box: fill-box; transform-origin: center; animation: lw-spin 1.1s linear infinite; }
+.as-fan.as-fast { animation-duration: .32s; }
+.as-gas-out { animation: as-out 2.4s linear infinite; }
+.as-gas-in { animation: as-in 2s linear infinite; }
+.as-needle-down { animation: as-nd 3.2s ease-in-out infinite alternate; }
+.as-needle-up { animation: as-nu 3.2s ease-in-out infinite alternate; }
+.as-switch { transform-box: fill-box; transform-origin: 50% 100%; animation: as-flip 3s ease-in-out infinite; }
+.as-boot { opacity: .35; animation: as-bootup 3s ease-out infinite; }
+.as-led { animation: lw-blink .9s ease-in-out infinite; }
+.as-bolt { animation: lw-flow .8s linear infinite; }
+.as-orbit { transform-box: fill-box; transform-origin: -19px 50%; animation: lw-spin 1.6s linear infinite; }
+.as-wave-run { stroke-dasharray: 6 4; animation: lw-flow 1s linear infinite; }
+.as-door { transform-box: fill-box; transform-origin: 0 50%; animation: as-door 3s ease-in-out infinite; }
+.as-blink { animation: lw-blink .8s ease-in-out infinite; }
+.as-heat { animation: as-rise 1.8s ease-in-out infinite; transform-box: fill-box; }
+.as-mercury { transform-box: fill-box; transform-origin: 50% 100%; animation: as-merc 3s ease-in-out infinite alternate; }
+.as-cage { animation: lw-flow 1s linear infinite; }
+.as-bounce { animation: as-bounce 1.4s ease-out infinite; }
+.as-spring { transform-box: fill-box; animation: as-spring 1.1s ease-in-out infinite; }
+.as-floor { animation: as-floor .25s linear infinite; }
+.as-travel { animation: as-travel 2.6s ease-in-out infinite; }
+.as-jaw-l { animation: as-jawl 2.4s ease-in-out infinite; } .as-jaw-r { animation: as-jawr 2.4s ease-in-out infinite; }
+.as-ripple { transform-box: fill-box; transform-origin: center; animation: lw-ripple 1.8s ease-out infinite; }
+.as-flow { animation: lw-flow .9s linear infinite; }
+.as-draw { stroke-dasharray: 260; stroke-dashoffset: 260; animation: as-draw 3s linear infinite; }
+.as-cursor { animation: as-cursor 3s linear infinite; }
+.as-std { opacity: .25; animation: as-std 2.7s ease-in-out infinite; }
+.as-beam { animation: lw-beamflick .09s steps(2) infinite; }
+.as-spot { transform-box: fill-box; transform-origin: center; animation: lw-beat 1s ease-in-out infinite; }
+.as-scanbeam { transform-origin: 100px 14px; animation: as-scanbeam 2s ease-in-out infinite alternate; }
+.as-dotfill { opacity: .15; animation: as-dot 3s steps(1) infinite; }
+.as-scroll { animation: as-scroll 2.2s linear infinite; }
+.as-row { opacity: .2; animation: as-row 2.4s ease-out infinite; }
+.as-packet { animation: as-packet 2s linear infinite; }
+.as-alarm { animation: lw-blink .5s steps(2) infinite; }
+.as-hand-s { animation: lw-spin 1s linear infinite; } .as-hand-m { animation: lw-spin 8s linear infinite; }
+.as-hand-s, .as-hand-m { transform-box: fill-box; transform-origin: 50% 100%; }
+.as-chev { opacity: .2; animation: as-chev .9s ease-in-out infinite; }
+@keyframes as-out { 0% { transform: translate(0, 0); opacity: .9; } 100% { transform: translate(86px, 4px); opacity: 0; } }
+@keyframes as-in { 0% { transform: translate(0, -30px); opacity: 0; } 25% { opacity: .9; } 100% { transform: translate(0, 8px); opacity: .2; } }
+@keyframes as-nd { from { transform: rotate(-20deg); } to { transform: rotate(-120deg); } }
+@keyframes as-nu { from { transform: rotate(-120deg); } to { transform: rotate(10deg); } }
+@keyframes as-flip { 0%, 20% { transform: translateY(18px) scaleY(.6); } 40%, 100% { transform: translateY(0) scaleY(1); } }
+@keyframes as-bootup { 0%, 20% { opacity: .25; } 40%, 100% { opacity: 1; } }
+@keyframes as-door { 0%, 25% { transform: perspective(80px) rotateY(0); } 55%, 100% { transform: perspective(80px) rotateY(-65deg); } }
+@keyframes as-rise { 0% { transform: translateY(8px); opacity: 0; } 50% { opacity: 1; } 100% { transform: translateY(-14px); opacity: 0; } }
+@keyframes as-merc { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
+@keyframes as-bounce { 0% { transform: translateX(-8px); opacity: 0; } 40% { opacity: 1; } 100% { transform: translateX(26px); opacity: 0; } }
+@keyframes as-spring { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.75); } }
+@keyframes as-floor { 0% { transform: translateY(0); } 50% { transform: translateY(1.6px); } 100% { transform: translateY(-1.6px); } }
+@keyframes as-travel { 0%, 15% { transform: translate(0, 0); } 70%, 100% { transform: translate(36px, -26px); } }
+@keyframes as-jawl { 0%, 100% { transform: translateX(-6px); } 50% { transform: translateX(0); } }
+@keyframes as-jawr { 0%, 100% { transform: translateX(6px); } 50% { transform: translateX(0); } }
+@keyframes as-draw { 0% { stroke-dashoffset: 260; } 80%, 100% { stroke-dashoffset: 0; } }
+@keyframes as-cursor { 0% { transform: translateX(0); } 80%, 100% { transform: translateX(156px); } }
+@keyframes as-std { 0%, 100% { opacity: .25; } 15%, 30% { opacity: 1; } }
+@keyframes as-scanbeam { from { transform: rotate(-9deg); } to { transform: rotate(9deg); } }
+@keyframes as-dot { 0% { opacity: .15; } 50%, 100% { opacity: 1; } }
+@keyframes as-scroll { to { transform: translateX(-40px); } }
+@keyframes as-row { 0% { opacity: 0; transform: translateX(-6px); } 30%, 100% { opacity: 1; transform: translateX(0); } }
+@keyframes as-packet { 0% { transform: translateX(0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateX(18px); opacity: 0; } }
+@keyframes as-chev { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) { .lw *, .lw-rec { animation: none !important; transition: none !important; } .as-boot, .as-std, .as-row, .as-dotfill { opacity: 1 !important; } }
+.fx-reduced .lw *, .fx-reduced .lw-rec { animation: none !important; transition: none !important; }
+.fx-reduced .as-boot, .fx-reduced .as-std, .fx-reduced .as-row, .fx-reduced .as-dotfill { opacity: 1 !important; }

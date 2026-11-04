@@ -107,3 +107,26 @@
 .ls-cctv-exit { position: absolute; left: 10px; bottom: 8px; pointer-events: auto; }
 @keyframes ls-rec { 50% { opacity: .1; } }
 @media (prefers-reduced-motion: reduce) { .ls-cctv-rec i { animation: none; } }
+
+/* Live equipment overlay: pins that follow the parts in use, and a list of everything the lab is doing right now. */
+.ls-pin { --c: #38bdf8; position: absolute; left: 0; top: 0; z-index: 6; display: flex; align-items: center; gap: 5px; margin: -7px 0 0 -7px; pointer-events: none; will-change: transform; }
+.ls-pin i { position: relative; flex: none; width: 14px; height: 14px; border: 2px solid var(--c); border-radius: 50%; background: color-mix(in srgb, var(--c) 35%, #0b121b); opacity: .55; }
+.ls-pin span { display: none; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--c) 70%, #0b121b); border-radius: 99px; background: #0b121bdd; color: #f1f7fd; font: 700 11px/1.5 ui-monospace, monospace; white-space: nowrap; }
+.ls-pin.is-active i { opacity: 1; box-shadow: 0 0 10px 2px var(--c); animation: ls-pinpulse 1.4s ease-out infinite; }
+.ls-pin.is-active span { display: inline-block; }
+.ls-pin.is-error i { border-color: #fb7185; box-shadow: 0 0 10px 2px #fb7185; }
+@keyframes ls-pinpulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 80%, transparent); } 100% { box-shadow: 0 0 0 14px transparent; } }
+.ls-hud { position: absolute; top: 8px; right: 8px; z-index: 7; display: flex; flex-direction: column; width: 244px; max-height: calc(100% - 60px); border: 1px solid #2f5f8a; border-radius: 10px; background: #0a1119e6; color: #dbe8f6; backdrop-filter: blur(4px); pointer-events: none; overflow: hidden; }
+.ls-hud.is-inside { width: 300px; }
+.ls-hud-h { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #1c2e44; background: #0e1b2a; font: 700 10.5px/1.4 ui-monospace, monospace; letter-spacing: .1em; color: #7dd3fc; }
+.ls-hud-h span { color: #86efac; }
+.ls-hud ul { display: grid; gap: 2px; margin: 0; padding: 6px; overflow-y: auto; list-style: none; }
+.ls-hud li { --c: #64748b; display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 1px 7px; padding: 2px 6px; border-radius: 6px; opacity: .55; font-size: 11.5px; line-height: 1.35; }
+.ls-hud li i { grid-row: 1; width: 8px; height: 8px; border-radius: 50%; background: #475569; }
+.ls-hud li b { font-weight: 700; } .ls-hud li span { grid-column: 2 / 4; color: #a9bbcd; font-size: 11px; }
+.ls-hud li em { grid-row: 1; grid-column: 3; display: inline-flex; font-style: normal; }
+.ls-hud li.on { opacity: 1; background: color-mix(in srgb, var(--c) 14%, #0a1119); box-shadow: inset 2px 0 0 var(--c); }
+.ls-hud li.on i { background: var(--c); box-shadow: 0 0 8px var(--c); animation: ls-pinblink 1.2s ease-in-out infinite; }
+@keyframes ls-pinblink { 50% { opacity: .35; } }
+@media (max-width: 760px) { .ls-hud { display: none; } }
+@media (prefers-reduced-motion: reduce) { .ls-pin.is-active i, .ls-hud li.on i { animation: none !important; } }

@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Menu, MoreHorizontal, Power, Search, Terminal, Maximize, Minimize2, Target } from 'lucide-react';
 
 import { VERSION_LABEL, VERSION_TITLE } from './siteInfo';
+import { LabClock } from './features/LabClock';
+import { OperatorChip } from './features/OperatorProfile';
+import type { OperatorProfile } from './features/operator';
 
 type Props = {
   state: any;
@@ -23,6 +26,8 @@ type Props = {
   detailsOpen: boolean;
   onDetails: () => void;
   settings: React.ReactNode;
+  operator: OperatorProfile;
+  onOperator: () => void;
 };
 
 export default function WorkspaceHeader(props: Props) {
@@ -61,6 +66,8 @@ export default function WorkspaceHeader(props: Props) {
         {props.navOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
       </select>
       <div className="workspace-actions">
+        <LabClock variant="chip" />
+        <OperatorChip operator={props.operator} onClick={props.onOperator} />
         <button className="chrome-button icon-button" aria-label="Search commands" title="Search commands (Ctrl/Cmd+K)" onClick={props.onSearch}><Search size={16} /></button>
         <button className={`chrome-button ${props.journalOpen ? 'is-active' : ''}`} aria-label={props.journalOpen ? 'Collapse operations journal' : 'Open operations journal'} aria-expanded={props.journalOpen} aria-controls="operations-journal" onClick={props.onJournal}>
           <Terminal size={16} /><span className="chrome-action-label">Journal</span><span className="chrome-count">{props.state.events.length}</span>

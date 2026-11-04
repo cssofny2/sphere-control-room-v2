@@ -2,6 +2,17 @@
 
 Versions follow semantic versioning. The version lives in `package.json` and is shown in the top-left corner of the app next to the S.P.H.E.R.E. logo.
 
+## Unreleased
+
+- Lab Overview: flat map only; every box has an animated illustration drawn from live state; signal packets travel along active lines.
+- Animated alerts (Running, Stuck, Error, Needs attention) on the sidebar, status strip, page banners and lab map.
+- Live date and time in the header, journal and instrument screens; operator profile (name, nickname, initials) stamped on journal entries, alarms, notebook notes and exports and shared with Dr. Wire.
+- Live Operation window: always-visible animation and plain-English explanation of every action.
+- 3D Chamber & Stage: Engineering model is the default; Camera preset and Viewing mode now work in both 3D views and moved above the viewer; Realistic lab gains an Inside chamber view with live equipment highlights.
+- LDV Scanner: pressed-state Acquire 3D Scan with progress, results panel, six scenarios, exports, reference compare and an instrument explainer.
+- Oscilloscope: power-on self-test, live signals tied to lab state, trigger, FFT, cursors, measurements, autoset, screenshots and eight guided scenarios.
+- Startup wizard: oscilloscope step and a power-LED checklist.
+
 ## [2.0.0] - 2026-10-24
 
 ### Changed

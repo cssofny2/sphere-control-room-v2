@@ -6,7 +6,7 @@ import HelpDialog from './overview/HelpDialog';
 // The realistic WebGL lab loads on demand so three.js stays out of the main bundle.
 // The chunk also carries the audio engine (Foley) and the technician voice system, so none of it downloads until the 3D view is allowed to mount.
 import { useShallow } from 'zustand/react/shallow';
-import { dispatch, initLabStores, resetLabStores, useEnvironmentStore, useInstrumentStore, useLab } from './state/labStores';
+import { dispatch, initLabStores, onLabTransition, resetLabStores, useEnvironmentStore, useInstrumentStore, useLab } from './state/labStores';
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
 const Schematic = lazy(() => import('./engineering/Schematic'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
@@ -17,6 +17,20 @@ import { buildAxisPlan, buildPointPlan, validateAxisSettings, type PlanIssue } f
 import { paletteEntries, execute as executeAction } from './technician/actions';
 import { installLabSelectionSync } from './engineering/selection';
 import { APP_VERSION, AUTHOR, COPYRIGHT_LINE } from './siteInfo';
+import { EMPTY_OPERATOR, hasOperator, loadOperator, operatorFullName, operatorTag, sanitizeProfile, saveOperator } from './features/operator';
+import { acquireScope, autoset, scenarioPatch, SCOPE_SCENARIO_BY_ID } from './features/scopeModel';
+import { generateScan, LDV_SCENARIO_BY_ID, scanPointTotal, scanSeconds, stallReason } from './features/ldvModel';
+import { installActivityTracker } from './features/activity';
+import { AlertGlyph, AlertStrip, PageAlert } from './features/AlertBadge';
+import { PAGE_ALERT_KEYS, worstAlert, type AlertKey } from './features/alerts';
+import { LabClock } from './features/LabClock';
+import { OperatorModal, OperatorWelcome } from './features/OperatorProfile';
+import LiveOperationWindow from './features/LiveOperationWindow';
+import LdvPanel from './features/LdvPanel';
+import Scope from './features/ScopePanel';
+import './features/features.css';
+import { ScopePowerArt, StartupChecklist } from './features/StartupChecklist';
+import { CAM_PRESETS, ChamberViewControls, VIEW_MODES, type CamPreset, type ChamberViewId, type ViewMode } from './features/ChamberViewControls';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
@@ -30,6 +44,7 @@ import {
   Search, Command, Filter, Terminal, Layers, FileSpreadsheet
 } from 'lucide-react';
 
+const ALERT_ALL: AlertKey[] = ["facility", "clock", "vna", "scope", "ldv", "chamber", "pumps", "stage", "experiment", "spatial"];
 const BASE_FREQUENCY = 230500;
 const AMBIENT_C = 22.0;
 const LIMIT_MM = 35.0;
@@ -63,7 +78,15 @@ const GLOSSARY = {
   isosurface: { title: "Isosurface Rendering", desc: "3D contour surfaces connecting points of equal value, such as equal resonance frequency shift (\\Delta f)." },
   roi: { title: "Region of Interest (ROI)", desc: "Sub-volume selection tool used to calculate descriptive statistics and isolate specific coordinate bounds." },
   ai_copilot: { title: "AI Laboratory Copilot", desc: "Contextual assistant monitoring experiment health, suggesting next steps, and evaluating statistical significance." },
-  fault_sim: { title: "Instrument Failure Simulator", desc: "Injects realistic equipment faults (clock drift, LDV misalignment, vacuum leaks) for troubleshooting training." }
+  fault_sim: { title: "Instrument Failure Simulator", desc: "Injects realistic equipment faults (clock drift, LDV misalignment, vacuum leaks) for troubleshooting training." },
+  camera_preset: { title: "Camera Preset", desc: "A ready-made viewpoint for the 3D views. Pick one (for example Inside chamber or Laser path) and the camera jumps there, so you can watch a part while you operate it. Drag and scroll still work afterwards. Presets apply to the Engineering model and the Realistic lab; the flat Engineering schematic has no camera." },
+  view_mode: { title: "Viewing Mode", desc: "How the chamber walls are drawn in the 3D views: Standard (solid), Cutaway (part of the wall removed), See-through (glass) or Blueprint (technical-drawing look). The Engineering model also offers Exploded and Measurement chain." },
+  scope_trigger: { title: "Oscilloscope Trigger", desc: "The rule that decides where a wave starts on the screen. When the signal crosses the trigger level in the chosen direction, the scope starts drawing, so repeating waves sit still instead of sliding. Auto keeps drawing even without a trigger, Normal waits for one, Single captures once." },
+  ldv_scan: { title: "3D Scan (LDV)", desc: "A timed job in which the scanning mirrors steer the laser spot over the sphere and the vibrometer measures the velocity of each point. When it finishes, the Scan results panel shows a rotating 3D sphere, a surface map and the numbers." },
+  ldv_mode_shape: { title: "Mode Shape", desc: "The pattern of in-and-out movement over the whole sphere surface at one resonance. Where the surface moves a lot is an antinode; where it stays still is a node. The mode shape tells you which vibration the VNA is exciting." },
+  operator_profile: { title: "Operator Profile", desc: "Your name, nickname and initials. Initials are stamped on every journal entry, alarm, notebook note and export, together with the real date and time, and Dr. Wire uses your nickname to greet you. It is stored only in this browser." },
+  live_operation: { title: "Live Operation Window", desc: "An always-visible window that animates each action as it happens, highlights the equipment involved, and explains in plain English what it does and what to watch for next." },
+  alert_states: { title: "Running / Stuck / Error / Needs attention", desc: "The four animated alert words. Running: the part is working. Stuck: it started something that cannot continue until you fix a blocker (for example pumping with the door open). Error: a fault or critical alarm. Needs attention: it works, but something should be checked (shielding off, calibration expired)." }
 };
 
 const TUTORIAL_VIDEOS = [
@@ -114,18 +137,22 @@ const initialState = {
     power: false, shutter: false, range: "20 mm/s/V", filter: "10 MHz", grid: 64,
     laserPower: 50, focus: 0, alignmentX: 0, alignmentY: 0, opticalReturn: 85,
     signalQuality: "good", decoderLocked: true, measurementMode: "velocity",
-    scanPattern: "grid", scanProgress: 0, scanActive: false, modeShapeData: []
+    scanPattern: "grid", scanProgress: 0, scanActive: false, modeShapeData: [],
+    mode: "2,0", scanScenario: "modemap", scanTitle: "", scanId: null as string | null, scanDone: 0, scanTotal: 0, scanStalled: false, scanStalledReason: "",
+    scanResult: null as any, scanHistory: [] as any[], scanNew: false, scanCount: 0, reference: null as any
   },
   scope: {
     power: false, running: true, timebase: 10, scale: 0.5,
-    triggerMode: "edge", triggerSource: "CH1", triggerLevel: 0, acquisitionMode: "sample",
+    triggerMode: "edge", triggerSource: "CH1", triggerLevel: 0, triggerSlope: "rising", holdMode: "auto", acquisitionMode: "sample",
     channels: {
       ch1: { enabled: true, scale: 0.5, offset: 0, coupling: "DC", source: "rf_monitor" },
       ch2: { enabled: true, scale: 0.2, offset: 0, coupling: "AC", source: "ldv_output" },
       ch3: { enabled: false, scale: 1, offset: 0, coupling: "DC", source: "clock_reference" },
       ch4: { enabled: false, scale: 1, offset: 0, coupling: "DC", source: "environmental_probe" }
     },
-    trace: [], fftEnabled: false, cursorA: null, cursorB: null
+    trace: [], fftEnabled: false, cursorA: null, cursorB: null,
+    channelTraces: { ch1: [], ch2: [], ch3: [], ch4: [] }, measure: { ch1: null, ch2: null, ch3: null, ch4: null }, triggerState: "stopped", acqCount: 0, sampleRate: 0,
+    bootProgress: 0, booting: false, scenario: null as string | null, persist: false, math: "off", fftChannel: "ch1", showMeasure: true
   },
   model: {
     location: true, temperature: true, pressure: true, rfNoise: true, vibration: true,
@@ -144,6 +171,7 @@ const initialState = {
   },
   ui: { active: "dashboard", modal: null, alarmsOpen: false, helpModal: null, glossaryOpen: false, manualOpen: false, peerModal: false, videoModal: false, activeVideo: TUTORIAL_VIDEOS[0], confirmModal: null, validatorModalOpen: false, wizardOpen: false, cmdPaletteOpen: false, navCollapsed: false, calModalOpen: false },
   notebook: [],
+  operator: { ...EMPTY_OPERATOR },
   faultDrill: { hiddenKey: null, revealed: false, startedAt: null },
   badges: [],
   activeChallenge: null,
@@ -164,9 +192,13 @@ const resolveHelp = (key) => {
 };
 
 function addEvent(state, text, level: SimulationEvent['level'] = "info", subsystem = "SYSTEM", x = null, y = null, z = null, runId = null) {
+  const stamp = new Date();
   const ev: SimulationEvent = {
     id: createIdentifier('event'),
-    time: now(),
+    time: stamp.toLocaleTimeString(),
+    iso: stamp.toISOString(),
+    date: stamp.toLocaleDateString(),
+    operator: operatorTag(state.operator),
     simulationTime: Math.floor(state.facility.simulationTime),
     subsystem,
     text,
@@ -179,7 +211,8 @@ function addEvent(state, text, level: SimulationEvent['level'] = "info", subsyst
 
 function addAlarm(state, text, severity = "warning") {
   if (state.alarms.some(a => a.text === text && !a.acknowledged)) return state;
-  const alarm = { id: Math.random(), time: now(), text, severity, acknowledged: false };
+  const stamp = new Date();
+  const alarm = { id: Math.random(), time: stamp.toLocaleTimeString(), iso: stamp.toISOString(), date: stamp.toLocaleDateString(), operator: operatorTag(state.operator), text, severity, acknowledged: false };
   return { ...state, alarms: [alarm, ...state.alarms].slice(0, 60) };
 }
 
@@ -312,7 +345,7 @@ function getCopilotAdvice(state, validation) {
 function reducer(state, action) {
   switch (action.type) {
     case "POWER": {
-      if (!action.value) return addEvent({ ...initialState, notebook: state.notebook, faultDrill: initialState.faultDrill, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
+      if (!action.value) return addEvent({ ...initialState, notebook: state.notebook, operator: state.operator, faultDrill: initialState.faultDrill, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
       return addEvent({ ...state, facility: { ...state.facility, power: true } }, "MAIN BREAKER closed; facility AC online.", "info", "SYSTEM");
     }
     case "SET_MODE": {
@@ -330,6 +363,46 @@ function reducer(state, action) {
       return next;
     }
     case "SET_UI": return { ...state, ui: { ...state.ui, ...action.patch } };
+    case "SET_OPERATOR": {
+      const operator = sanitizeProfile(action.profile);
+      if (action.silent) return { ...state, operator };
+      return addEvent({ ...state, operator }, hasOperator(operator) ? `Operator on duty: ${operatorFullName(operator)} [${operatorTag(operator)}].` : "Operator profile cleared.", "info", "SYSTEM");
+    }
+    case "SCOPE_AUTOSET": {
+      if (!state.scope.power) return addAlarm(state, "Autoset ignored: the oscilloscope is off.", "warning");
+      const a = autoset(state, trueFrequency(state)), channels = { ...state.scope.channels };
+      for (const id of Object.keys(channels)) channels[id] = { ...channels[id], ...a.channels[id] };
+      return addEvent({ ...state, scope: { ...state.scope, timebase: a.timebase, channels, triggerSource: a.triggerSource, triggerLevel: a.triggerLevel, scale: channels.ch1.scale, holdMode: "auto", running: true } }, `Oscilloscope autoset: ${a.timebase} µs/div, trigger ${a.triggerSource} at ${a.triggerLevel} V.`, "info", "SCOPE");
+    }
+    case "SCOPE_SCENARIO": {
+      const sc = SCOPE_SCENARIO_BY_ID[action.id];
+      if (!sc) return state;
+      return addEvent({ ...state, scope: { ...state.scope, ...scenarioPatch(state, sc) } }, `Oscilloscope scenario loaded: ${sc.title}.`, "info", "SCOPE");
+    }
+    case "LDV_SCAN_START": {
+      const l = state.ldv, scenario = LDV_SCENARIO_BY_ID[action.scenario] ? action.scenario : "modemap";
+      if (!state.facility.power || !l.power) return addAlarm(state, "3D scan rejected: power on the LDV first.", "warning");
+      if (!l.shutter) return addAlarm(state, "3D scan rejected: open the laser shutter first.", "warning");
+      if (state.chamber.doorOpen) return addAlarm(state, "3D scan rejected: close the chamber door (laser interlock).", "critical");
+      if (l.scanActive) return addAlarm(state, "A 3D scan is already running.", "warning");
+      const total = scanPointTotal(scenario, l.grid), title = LDV_SCENARIO_BY_ID[scenario].title;
+      const ldv = { ...l, scanActive: true, scanProgress: 0, scanDone: 0, scanTotal: total, scanScenario: scenario, scanTitle: title, scanId: createIdentifier("scan"), scanStalled: false, scanStalledReason: "", scanNew: false };
+      return addEvent({ ...state, ldv }, `LDV 3D scan started: ${title} (${total} points).`, "info", "LDV");
+    }
+    case "LDV_SCAN_CANCEL": {
+      if (!state.ldv.scanActive) return state;
+      return addEvent({ ...state, ldv: { ...state.ldv, scanActive: false, scanProgress: 0, scanDone: 0, scanStalled: false, scanStalledReason: "" } }, "LDV 3D scan cancelled.", "warning", "LDV");
+    }
+    case "LDV_SCAN_SEEN": return state.ldv.scanNew ? { ...state, ldv: { ...state.ldv, scanNew: false } } : state;
+    case "LDV_SET_REFERENCE": {
+      const r = state.ldv.scanResult;
+      if (!r) return addAlarm(state, "No scan result to keep as a reference yet.", "warning");
+      return addEvent({ ...state, ldv: { ...state.ldv, reference: { id: r.id, title: r.title, f0: r.f0, peakVel: r.peakVel, position: r.position, q: r.q, clock: r.clock } } }, `LDV reference kept: ${r.title} at ${r.position.map(v => v.toFixed(1)).join(", ")} mm.`, "info", "LDV");
+    }
+    case "LDV_AUTO_ALIGN": {
+      if (!state.ldv.power) return addAlarm(state, "Auto-align needs the LDV powered on.", "warning");
+      return addEvent({ ...state, ldv: { ...state.ldv, alignmentX: 0, alignmentY: 0, focus: 0 } }, state.failures.ldvMisalign ? "LDV auto-align moved the beam to the optimum, but the misalignment fault still limits the return." : "LDV auto-align: beam centred and focused.", "info", "LDV");
+    }
     case "EVENT": return addEvent(state, action.text, action.level, action.subsystem || "SYSTEM", action.x, action.y, action.z, action.runId);
     case "ALARM": return addAlarm(state, action.text, action.severity);
     case "ACK_ALARM": return { ...state, alarms: state.alarms.map(a => a.id === action.id ? { ...a, acknowledged: true } : a) };
@@ -503,16 +576,7 @@ function buildSweep(state) {
 }
 
 function buildScope(state) {
-  return Array.from({ length: 250 }, (_, i) => {
-    const t = i / 250;
-    let v = (noise(i + state.facility.simulationTime, state.facility.seed) - .5) * .1;
-    if (state.vna.rf) v += Math.sin(t * Math.PI * 20) * .55;
-    if ((!state.chamber.faraday && state.model.rfNoise) || state.failures.emiSpike) v += Math.sin(t * Math.PI * 6) * .65 + (noise(i * 5, 99) - .5) * .4;
-    if (!state.chamber.isolation && state.model.vibration) v += Math.sin(t * Math.PI * 1.3) * .4;
-    if (state.chamber.turbo) v += Math.sin(t * Math.PI * 3.1) * .12;
-    if (!state.clock.locked || state.clock.cableFault) v += (noise(i, 88) - .5) * 0.3;
-    return { t: i, value: v };
-  });
+  return acquireScope(state, state.facility.simulationTime, trueFrequency(state)).trace;
 }
 
 function getPumpLifecycle(state){
@@ -577,14 +641,15 @@ function tick(state, dt) {
   }
 
   const scope = { ...state.scope };
-  if (scope.power && scope.running) scope.trace = buildScope({ ...state, chamber, clock, vna, scope, facility: { ...state.facility, simulationTime: elapsed } });
+  // The scope runs a short power-on self-test, then draws live waveforms (acquired below, once the stage and laser are updated).
+  if (scope.power) { scope.bootProgress = Math.min(1, (scope.bootProgress || 0) + dt * speed / 2.2); scope.booting = scope.bootProgress < 1; }
+  else { scope.bootProgress = 0; scope.booting = false; scope.triggerState = "stopped"; }
 
 
   const envNoise=(!chamber.isolation?18:0)+(!chamber.faraday?10:0)+(Math.abs(chamber.temperature-chamber.targetTemp)>0.03?8:0);
   const ldv={...state.ldv}; ldv.scanPhase=((ldv.scanPhase||0)+dt*(state.ldv.shutter?0.8:0))%1;
   const alignmentPenalty=Math.min(75,(Math.abs(ldv.alignmentX||0)+Math.abs(ldv.alignmentY||0))*4+Math.abs(ldv.focus||0)*3)+(state.failures.ldvMisalign?65:0);
   ldv.opticalQuality=Math.max(0,100-envNoise-alignmentPenalty-(state.failures.stageBacklash?10:0)); ldv.laserReturn=ldv.power&&ldv.shutter?ldv.opticalQuality/100:0;
-  scope.persistence=Math.min(1,(scope.persistence||0)+(scope.running?dt*0.7:-dt*0.5)); scope.triggerState=scope.running?(envNoise>20?'unstable':'triggered'):'armed';
 const stage = { ...state.stage };
   const servoDt = Math.min(0.08, dt) * Math.min(4, Math.max(1, Math.sqrt(speed)));
   const maxVel = 14, accel = 42, decel = 48, posTol = 0.025, velTol = 0.05;
@@ -617,7 +682,41 @@ const stage = { ...state.stage };
     stage.moving = true; stage.settling = totalErr < 0.4; stage.settleTime = 0;
   }
   stage.positionError = totalErr; stage.velocity = peakVel;
+  const liveState = { ...state, chamber, clock, vna, ldv, stage, scope, facility: { ...state.facility, simulationTime: elapsed } };
+  if (scope.power && !scope.booting) {
+    if (scope.running) {
+      if (!scope.acqCount || Math.floor(elapsed * 12) !== Math.floor(state.facility.simulationTime * 12)) {
+        const acq = acquireScope(liveState, elapsed, trueFrequency(liveState), scope);
+        Object.assign(scope, acq);
+        if (scope.holdMode === "single" && acq.triggerFound) { scope.running = false; scope.triggerState = "stopped"; }
+      }
+    } else if (scope.triggerState !== "armed") scope.triggerState = "stopped";
+  }
+  // LDV 3D scan job: a timed sweep of the laser spot that stalls (and keeps its progress) when conditions are bad.
+  let scanFinished: any = null, scanCancelled = false;
+  if (ldv.scanActive) {
+    if (!ldv.power) { ldv.scanActive = false; ldv.scanProgress = 0; ldv.scanDone = 0; ldv.scanStalled = false; ldv.scanStalledReason = ""; scanCancelled = true; }
+    else {
+      const reason = stallReason(liveState);
+      ldv.scanStalled = !!reason; ldv.scanStalledReason = reason;
+      if (!reason) {
+        const total = ldv.scanTotal || 1;
+        ldv.scanDone = Math.min(total, (ldv.scanDone || 0) + (total / scanSeconds(ldv.scanScenario, ldv.grid)) * dt * speed);
+        ldv.scanProgress = ldv.scanDone / total;
+      }
+      if ((ldv.scanDone || 0) >= (ldv.scanTotal || 1)) {
+        const res = generateScan(liveState, ldv.scanScenario, {
+          f0: trueFrequency(liveState), grid: ldv.grid, id: ldv.scanId || "scan", iso: new Date().toISOString(), clock: now(), operator: operatorTag(state.operator),
+          freqAt: (x, y, z) => trueFrequency({ ...liveState, stage: { ...stage, actualX: x, actualY: y, actualZ: z } }),
+        });
+        ldv.scanResult = res; ldv.scanHistory = [res, ...(ldv.scanHistory || [])].slice(0, 8); ldv.scanNew = true; ldv.scanCount = (ldv.scanCount || 0) + 1;
+        ldv.scanActive = false; ldv.scanProgress = 1; ldv.modeShapeData = res.field || []; scanFinished = res;
+      }
+    }
+  }
   let next = { ...state, chamber, clock, vna, scope, ldv, stage, facility: { ...state.facility, simulationTime: elapsed } };
+  if (scanFinished) next = addEvent(next, `LDV 3D scan complete: ${scanFinished.title} (${scanFinished.verdict}). Results are in the LDV page, Scan results panel.`, scanFinished.verdict === "poor" ? "warning" : "info", "LDV");
+  if (scanCancelled) next = addEvent(next, "LDV 3D scan cancelled because the LDV was powered off.", "warning", "LDV");
   if (!stage.moving && !stage.settling && stage.lastCompletedMotionId !== stage.motionId) {
     stage.lastCompletedMotionId = stage.motionId;
     next = addEvent(next, `Stage settled at X ${stage.actualX.toFixed(3)}, Y ${stage.actualY.toFixed(3)}, Z ${stage.actualZ.toFixed(3)} mm.`, "info", "CHAMBER", stage.actualX, stage.actualY, stage.actualZ);
@@ -648,6 +747,7 @@ export default function MetrologyLab() {
   const [fullscreenNotice, setFullscreenNotice] = useState("");
   const [wideDock, setWideDock] = useState(() => window.matchMedia('(min-width: 1100px)').matches);
   const labRootRef = useRef<HTMLDivElement>(null);
+  const [operatorOpen, setOperatorOpen] = useState(false);
   const resizeStart = useRef<{ coordinate: number; size: number } | null>(null);
   useEffect(() => {
     const media = window.matchMedia('(min-width: 1100px)');
@@ -754,6 +854,16 @@ export default function MetrologyLab() {
     timer.current = window.setInterval(() => dispatch({ type: "TICK", dt: 0.05 }), 50);
     return () => clearInterval(timer.current);
   }, []);
+
+  // The person at the bench: restored from this browser once, then saved only when they press Save.
+  useEffect(() => {
+    const saved = loadOperator();
+    if (hasOperator(saved)) dispatch({ type: "SET_OPERATOR", profile: saved, silent: true });
+  }, []);
+  const saveProfile = useCallback((profile) => { const clean = sanitizeProfile(profile); saveOperator(clean); dispatch({ type: "SET_OPERATOR", profile: clean }); }, []);
+  const clearProfile = useCallback(() => { saveOperator({ ...EMPTY_OPERATOR }); dispatch({ type: "SET_OPERATOR", profile: { ...EMPTY_OPERATOR } }); }, []);
+  // Every change in the lab (any button, slider, the palette, Dr. Wire) is explained in the live operation window.
+  useEffect(() => installActivityTracker(cb => onLabTransition(cb)), []);
 
   useEffect(() => {
     const e=state.experiment;
@@ -913,8 +1023,8 @@ export default function MetrologyLab() {
 
   const exportJournalCsv = () => {
     const rows = [
-      ["timestamp", "sim_time", "subsystem", "severity", "x", "y", "z", "run_id", "message"],
-      ...state.events.map(e => [e.time, e.simulationTime, e.subsystem, e.level, e.x ?? "", e.y ?? "", e.z ?? "", e.runId ?? "", `"${e.text.replace(/"/g, '""')}"`])
+      ["date", "time", "iso_timestamp", "operator", "sim_time", "subsystem", "severity", "x", "y", "z", "run_id", "message"],
+      ...state.events.map(e => [e.date ?? "", e.time, e.iso ?? "", e.operator ?? "", e.simulationTime, e.subsystem, e.level, e.x ?? "", e.y ?? "", e.z ?? "", e.runId ?? "", `"${e.text.replace(/"/g, '""')}"`])
     ];
     const blob = new Blob([rows.map(r => r.join(",")).join("\n")], { type: "text/csv" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `sphere-journal-${Date.now()}.csv`; a.click(); URL.revokeObjectURL(a.href);
@@ -979,13 +1089,14 @@ export default function MetrologyLab() {
       <WorkspaceHeader state={state} navOptions={navGroups.flatMap(group => group.items.map(([id, label]) => ({ id, label })))} focus={focusMode} fullscreen={fullscreen} journalOpen={journalOpen && !focusMode} alarms={unresolved}
         onNavigate={navigate} onNavigation={toggleNavigation} onJournal={toggleJournal} onFocus={() => { setFocusMode(v => !v); setNavDrawerOpen(false); }} onFullscreen={toggleFullscreen}
         onSearch={() => set("ui", { cmdPaletteOpen: true })} onTool={tool => set("ui", { [({ wizard: "wizardOpen", videos: "videoModal", procedure: "manualOpen", glossary: "glossaryOpen" })[tool]]: true })}
-        onMode={mode => dispatch({ type: "SET_MODE", mode })} onSpeed={speed => set("facility", { speed })} detailsOpen={detailsOpen} onDetails={() => setDetailsOpen(v => !v)} settings={<FxSettings fx={fx} setFx={setFx} />}
+        operator={state.operator} onOperator={() => setOperatorOpen(true)} onMode={mode => dispatch({ type: "SET_MODE", mode })} onSpeed={speed => set("facility", { speed })} detailsOpen={detailsOpen} onDetails={() => setDetailsOpen(v => !v)} settings={<FxSettings fx={fx} setFx={setFx} />}
         onPower={() => {
           if (state.facility.power) set("ui", { confirmModal: { title: "Open Main Breaker?", desc: "Opening the main breaker will cut AC power to all instruments and reset session state.", onConfirm: () => { dispatch({ type: "POWER", value: false }); set("ui", { confirmModal: null }); } } });
           else dispatch({ type: "POWER", value: true });
         }}
       />
       <div className="workspace-status" aria-label="Essential laboratory status">
+        <AlertStrip state={state} onOpen={() => navigate("overview")} />
         <span className="status-chip"><span>Clock</span><strong>{clockStatus}</strong></span>
         <span className="status-chip"><span>Pressure</span><strong>{fmtPressure(state.chamber.pressure)}</strong></span>
         <span className={`status-chip ${tempStable ? "" : "status-warning"}`}><span>Temp</span><strong>{state.chamber.temperature.toFixed(2)} °C</strong></span>
@@ -1095,6 +1206,7 @@ export default function MetrologyLab() {
                   const navSubsystem = ({vna:"vna",scope:"scope",ldv:"ldv",clock:"clock",chamber:"chamber",spatial:"spatial",runs:"experiment",overview:"facility"})[id];
                   const navState = navSubsystem ? getSubsystemVisualState(state, navSubsystem) : "standby";
                   const navToken = visualToken(active === id ? "selected" : navState);
+                  const navAlert = PAGE_ALERT_KEYS[id] ? worstAlert(state, id === "overview" ? ALERT_ALL : PAGE_ALERT_KEYS[id]) : null;
                   return (
                     <button
                       key={id}
@@ -1106,7 +1218,8 @@ export default function MetrologyLab() {
                     >
                       <span className={`h-2 w-2 shrink-0 rounded-full ${navToken.led}`} style={{boxShadow:navState==="offline"?"none":`0 0 6px ${navToken.hex}`}} aria-hidden="true"/><Icon className="h-4 w-4 shrink-0" />
                       {!collapsed && <span className="truncate">{label}</span>}
-                      {isAlarmPage && (
+                      {navAlert && navAlert.level !== "idle" && <span className="al-nav" title={`${navAlert.label}: ${navAlert.detail}`}><AlertGlyph level={navAlert.level} size={15} /></span>}
+                      {isAlarmPage && navAlert?.level === "idle" && (
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-rose-500 animate-ping" />
                       )}
                     </button>
@@ -1129,15 +1242,15 @@ export default function MetrologyLab() {
         </aside>
 
         <section className="workspace-instrument min-w-0 bg-zinc-950 flex flex-col" aria-label="Active instrument workspace" tabIndex={-1}>
-          {active === "dashboard" && <Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} />}
+          {active === "dashboard" && <><PageAlert k="facility" name="Facility" onGo={navigate} /><Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} onSaveOperator={saveProfile} /></>}
           {active === "overview" && <LabOverview state={state} dispatch={dispatch} quality={recordQuality} reduced={FX.reduced || FX.hide} lab={{ getSubsystemVisualState, visualToken, fmtPressure, WARMUP_SECONDS, resolveHelp }} />}
-          {active === "chamber" && <Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
-          {active === "spatial" && <SpatialField state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
-          {active === "vna" && <Vna sweep={stableSweep} HelpInfo={HelpInfo} />}
+          {active === "chamber" && <><PageAlert k={["chamber", "pumps", "stage"]} name="Chamber & stage" onGo={navigate} /><Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
+          {active === "spatial" && <><PageAlert k="spatial" name="Data quality" onGo={navigate} /><SpatialField state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
+          {active === "vna" && <><PageAlert k="vna" name="VNA" onGo={navigate} /><Vna sweep={stableSweep} HelpInfo={HelpInfo} /></>}
           {active === "ldv" && <Ldv state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "scope" && <Scope HelpInfo={HelpInfo} />}
-          {active === "clock" && <Clock state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
-          {active === "runs" && <Runs state={state} dispatch={dispatch} exportCsv={exportCsv} exportJson={exportJson} sweep={performSweep} HelpInfo={HelpInfo} />}
+          {active === "clock" && <><PageAlert k="clock" name="Reference clock" onGo={navigate} /><Clock state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
+          {active === "runs" && <><PageAlert k="experiment" name="Experiment run" onGo={navigate} /><Runs state={state} dispatch={dispatch} exportCsv={exportCsv} exportJson={exportJson} sweep={performSweep} HelpInfo={HelpInfo} /></>}
           {active === "training" && <TrainingMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "copilot" && <LabCopilot state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
@@ -1155,7 +1268,7 @@ export default function MetrologyLab() {
             onKeyDown={e => { const keys = wideDock ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown']; if (keys.includes(e.key)) { e.preventDefault(); resizeJournal((wideDock ? journalWidth : journalHeight) + (e.key === keys[0] ? 24 : -24)); } else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); resizeJournal(e.key === 'Home' ? 0 : 1000); } }}
           />
           <div className="journal-toolbar">
-            <strong>Operations journal</strong>
+            <strong>Operations journal</strong><LabClock variant="screen" />
             <button className="chrome-button icon-button" aria-label="Export Journal CSV" title="Export CSV" onClick={exportJournalCsv}><Download size={15} /></button>
             <button className="chrome-button icon-button" aria-label="Collapse operations journal" title="Collapse journal" onClick={() => setJournalOpen(false)}><X size={16} /></button>
           </div>
@@ -1432,6 +1545,9 @@ export default function MetrologyLab() {
           onOpen={(k) => set("ui", { helpModal: resolveHelp(k) })}
         />
       )}
+
+      {operatorOpen && <OperatorModal operator={state.operator} onSave={p => { saveProfile(p); }} onClear={clearProfile} onClose={() => setOperatorOpen(false)} />}
+      <LiveOperationWindow onOpenPage={navigate} />
     </div>
   );
 }
@@ -1603,8 +1719,9 @@ function StartupWizard({ state, dispatch, close }) {
       case 5: return state.chamber.pressure < 1e-3;
       case 6: return Math.abs(state.chamber.temperature - state.chamber.targetTemp) < 0.1;
       case 7: return state.vna.power && state.vna.rf && state.vna.calibrated;
-      case 8: return state.ldv.power && state.ldv.shutter;
-      case 9: return state.stage.homed;
+      case 8: return state.scope.power && !state.scope.booting;
+      case 9: return state.ldv.power && state.ldv.shutter;
+      case 10: return state.stage.homed;
       default: return true;
     }
   };
@@ -1618,8 +1735,9 @@ function StartupWizard({ state, dispatch, close }) {
       case 5: dispatch({ type: "PATCH", domain: "chamber", patch: { vent: false, roughing: true, turbo: true, pressure: 1e-4 } }); break;
       case 6: dispatch({ type: "PATCH", domain: "chamber", patch: { thermostat: true, temperature: state.chamber.targetTemp } }); break;
       case 7: dispatch({ type: "PATCH", domain: "vna", patch: { power: true, rf: true } }); dispatch({ type: "CALIBRATE_VNA", calType: "SOLT 1-Port" }); break;
-      case 8: dispatch({ type: "PATCH", domain: "ldv", patch: { power: true, shutter: true } }); break;
-      case 9: dispatch({ type: "HOME_STAGE" }); break;
+      case 8: dispatch({ type: "PATCH", domain: "scope", patch: { power: true, running: true } }); break;
+      case 9: dispatch({ type: "PATCH", domain: "ldv", patch: { power: true, shutter: true } }); break;
+      case 10: dispatch({ type: "HOME_STAGE" }); break;
       default: break;
     }
   };
@@ -1632,53 +1750,68 @@ function StartupWizard({ state, dispatch, close }) {
     { num: 5, title: "High-Vacuum Turbo Pump", desc: "Engage turbomolecular pump to reach deep vacuum (< 1e-3 Torr)." },
     { num: 6, title: "Thermal Stabilization", desc: "Allow active thermostat to settle temperature drift to < 0.03°C." },
     { num: 7, title: "Calibrate VNA & Enable RF", desc: "Power Keysight VNA, enable RF output, and execute calibration." },
-    { num: 8, title: "Engage LDV System", desc: "Power Polytec vibrometer and open mechanical laser shutter." },
-    { num: 9, title: "Home XYZ Stage", desc: "Home precision non-magnetic positioning stage to reference origin (0,0,0)." }
+    { num: 8, title: "Power On the Oscilloscope", desc: "Switch on the Tektronix 5 Series scope. It runs a short self-test, then shows live waveforms: the RF tone, the vibrometer signal, the clock and the room around the chamber. Open the Oscilloscope page afterwards to try the guided scenarios." },
+    { num: 9, title: "Engage LDV System", desc: "Power Polytec vibrometer and open mechanical laser shutter." },
+    { num: 10, title: "Home XYZ Stage", desc: "Home precision non-magnetic positioning stage to reference origin (0,0,0)." }
   ];
+  const remaining = steps.filter(x => !isStepDone(x.num)).length;
+  const doAll = () => { for (const x of steps) if (!isStepDone(x.num)) autoFixStep(x.num); };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-      <div className="bg-zinc-900 border border-emerald-500/50 rounded-xl w-full max-w-xl shadow-2xl overflow-hidden font-sans flex flex-col">
-        <div className="bg-zinc-800 p-4 border-b border-zinc-700 flex justify-between items-center">
+      <div className="bg-zinc-900 border border-emerald-500/50 rounded-xl w-full max-w-3xl max-h-[92vh] shadow-2xl overflow-hidden font-sans flex flex-col" role="dialog" aria-modal="true" aria-label="Facility bring-up and startup wizard">
+        <div className="bg-zinc-800 p-4 border-b border-zinc-700 flex justify-between items-center gap-3">
           <h3 className="font-bold text-emerald-400 flex items-center gap-2"><Wrench size={18}/> Facility Bring-Up & Startup Wizard</h3>
-          <button onClick={close} className="text-gray-400 hover:text-white"><X size={20}/></button>
+          <span className="ml-auto"><LabClock variant="screen" /></span>
+          <button onClick={close} className="text-gray-400 hover:text-white" aria-label="Close startup wizard"><X size={20}/></button>
         </div>
 
-        <div className="p-6 space-y-5 flex-1 overflow-y-auto">
-          <div className="flex justify-between text-xs text-zinc-400 font-mono">
-            <span>Step {step} of {steps.length}</span>
-            <span>Estimated time: {(steps.length - step + 1) * 2}s simulated</span>
-          </div>
+        <div className="p-5 flex-1 overflow-y-auto sc-grid">
+          <StartupChecklist state={state} current={step} onPick={setStep} />
+          <div className="space-y-4">
+            <div className="flex justify-between text-xs text-zinc-400 font-mono">
+              <span>Step {step} of {steps.length}</span>
+              <span>{remaining === 0 ? "All steps complete" : `${remaining} step${remaining === 1 ? "" : "s"} still to do`}</span>
+            </div>
 
-          <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
-            <div className="bg-emerald-500 h-full transition-all duration-300" style={{ width: `${(step / steps.length) * 100}%` }} />
-          </div>
+            <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
+              <div className="bg-emerald-500 h-full transition-all duration-300" style={{ width: `${(step / steps.length) * 100}%` }} />
+            </div>
 
-          <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800 space-y-2">
-            <h4 className="font-bold text-base text-zinc-100 flex items-center gap-2">
-              {steps[step - 1].title}
-              {isStepDone(step) ? <CheckCircle2 size={16} className="text-emerald-400" /> : <AlertTriangle size={16} className="text-amber-400" />}
-            </h4>
-            <p className="text-sm text-zinc-300 leading-relaxed">{steps[step - 1].desc}</p>
-          </div>
+            <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800 space-y-2">
+              <h4 className="font-bold text-base text-zinc-100 flex items-center gap-2">
+                {steps[step - 1].title}
+                {isStepDone(step) ? <CheckCircle2 size={16} className="text-emerald-400" /> : <AlertTriangle size={16} className="text-amber-400" />}
+              </h4>
+              <p className="text-sm text-zinc-300 leading-relaxed">{steps[step - 1].desc}</p>
+              {step === 8 && <ScopePowerArt power={state.scope.power} booting={!!state.scope.booting} progress={state.scope.bootProgress || 0} />}
+              {step === 8 && <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={!state.facility.power} onClick={() => dispatch({ type: "PATCH", domain: "scope", patch: { power: !state.scope.power, running: true } })} className={`rounded border px-3 py-1.5 text-xs font-bold ${state.scope.power ? "border-amber-500 bg-amber-950/50 text-amber-200" : "border-zinc-600 bg-zinc-800 text-zinc-200"} disabled:opacity-40`}>{state.scope.power ? "Switch scope OFF" : "Switch scope ON"}</button>
+                <button type="button" onClick={() => { close(); dispatch({ type: "SET_UI", patch: { active: "scope" } }); }} className="rounded border border-sky-600 px-3 py-1.5 text-xs font-bold text-sky-200">Open Oscilloscope page →</button>
+              </div>}
+            </div>
 
-          <div className="flex gap-2">
-            {isTraining && (
-              <button
-                onClick={() => autoFixStep(step)}
-                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition"
-              >
-                Do this for me (Training Auto-Fix)
-              </button>
-            )}
-            {!isTraining && (
-              <button
-                onClick={() => setStep(s => Math.min(steps.length, s + 1))}
-                className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded text-xs transition"
-              >
-                Skip for Free-Lab
-              </button>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {isTraining && (
+                <button
+                  onClick={() => autoFixStep(step)}
+                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition"
+                >
+                  Do this for me (Training Auto-Fix)
+                </button>
+              )}
+              {isTraining && remaining > 1 && (
+                <button onClick={doAll} className="py-2 px-3 bg-emerald-900 hover:bg-emerald-800 border border-emerald-600 text-emerald-100 font-bold rounded text-xs transition">Do all {remaining} remaining steps</button>
+              )}
+              {!isTraining && (
+                <button
+                  onClick={() => setStep(s => Math.min(steps.length, s + 1))}
+                  className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded text-xs transition"
+                >
+                  Skip for Free-Lab
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1908,14 +2041,14 @@ function LabNotebook({ state, dispatch, validationResult, f0 }) {
     if (!text.trim()) return;
     const c = state.chamber;
     dispatch({ type: "NOTEBOOK_ADD", entry: {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, tag, text: text.trim(), time: now(), simTime: Math.floor(state.facility.simulationTime),
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, tag, text: text.trim(), time: new Date().toLocaleString(), operator: operatorTag(state.operator), simTime: Math.floor(state.facility.simulationTime),
       snapshot: { f0Hz: Number(f0.toFixed(3)), tempC: Number(c.temperature.toFixed(3)), pressure: fmtPressure(c.pressure), clockLocked: state.clock.locked, validation: validationResult.overall, stage: [state.stage.actualX ?? state.stage.x, state.stage.actualY ?? state.stage.y, state.stage.actualZ ?? state.stage.z].map(v => Number(v.toFixed(2))) }
     } });
     setText("");
   };
   const shown = state.notebook.filter(n => filter === "all" || n.tag === filter);
   const exportMd = () => {
-    const md = ["# S.P.H.E.R.E. Lab Notebook", "", ...[...state.notebook].reverse().map(n => `## [${n.tag}] ${n.time} (sim t=${n.simTime}s)\n\n${n.text}\n\n- f0: ${n.snapshot.f0Hz} Hz\n- Temp: ${n.snapshot.tempC} °C\n- Pressure: ${n.snapshot.pressure}\n- Clock locked: ${n.snapshot.clockLocked}\n- Validation: ${n.snapshot.validation}\n- Stage XYZ: ${n.snapshot.stage.join(", ")} mm\n`)].join("\n");
+    const md = ["# S.P.H.E.R.E. Lab Notebook", "", ...[...state.notebook].reverse().map(n => `## [${n.tag}] ${n.time}${n.operator ? ` · operator ${n.operator}` : ""} (sim t=${n.simTime}s)\n\n${n.text}\n\n- f0: ${n.snapshot.f0Hz} Hz\n- Temp: ${n.snapshot.tempC} °C\n- Pressure: ${n.snapshot.pressure}\n- Clock locked: ${n.snapshot.clockLocked}\n- Validation: ${n.snapshot.validation}\n- Stage XYZ: ${n.snapshot.stage.join(", ")} mm\n`)].join("\n");
     downloadBlob(new Blob([md], { type: "text/markdown;charset=utf-8" }), "sphere-lab-notebook.md");
   };
   return (
@@ -1939,7 +2072,7 @@ function LabNotebook({ state, dispatch, validationResult, f0 }) {
         <ul className="space-y-2">
           {shown.map(n => (
             <li key={n.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-              <div className="flex items-center gap-2 text-[11px] text-zinc-500"><span className="rounded bg-sky-500/20 px-1.5 py-0.5 font-bold text-sky-300">{n.tag}</span><span>{n.time}</span><span>sim t={n.simTime}s</span>
+              <div className="flex items-center gap-2 text-[11px] text-zinc-500"><span className="rounded bg-sky-500/20 px-1.5 py-0.5 font-bold text-sky-300">{n.tag}</span><span>{n.time}</span>{n.operator && <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-sky-200">[{n.operator}]</span>}<span>sim t={n.simTime}s</span>
                 <button onClick={() => dispatch({ type: "NOTEBOOK_DELETE", id: n.id })} className="ml-auto text-zinc-500 hover:text-rose-400" aria-label="Delete entry"><X size={14} /></button></div>
               <div className="mt-1 whitespace-pre-wrap text-sm text-zinc-100">{n.text}</div>
               <div className="mt-2 font-mono text-[10px] text-zinc-500">f0 {n.snapshot.f0Hz} Hz · {n.snapshot.tempC} °C · {n.snapshot.pressure} · clock {n.snapshot.clockLocked ? "locked" : "unlocked"} · {n.snapshot.validation} · XYZ {n.snapshot.stage.join("/")}</div>
@@ -2487,7 +2620,7 @@ function twinParts(st) {
   ];
 }
 
-function DigitalTwin({ state, dispatch }) {
+function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, onReset = null }: { state: any; dispatch: any; command?: { cam?: string; mode?: string; n: number } | null; hideToolbars?: boolean; onReset?: (() => void) | null }) {
   const commandedStage = state.stage;
   const actualStage = { ...commandedStage, x: commandedStage.actualX ?? commandedStage.x, y: commandedStage.actualY ?? commandedStage.y, z: commandedStage.actualZ ?? commandedStage.z };
   const renderState = { ...state, stage: actualStage };
@@ -2522,7 +2655,9 @@ function DigitalTwin({ state, dispatch }) {
     else if (m === "instrument") { const p = parts.find(q => q.id === sel) || parts.find(q => q.id === "uvna"); focus(p); }
     else if (m === "chain") goTo("iso");
   };
-  const reset = () => { setMode("lab"); setHid({}); setSolo(null); setGhost({}); setSel(null); goTo("iso"); };
+  const reset = () => { setMode("lab"); setHid({}); setSolo(null); setGhost({}); setSel(null); goTo("iso"); onReset?.(); };
+  // Camera preset / viewing mode chosen in the Chamber page's view controls (only the part that changed is sent).
+  useEffect(() => { if (!command) return; if (command.cam) goTo(command.cam); if (command.mode) setMode(command.mode); }, [command?.n]);  // eslint-disable-line react-hooks/exhaustive-deps
   const e = mode === "exploded" ? 1 : 0, jit = !c.isolation && !FX.reduced ? Math.sin(tm / 45) * 1.6 + Math.sin(tm / 17) * 0.8 : 0;
   const chain = new Set(["uclk", "uvna", "fix", "sph", "ldvA", "view", "ftrf"]);
   const { yaw, pit, dist, t } = cam;
@@ -2591,13 +2726,13 @@ function DigitalTwin({ state, dispatch }) {
     <div className="space-y-2">
       <div className="rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[10px] text-amber-200">▲ Conceptual, simplified model. Dimensions are plausible approximations, not an exact replica of any instrument. Only the stage ±{LIMIT_MM} mm travel is taken from the simulator.</div>
       <div className="flex flex-wrap items-center gap-1">
-        {[["lab", "Laboratory"], ["chamber", "Chamber"], ["instrument", "Instrument"], ["exploded", "Exploded"], ["transparent", "Transparent"], ["chain", "Measurement chain"]].map(([m, l]) => <B key={m} on={mode === m} f={() => setM(m)}>{l}</B>)}
+        {!hideToolbars && [["lab", "Laboratory"], ["chamber", "Chamber"], ["instrument", "Instrument"], ["exploded", "Exploded"], ["transparent", "Transparent"], ["chain", "Measurement chain"]].map(([m, l]) => <B key={m} on={mode === m} f={() => setM(m)}>{l}</B>)}
         <button onClick={reset} className="rounded border border-zinc-600 px-2 py-1 text-[10px] text-zinc-200">Reset view</button>
         <label className="ml-2 flex items-center gap-1 text-[10px] text-zinc-400">Quality<select aria-label="Render quality" value={qual} onChange={e => setQual(e.target.value)} className="rounded border border-zinc-700 bg-black px-1 py-0.5 text-[10px]"><option value="perf">Performance</option><option value="bal">Balanced</option><option value="qual">Quality</option></select></label>
       </div>
-      <div className="flex flex-wrap items-center gap-1">
+      {!hideToolbars && <div className="flex flex-wrap items-center gap-1">
         {[["iso", "Isometric"], ["front", "Front"], ["top", "Top"], ["interior", "Chamber interior"], ["optical", "Optical path"], ["rf", "RF path"], ["vacuum", "Vacuum path"], ["rack", "Instrument rack"], ["stage", "Stage position"]].map(([n, l]) => <button key={n} onClick={() => goTo(n)} className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-sky-500">{l}</button>)}
-      </div>
+      </div>}
       <div className="flex flex-col gap-3">
         <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800 bg-black">
           <svg ref={svgRef} viewBox="0 0 800 480" tabIndex={0} role="application" aria-label="3D laboratory digital twin. Drag to rotate, shift-drag to pan, wheel or plus and minus to zoom, arrow keys to orbit." onKeyDown={key} className="w-full cursor-grab touch-none select-none"
@@ -2640,7 +2775,7 @@ function DigitalTwin({ state, dispatch }) {
   );
 }
 
-function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo }) {
+function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onSaveOperator }) {
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
   const valid = validationResult.overall === "VALID";
   const records = state.experiment.records;
@@ -2671,6 +2806,8 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo }) {
           )}
         </div>
       </div>
+
+      <OperatorWelcome operator={state.operator} onSave={onSaveOperator} />
 
       <div className="rounded-lg border border-sky-500/40 bg-sky-950/20 p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div className="flex gap-3 items-center">
@@ -2766,8 +2903,8 @@ function getChamberLifecycle(state){
 function ChamberLifecyclePanel({state,cv,setCv}){
   const life=getChamberLifecycle(state),t=visualToken(life.visual),c=state.chamber;
   const issues=[c.doorOpen&&"Door open: vacuum disabled",c.turbo&&c.pressure>50&&"Turbo pressure interlock",!c.faraday&&"RF shielding disabled",!c.isolation&&"Isolation disabled",Math.abs(c.temperature-c.targetTemp)>=.03&&"Temperature drifting"].filter(Boolean);
-  const cams=["front","iso","top","interior","optical","rf","vacuum","rack"],modes=["standard","transparent","cutaway","blueprint"];
-  return <div className={`rounded-lg border p-3 ${visualClass(life.visual)}`} data-chamber-lifecycle={life.id}><div className="flex flex-wrap items-center gap-3"><StatusLED status={life.visual}/><div className="min-w-[220px] flex-1"><div className="text-xs font-bold uppercase tracking-wider">{life.label}</div><div className="mt-1 text-[11px] text-zinc-400">{life.detail}</div></div><div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px]"><span>P {fmtPressure(c.pressure)}</span><span>T {c.temperature.toFixed(2)} °C</span><span>Shield {c.faraday?"ON":"OFF"}</span><span>Isolation {c.isolation?"ON":"OFF"}</span></div></div>{issues.length>0&&<div className="mt-2 flex flex-wrap gap-1">{issues.map(x=><span key={x} className="rounded border border-amber-500/40 bg-amber-950/30 px-2 py-1 text-[9px] text-amber-200">▲ {x}</span>)}</div>}<div className="mt-3 grid gap-2 md:grid-cols-2"><div><div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Camera preset</div><div className="flex flex-wrap gap-1">{cams.map(x=><button key={x} onClick={()=>setCv({...cv,cam:x})} aria-pressed={cv.cam===x} className={`rounded border px-2 py-1 text-[9px] uppercase ${cv.cam===x?"border-sky-400 bg-sky-950 text-sky-200":"border-zinc-700 bg-zinc-900 text-zinc-400"}`}>{x}</button>)}</div></div><div><div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Viewing mode</div><div className="flex flex-wrap gap-1">{modes.map(x=><button key={x} onClick={()=>setCv({...cv,mode:x,shell:x==="transparent"?true:cv.shell,cut:x==="cutaway"})} aria-pressed={cv.mode===x} className={`rounded border px-2 py-1 text-[9px] uppercase ${cv.mode===x?"border-cyan-400 bg-cyan-950 text-cyan-200":"border-zinc-700 bg-zinc-900 text-zinc-400"}`}>{x}</button>)}</div></div></div></div>;}
+  
+  return <div className={`rounded-lg border p-3 ${visualClass(life.visual)}`} data-chamber-lifecycle={life.id}><div className="flex flex-wrap items-center gap-3"><StatusLED status={life.visual}/><div className="min-w-[220px] flex-1"><div className="text-xs font-bold uppercase tracking-wider">{life.label}</div><div className="mt-1 text-[11px] text-zinc-400">{life.detail}</div></div><div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px]"><span>P {fmtPressure(c.pressure)}</span><span>T {c.temperature.toFixed(2)} °C</span><span>Shield {c.faraday?"ON":"OFF"}</span><span>Isolation {c.isolation?"ON":"OFF"}</span></div></div>{issues.length>0&&<div className="mt-2 flex flex-wrap gap-1">{issues.map(x=><span key={x} className="rounded border border-amber-500/40 bg-amber-950/30 px-2 py-1 text-[9px] text-amber-200">▲ {x}</span>)}</div>}</div>;}
 function PumpLifecyclePanel({state}){const p=getPumpLifecycle(state),t=visualToken(p.visual),c=state.chamber;const gauge=clamp((Math.log10(Math.max(c.pressure,1e-6))+6)/8.88,0,1);return <div className={`rounded-lg border p-3 ${visualClass(p.visual)}`} data-pump-phase={p.id}><div className="flex flex-wrap items-center gap-3"><div className="relative h-16 w-16 rounded-full border-4 border-zinc-700 bg-black"><div className="absolute left-1/2 top-1/2 h-6 w-0.5 origin-bottom bg-sky-300" style={{transform:`translate(-50%,-100%) rotate(${-130+gauge*260}deg)`}}/><div className="absolute inset-0 grid place-items-end pb-2 font-mono text-[8px] text-zinc-400">PRESS</div></div><div className="min-w-[190px] flex-1"><div className="flex items-center gap-2"><StatusLED status={p.visual}/><span className="text-xs font-bold uppercase">{p.label}</span></div><div className="mt-1 text-[11px] text-zinc-400">{p.detail}</div><div className="mt-2 font-mono text-[10px] text-sky-200">{fmtPressure(c.pressure)} · {c.pressureRate>0?"↑":"↓"} {Math.abs(c.pressureRate||0).toExponential(1)} Torr/s</div></div><div className="grid min-w-[180px] gap-2"><div><div className="flex justify-between text-[9px] text-zinc-400"><span>ROUGHING</span><span>{(c.roughingRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-slate-400 transition-[width]" style={{width:`${c.roughingRpm||0}%`}}/></div></div><div><div className="flex justify-between text-[9px] text-zinc-400"><span>TURBO</span><span>{(c.turboRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-cyan-400 transition-[width]" style={{width:`${c.turboRpm||0}%`}}/></div></div></div></div></div>}
 function StageMotionPanel({state}){const sm=getStageMotionState(state),t=visualToken(sm),p=state.stage;const ax=p.actualX??p.x,ay=p.actualY??p.y,az=p.actualZ??p.z;return <div className={`rounded-lg border p-3 ${visualClass(sm)}`}><div className="flex items-center justify-between"><div><div className="text-xs font-bold uppercase">XYZ Motion State</div><div className="text-[11px] text-zinc-400">Commanded versus actual position and settling indication.</div></div><StatusLED status={sm}/></div><div className="mt-2 grid grid-cols-2 gap-3 font-mono text-xs"><div>CMD {p.x.toFixed(1)} / {p.y.toFixed(1)} / {p.z.toFixed(1)}</div><div>ACT {ax.toFixed(1)} / {ay.toFixed(1)} / {az.toFixed(1)}</div></div><div className="mt-2 h-2 rounded bg-zinc-900 overflow-hidden"><div className="h-full bg-cyan-400" style={{width:`${Math.min(100,100-(Math.abs(p.x-ax)+Math.abs(p.y-ay)+Math.abs(p.z-az))*10)}%`}}/></div></div>;}
 // True only after the dashboard has painted and the browser is idle, so the 2D UI mounts before any 3D/audio bytes are requested.
@@ -2789,8 +2926,22 @@ function LabEnvironmentSkeleton({ label = "Loading Lab Environment…" }) {
 }
 function Chamber({ state, dispatch, HelpInfo }) {
   const scene3dReady = useAfterFirstPaint();
-  const [cv, setCv] = useState({ shell: true, cut: false, cam: "front", mode: "standard" });
-  const [sceneView, setSceneView] = useState("lab");
+  // Engineering model is the default; the realistic lab is a fun, lifelike view of the same live data.
+  const [sceneView, setSceneView] = useState<ChamberViewId>("engineering");
+  const [vs, setVs] = useState<Record<ChamberViewId, { cam: string; mode: string; cmd: { cam?: string; mode?: string }; n: number }>>({
+    engineering: { cam: "overview", mode: "standard", cmd: {}, n: 0 }, schematic: { cam: "overview", mode: "standard", cmd: {}, n: 0 }, lab: { cam: "overview", mode: "cutaway", cmd: {}, n: 0 },
+  });
+  const [viewNotice, setViewNotice] = useState("");
+  const cur = vs[sceneView];
+  const chooseCam = (p: CamPreset) => { setVs(v => ({ ...v, [sceneView]: { ...v[sceneView], cam: p.id, cmd: { cam: sceneView === "lab" ? p.id : p.eng }, n: v[sceneView].n + 1 } })); setViewNotice(`Camera → ${p.label}: ${p.desc}.`); };
+  const chooseMode = (m: ViewMode) => { setVs(v => ({ ...v, [sceneView]: { ...v[sceneView], mode: m.id, cmd: { mode: sceneView === "lab" ? m.id : m.eng }, n: v[sceneView].n + 1 } })); setViewNotice(`Viewing mode → ${m.label}: ${m.desc}.`); };
+  const switchView = (view: ChamberViewId) => {
+    setSceneView(view); setViewNotice("");
+    // each view remembers its own camera and mode; coming back re-applies both
+    setVs(v => { const c = v[view], p = CAM_PRESETS.find(x => x.id === c.cam), m = VIEW_MODES.find(x => x.id === c.mode); return { ...v, [view]: { ...c, cmd: { cam: view === "lab" ? c.cam : p?.eng, mode: view === "lab" ? c.mode : m?.eng }, n: c.n + 1 } }; });
+  };
+  const resetEngineering = () => setVs(v => ({ ...v, engineering: { cam: "overview", mode: "standard", cmd: {}, n: v.engineering.n } }));
+  const command = { ...cur.cmd, n: cur.n };
   useEffect(() => { installLabSelectionSync(); }, []);
   const labStateRef = useRef(state); labStateRef.current = state;
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
@@ -2847,7 +2998,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
         <p className="mt-1 text-sm text-zinc-400">Interactive 3D Hardware Simulation with rendered stainless enclosure, optical window, vacuum fittings, and motorized stage.</p>
       </div>
 
-      <ChamberLifecyclePanel state={state} cv={cv} setCv={setCv} />
+      <ChamberLifecyclePanel state={state} cv={null} setCv={null} />
       <PumpLifecyclePanel state={state} />
       <StageMotionPanel state={state} />
 
@@ -2860,22 +3011,27 @@ function Chamber({ state, dispatch, HelpInfo }) {
 
           <div className="mb-2 flex flex-wrap items-center gap-2" role="group" aria-label="Chamber view">
             <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">View</span>
-            {[["lab", "Realistic lab"], ["engineering", "Engineering model"], ["schematic", "Engineering schematic"]].map(([k, l]) => <button key={k} type="button" aria-pressed={sceneView === k} onClick={() => setSceneView(k)} className={`rounded border px-3 py-1.5 text-xs font-semibold ${sceneView === k ? "border-sky-500 bg-sky-950/40 text-sky-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"}`}>{l}</button>)}
+            {([["engineering", "Engineering model", ""], ["schematic", "Engineering schematic", ""], ["lab", "Realistic lab", "FUN"]] as [ChamberViewId, string, string][]).map(([k, l, tag]) => <button key={k} type="button" aria-label={l} aria-pressed={sceneView === k} onClick={() => switchView(k)} className={`rounded border px-3 py-1.5 text-xs font-semibold ${sceneView === k ? "border-sky-500 bg-sky-950/40 text-sky-100" : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"}`}>{l}{tag && <span className="cv-fun" aria-hidden="true">{tag}</span>}</button>)}
           </div>
+          <p className="cv-view-note" data-view-note>
+            {sceneView === "engineering" && <><b>Engineering model</b> (default): the working 3D model of the lab. Click any part to inspect it, hide or isolate assemblies, and follow the measurement chain. Drawn live from the simulator; sizes are plausible approximations.</>}
+            {sceneView === "schematic" && <><b>Engineering schematic</b>: flat drawings of the same lab — pipe-and-instrument diagram, dimensioned cutaway and signal path — with a parts list.</>}
+            {sceneView === "lab" && <><b>Realistic lab</b> — made for fun and entertainment. It is a lifelike room with Dr. Wire working in it, and it is driven by the same live simulation data as the other views (so what you switch on really happens), but stage motion is exaggerated ×3 and proportions are artistic. Use the Engineering model for precise inspection.</>}
+          </p>
+          <ChamberViewControls view={sceneView} cam={cur.cam} mode={cur.mode} onCam={chooseCam} onMode={chooseMode} notice={viewNotice} HelpInfo={HelpInfo} />
           {sceneView === "lab" && (!scene3dReady ? <LabEnvironmentSkeleton /> : (
             <Suspense fallback={<LabEnvironmentSkeleton />}>
-              <LabScene3D stateRef={labStateRef} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
+              <LabScene3D stateRef={labStateRef} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} command={command} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
             </Suspense>
           ))}
           {sceneView === "schematic" && (
             <Suspense fallback={<div className="grid h-[320px] place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-xs text-zinc-400">Loading the engineering schematic…</div>}>
-              <Schematic state={state} dispatch={dispatch} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} onShowInLab={() => setSceneView("lab")} />
+              <Schematic state={state} dispatch={dispatch} reduced={FX.reduced || FX.hide} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} onShowInLab={() => switchView("lab")} />
             </Suspense>
           )}
           {sceneView === "engineering" && (
-          <div className={`relative chamber-phase4 ${cv.mode === "blueprint" ? "chamber-blueprint" : ""} ${cv.mode === "transparent" ? "chamber-transparent" : ""} ${cv.mode === "cutaway" ? "chamber-cutaway" : ""}`} data-camera={cv.cam} data-view-mode={cv.mode}>
-            <DigitalTwin state={state} dispatch={dispatch} />
-            {cv.mode === "blueprint" && <div className="pointer-events-none absolute inset-0 rounded border border-cyan-400/30 bg-cyan-950/10 mix-blend-screen" aria-hidden="true"/>}
+          <div className={`relative chamber-phase4 ${cur.mode === "blueprint" ? "cv-blueprint" : ""}`} data-camera={cur.cam} data-view-mode={cur.mode}>
+            <DigitalTwin state={state} dispatch={dispatch} command={command} hideToolbars onReset={resetEngineering} />
           </div>
           )}
 
@@ -3004,7 +3160,7 @@ function SpatialField({ state, dispatch, HelpInfo }) {
   );
 }
 
-function LDVScopePanel({state}){return <div className="rounded-lg border border-zinc-700 p-3"><div className="grid md:grid-cols-2 gap-3"><div><div className="text-xs font-bold uppercase">LDV Optical Path</div><div className="mt-2 h-2 rounded bg-zinc-900"><div className="h-full bg-yellow-400" style={{width:`${state.ldv.opticalQuality||0}%`}}/></div><div className="mt-1 text-[11px]">Optical Quality: {(state.ldv.opticalQuality||0).toFixed(0)}% · Return {(100*(state.ldv.laserReturn||0)).toFixed(0)}%</div><div className="mt-2 relative h-8 bg-black rounded overflow-hidden"><div className="absolute left-0 top-1/2 h-0.5 w-full bg-yellow-700"/><div className="absolute top-1/2 h-1 w-1 rounded-full bg-yellow-300" style={{left:`${(state.ldv.scanPhase||0)*100}%`}}/></div></div><div><div className="text-xs font-bold uppercase">Oscilloscope</div><div className="mt-1 text-[11px]">Trigger: {state.scope.triggerState} · Persistence {(100*(state.scope.persistence||0)).toFixed(0)}%</div><div className="mt-2 h-2 rounded bg-zinc-900"><div className="h-full bg-cyan-400" style={{width:`${100*(state.scope.persistence||0)}%`}}/></div></div></div></div>}
+function LDVScopePanel({state}){return <div className="rounded-lg border border-zinc-700 p-3"><div className="grid md:grid-cols-2 gap-3"><div><div className="text-xs font-bold uppercase">LDV Optical Path</div><div className="mt-2 h-2 rounded bg-zinc-900"><div className="h-full bg-yellow-400" style={{width:`${state.ldv.opticalQuality||0}%`}}/></div><div className="mt-1 text-[11px]">Optical Quality: {(state.ldv.opticalQuality||0).toFixed(0)}% · Return {(100*(state.ldv.laserReturn||0)).toFixed(0)}%</div><div className="mt-2 relative h-8 bg-black rounded overflow-hidden"><div className="absolute left-0 top-1/2 h-0.5 w-full bg-yellow-700"/><div className="absolute top-1/2 h-1 w-1 rounded-full bg-yellow-300" style={{left:`${(state.ldv.scanPhase||0)*100}%`}}/></div></div><div><div className="text-xs font-bold uppercase">Oscilloscope</div><div className="mt-1 text-[11px]">Trigger: {state.scope.triggerState} · {state.scope.acqCount||0} captures</div><div className="mt-2 h-2 rounded bg-zinc-900"><div className="h-full bg-cyan-400" style={{width:`${state.scope.power?100*(state.scope.bootProgress||0):0}%`}}/></div></div></div></div>}
 function ScanAutomationPanel({state,dispatch}){
   const e=state.experiment,pts=e.records||[],plan=e.scanPath?.length?e.scanPath:createSerpentineScanPlan();
   const qualityByPoint=e.qualityResults||{},rescan=e.rescanCounts||{};
@@ -3176,115 +3332,10 @@ function FitRow({ label, value }) {
 }
 
 function Ldv({ state, dispatch, HelpInfo }) {
-  const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
-  const signal = clamp(93 - Math.abs(state.stage.x)*.8 - Math.abs(state.stage.z)*.6 - (!state.chamber.isolation ? 18 : 0), 5, 99);
-  const data = Array.from({length:100},(_,i)=>({f:228+i*.05, a:Math.exp(-Math.pow((i-50)/10,2))*((signal/100)*.9)+Math.sin(i*.34)*.03}));
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold flex items-center">Polytec PSV-500-3D LDV Hardware Interface <HelpInfo termKey="ldv" /></h1>
-        <p className="mt-1 text-sm text-zinc-400">Scanning laser Doppler vibrometer controller simulation with optical head diagnostics and full-field 3D mode mapping.</p>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.45fr_.8fr]">
-        <div data-status={instStatus(state, "ldv")} className="rounded-xl border-4 border-zinc-700 bg-gradient-to-b from-zinc-800 to-zinc-950 p-4 shadow-2xl"><div className="absolute right-4 top-1 z-10 bg-black/70 px-1 rounded"><StatusLED status={instStatus(state, "ldv")} /></div>
-          <div className="flex justify-between items-center mb-3 border-b border-zinc-700 pb-2">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-fuchsia-500 shadow-[0_0_8px_2px_rgba(217,70,239,0.7)]" />
-              <span className="font-bold text-xs tracking-wider text-zinc-200 flex items-center">POLYTEC PSV-500-3D CONTROLLER & SOFTWARE SUITE <HelpInfo termKey="ldv" /></span>
-            </div>
-            <span className="text-[10px] font-mono text-fuchsia-400">LASER CLASS 2 · 633 nm</span>
-          </div>
-
-          <div className="rounded border-2 border-zinc-600 bg-black p-3 shadow-inner">
-            <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3 flex items-center">
-              <ScanLine className="h-4 w-4 text-fuchsia-400 mr-2" /> 3D Displacement Spectrum · Z Axis
-            </div>
-            <SpectrumPlot data={data} />
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl space-y-3">
-            <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center justify-between">
-              <span>Laser Head & Shutter Controls</span> <HelpInfo termKey="shutter" />
-            </div>
-            <div className="flex items-center justify-between text-xs"><span>LDV Hardware</span><input type="checkbox" checked={state.ldv.power} disabled={!state.facility.power} onChange={v => set("ldv", { power: v.target.checked, shutter: v.target.checked ? state.ldv.shutter : false })} /></div>
-            <div className="flex items-center justify-between text-xs"><span>Laser Shutter <HelpInfo termKey="shutter" /></span><input type="checkbox" checked={state.ldv.shutter} disabled={!state.ldv.power} onChange={v => set("ldv", { shutter: v.target.checked })} /></div>
-            <div className="mt-2">
-              <div className="mb-1 flex justify-between text-xs"><span className="text-zinc-400">Optical Return Signal</span><span className={signal>60?"text-emerald-400":"text-amber-400"}>{signal.toFixed(0)}%</span></div>
-              <div className="h-2 overflow-hidden rounded bg-zinc-800"><div className={`h-full ${signal>60?"bg-emerald-500":"bg-amber-500"}`} style={{width:`${signal}%`}}/></div>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl space-y-3">
-            <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center justify-between">
-              <span>Scan Configuration</span> <HelpInfo termKey="velocity_range" />
-            </div>
-            <label className="block text-xs text-zinc-400">Grid Points
-              <input type="number" value={state.ldv.grid} onChange={e => set("ldv", { grid: Math.round(Number(e.target.value)) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-sky-200 font-mono" />
-            </label>
-            <label className="block text-xs text-zinc-400">Velocity Range <HelpInfo termKey="velocity_range" />
-              <select value={state.ldv.range} onChange={e => set("ldv", { range: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs">
-                <option>10 mm/s/V</option><option>20 mm/s/V</option><option>100 mm/s/V</option>
-              </select>
-            </label>
-            <button className="w-full rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 mt-2" disabled={!state.ldv.shutter}>Acquire 3D Scan</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const f0 = trueFrequency(state);
+  const freqAt = (x, y, z) => trueFrequency({ ...state, stage: { ...state.stage, actualX: x, actualY: y, actualZ: z } });
+  return <LdvPanel state={state} dispatch={dispatch} f0={f0} freqAt={freqAt} HelpInfo={HelpInfo} />;
 }
-
-const Scope = memo(function Scope({ HelpInfo }: { HelpInfo: any }) {
-  const scope = useInstrumentStore(useShallow(s => ({ power: s.scope.power, running: s.scope.running, timebase: s.scope.timebase, scale: s.scope.scale, trace: s.scope.trace })));
-  const facilityPower = useEnvironmentStore(s => s.facility.power);
-  const status = useLab(s => instStatus(s, "scope"));
-  const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold flex items-center">Tektronix 5 Series MSO Hardware Front Panel <HelpInfo termKey="scope" /></h1>
-        <p className="mt-1 text-sm text-zinc-400">Mixed signal oscilloscope simulation featuring physical-grade screen graphics, channel inputs, and timebase knob controls.</p>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.5fr_.8fr]">
-        <div data-status={status} className="rounded-xl border-4 border-zinc-700 bg-gradient-to-b from-zinc-800 to-zinc-950 p-4 shadow-2xl"><div className="absolute right-4 top-1 z-10 bg-black/70 px-1 rounded"><StatusLED status={status} /></div>
-          <div className="flex justify-between items-center mb-3 border-b border-zinc-700 pb-2">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_8px_2px_rgba(245,158,11,0.7)]" />
-              <span className="font-bold text-xs tracking-wider text-zinc-200 flex items-center">TEKTRONIX 5 SERIES MSO MIXED SIGNAL OSCILLOSCOPE <HelpInfo termKey="scope" /></span>
-            </div>
-            <span className="text-[10px] font-mono text-amber-400">1 GHz · 12-BIT ADC</span>
-          </div>
-
-          <div className="rounded border-2 border-zinc-600 bg-black p-3 shadow-inner">
-            <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3">CH1 · Analog Acquisition (Time Domain)</div>
-            <div className="h-[280px]"><ScopePlot trace={scope.trace} scale={scope.scale} timebase={scope.timebase} /></div>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl space-y-3">
-            <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center justify-between">
-              <span>Oscilloscope Acquisition</span> <HelpInfo termKey="timebase" />
-            </div>
-            <div className="flex items-center justify-between text-xs"><span>Scope Power</span><input type="checkbox" checked={scope.power} disabled={!facilityPower} onChange={v => set("scope", { power: v.target.checked })} /></div>
-            <div className="flex items-center justify-between text-xs"><span>Run / Stop</span><input type="checkbox" checked={scope.running} disabled={!scope.power} onChange={v => set("scope", { running: v.target.checked })} /></div>
-            <label className="block text-xs text-zinc-400">Timebase µs/div <HelpInfo termKey="timebase" />
-              <input type="number" value={scope.timebase} onChange={e => set("scope", { timebase: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-sky-200 font-mono" />
-            </label>
-            <label className="block text-xs text-zinc-400">CH1 V/div <HelpInfo termKey="v_div" />
-              <input type="number" step="0.1" value={scope.scale} onChange={e => set("scope", { scale: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-sky-200 font-mono" />
-            </label>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-});
 
 function Clock({ state, dispatch, HelpInfo }) {
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
@@ -3466,8 +3517,8 @@ function EventLog({ events, journalFilter, setJournalFilter, journalSearch, setJ
         {filtered.length ? filtered.map(e => (
           <div key={e.id} className="rounded border border-zinc-800 bg-zinc-900/50 p-2 text-xs space-y-1">
             <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500">
-              <span className="text-sky-400 font-bold">{e.subsystem}</span>
-              <span>{e.time} (Sim t={e.simulationTime}s)</span>
+              <span className="text-sky-400 font-bold">{e.subsystem}{e.operator ? <span className="ml-1.5 rounded bg-zinc-800 px-1 text-zinc-300">[{e.operator}]</span> : null}</span>
+              <span title={e.iso}>{e.date ? `${e.date} ` : ""}{e.time} (Sim t={e.simulationTime}s)</span>
             </div>
             <div className={e.level === "warning" ? "text-amber-300" : e.level === "critical" ? "text-rose-400 font-bold" : "text-zinc-300"}>
               {e.text}
@@ -3486,7 +3537,7 @@ function AlarmList({ state, dispatch }) {
       {state.alarms.length ? state.alarms.map(a => (
         <div key={a.id} className={`rounded border p-2 text-xs ${a.severity === "critical" ? "border-rose-800 bg-rose-950/40" : "border-amber-800 bg-amber-950/30"}`}>
           <div className="flex justify-between">
-            <span className="text-zinc-500">{a.time}</span>
+            <span className="text-zinc-500" title={a.iso}>{a.date ? `${a.date} ` : ""}{a.time}{a.operator ? ` · [${a.operator}]` : ""}</span>
             <span className={a.acknowledged ? "text-zinc-500" : "text-amber-300 font-bold"}>{a.acknowledged ? "ACK" : "OPEN"}</span>
           </div>
           <div className="mt-1 text-zinc-200">{a.text}</div>

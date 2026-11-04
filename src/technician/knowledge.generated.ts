@@ -277,6 +277,93 @@ export const KNOWLEDGE: KBEntry[] = [
   "text": "The facility has an operating mode (training by default) and a simulation speed multiplier. Seeded noise is on by default so repeats are reproducible."
  },
  {
+  "id": "project.operator-profile-and-logs",
+  "source": "knowledge/project.md",
+  "title": "Operator profile and logs",
+  "keywords": [
+   "my name",
+   "operator",
+   "initials",
+   "nickname",
+   "who am i",
+   "logs",
+   "journal stamp"
+  ],
+  "text": "The operator can type a name, nickname and initials into the Operator on duty card (top of the Operator Console, or the person button in the header). Initials, the real date and the time are written into every journal entry, alarm, notebook note and export. The profile is stored only in this browser. Dr. Wire can greet the operator by nickname."
+ },
+ {
+  "id": "project.live-operation-window",
+  "source": "knowledge/project.md",
+  "title": "Live operation window",
+  "keywords": [
+   "live operation",
+   "animation window",
+   "what did that do",
+   "explain action"
+  ],
+  "text": "An always-visible floating window animates every action as it happens (a switch, a pump, a stage move), highlights the equipment involved on a live lab diagram, and explains in plain English what it does and what to watch for next. It can be dragged and minimised."
+ },
+ {
+  "id": "project.alert-words",
+  "source": "knowledge/project.md",
+  "title": "Alert words",
+  "keywords": [
+   "running",
+   "stuck",
+   "error",
+   "needs attention",
+   "alert",
+   "animated"
+  ],
+  "text": "Each part of the simulator shows one of four animated alert words. Running: it is working. Stuck: it started something that cannot continue until a blocker is fixed, for example pumping with the door open or a scope waiting for a trigger. Error: a fault or critical alarm. Needs attention: it works but should be checked, for example the Faraday cage is off or the VNA is not calibrated."
+ },
+ {
+  "id": "project.ldv-scanner-scenarios",
+  "source": "knowledge/project.md",
+  "title": "LDV Scanner scenarios",
+  "keywords": [
+   "ldv",
+   "laser vibrometer",
+   "3d scan",
+   "acquire",
+   "mode shape",
+   "scan results",
+   "noise floor",
+   "ring-down",
+   "alignment"
+  ],
+  "text": "The Acquire 3D Scan button steers the laser spot over the sphere and measures each point. Results appear in the Scan results panel on the LDV page with a rotating 3D sphere, surface map and numbers. Scenarios: surface mode map, single-point spectrum, noise-floor check, location sweep, ring-down (damping) and alignment map. Weak optical return, isolation off, air in the chamber or a 100 kHz decoder filter make the result poor."
+ },
+ {
+  "id": "project.oscilloscope-scenarios",
+  "source": "knowledge/project.md",
+  "title": "Oscilloscope scenarios",
+  "keywords": [
+   "oscilloscope",
+   "scope",
+   "trigger",
+   "fft",
+   "probe",
+   "hum",
+   "60 hz",
+   "clock check"
+  ],
+  "text": "The scope has four channels, each wired to one real signal: RF monitor, LDV output, 10 MHz clock, room probe, table accelerometer or stage servo. It runs a self-test when powered on. Guided scenarios: confirm the RF drive, check the 10 MHz reference, hunt 60 Hz interference, check vibration isolation, read pump signatures, check the LDV chain, trigger practice and catching a stage move."
+ },
+ {
+  "id": "project.3d-chamber-views",
+  "source": "knowledge/project.md",
+  "title": "3D Chamber views",
+  "keywords": [
+   "camera preset",
+   "viewing mode",
+   "engineering model",
+   "realistic lab",
+   "inside chamber"
+  ],
+  "text": "The Engineering model is the default 3D view. The Realistic lab is a lifelike view for fun, driven by the same live data. Camera presets and viewing modes work in both and sit above the viewer. The Realistic lab has an Inside chamber view with glows and name tags on the equipment in use."
+ },
+ {
   "id": "quality.measurement-validation-rules",
   "source": "knowledge/quality.md",
   "title": "Measurement validation rules",
@@ -795,6 +882,86 @@ export const KNOWLEDGE: KBEntry[] = [
   "text": "Injects realistic equipment faults (clock drift, LDV misalignment, vacuum leaks) for troubleshooting training."
  },
  {
+  "id": "glossary.camera_preset",
+  "source": "MetrologyLabV3.tsx GLOSSARY",
+  "title": "Camera Preset",
+  "keywords": [
+   "camera preset",
+   "camera preset"
+  ],
+  "text": "A ready-made viewpoint for the 3D views. Pick one (for example Inside chamber or Laser path) and the camera jumps there, so you can watch a part while you operate it. Drag and scroll still work afterwards. Presets apply to the Engineering model and the Realistic lab; the flat Engineering schematic has no camera."
+ },
+ {
+  "id": "glossary.view_mode",
+  "source": "MetrologyLabV3.tsx GLOSSARY",
+  "title": "Viewing Mode",
+  "keywords": [
+   "view mode",
+   "viewing mode"
+  ],
+  "text": "How the chamber walls are drawn in the 3D views: Standard (solid), Cutaway (part of the wall removed), See-through (glass) or Blueprint (technical-drawing look). The Engineering model also offers Exploded and Measurement chain."
+ },
+ {
+  "id": "glossary.scope_trigger",
+  "source": "MetrologyLabV3.tsx GLOSSARY",
+  "title": "Oscilloscope Trigger",
+  "keywords": [
+   "scope trigger",
+   "oscilloscope trigger"
+  ],
+  "text": "The rule that decides where a wave starts on the screen. When the signal crosses the trigger level in the chosen direction, the scope starts drawing, so repeating waves sit still instead of sliding. Auto keeps drawing even without a trigger, Normal waits for one, Single captures once."
+ },
+ {
+  "id": "glossary.ldv_scan",
+  "source": "MetrologyLabV3.tsx GLOSSARY",
+  "title": "3D Scan (LDV)",
+  "keywords": [
+   "ldv scan",
+   "3d scan (ldv)"
+  ],
+  "text": "A timed job in which the scanning mirrors steer the laser spot over the sphere and the vibrometer measures the velocity of each point. When it finishes, the Scan results panel shows a rotating 3D sphere, a surface map and the numbers."
+ },
+ {
+  "id": "glossary.ldv_mode_shape",
+  "source": "MetrologyLabV3.tsx GLOSSARY",
+  "title": "Mode Shape",
+  "keywords": [
+   "ldv mode shape",
+   "mode shape"
+  ],
+  "text": "The pattern of in-and-out movement over the whole sphere surface at one resonance. Where the surface moves a lot is an antinode; where it stays still is a node. The mode shape tells you which vibration the VNA is exciting."
+ },
+ {
+  "id": "glossary.operator_profile",
+  "source": "MetrologyLabV3.tsx GLOSSARY",
+  "title": "Operator Profile",
+  "keywords": [
+   "operator profile",
+   "operator profile"
+  ],
+  "text": "Your name, nickname and initials. Initials are stamped on every journal entry, alarm, notebook note and export, together with the real date and time, and Dr. Wire uses your nickname to greet you. It is stored only in this browser."
+ },
+ {
+  "id": "glossary.live_operation",
+  "source": "MetrologyLabV3.tsx GLOSSARY",
+  "title": "Live Operation Window",
+  "keywords": [
+   "live operation",
+   "live operation window"
+  ],
+  "text": "An always-visible window that animates each action as it happens, highlights the equipment involved, and explains in plain English what it does and what to watch for next."
+ },
+ {
+  "id": "glossary.alert_states",
+  "source": "MetrologyLabV3.tsx GLOSSARY",
+  "title": "Running / Stuck / Error / Needs attention",
+  "keywords": [
+   "alert states",
+   "running / stuck / error / needs attention"
+  ],
+  "text": "The four animated alert words. Running: the part is working. Stuck: it started something that cannot continue until you fix a blocker (for example pumping with the door open). Error: a fault or critical alarm. Needs attention: it works, but something should be checked (shielding off, calibration expired)."
+ },
+ {
   "id": "procedure.step1",
   "source": "MetrologyLabV3.tsx PROCEDURE_STEPS",
   "title": "Procedure step 1: Initialize Facility Power",
@@ -987,46 +1154,6 @@ export const KNOWLEDGE: KBEntry[] = [
   "text": "A single running simulation that every page of the lab reads from. If you change something on the VNA page, this overview updates immediately, because they are looking at the same model. Why it matters: Nothing here is a real measurement. It is a safe practice version of the lab."
  },
  {
-  "id": "ov.view_modes",
-  "source": "overview/overviewHelp.ts",
-  "title": "View mode",
-  "keywords": [
-   "view mode",
-   "view modes"
-  ],
-  "text": "Choose how the lab map is drawn: flat like a diagram, tilted like a table seen from above at an angle, or Orbit, where you can drag to turn the map yourself. Why it matters: Tilted views make the depth of the boxes easier to see. Flat is easiest for reading small text."
- },
- {
-  "id": "ov.view_flat",
-  "source": "overview/overviewHelp.ts",
-  "title": "Flat view",
-  "keywords": [
-   "flat view",
-   "view flat"
-  ],
-  "text": "Draws the lab map straight on with no tilt, like a normal diagram."
- },
- {
-  "id": "ov.view_tilt",
-  "source": "overview/overviewHelp.ts",
-  "title": "Tilted view",
-  "keywords": [
-   "tilted view",
-   "view tilt"
-  ],
-  "text": "Leans the map back a little so the boxes look like solid blocks standing on a table."
- },
- {
-  "id": "ov.view_orbit",
-  "source": "overview/overviewHelp.ts",
-  "title": "Orbit view",
-  "keywords": [
-   "orbit view",
-   "view orbit"
-  ],
-  "text": "Lets you turn the map yourself. Click and drag on the map to swing it left, right, up or down. Try: Double-click the map, or press Reset view, to bring it back."
- },
- {
   "id": "ov.reset_view",
   "source": "overview/overviewHelp.ts",
   "title": "Reset view",
@@ -1034,7 +1161,7 @@ export const KNOWLEDGE: KBEntry[] = [
    "reset view",
    "reset view"
   ],
-  "text": "Puts the map back to the normal tilt and clears any filters or hidden lines you set."
+  "text": "Clears any filters or hidden lines you set on the map and puts the equipment table back in lab order."
  },
  {
   "id": "ov.layers",

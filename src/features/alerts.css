@@ -1,0 +1,68 @@
+/* Animated alert language: Running (spinner), Stuck (hourglass + hazard stripes), Error (shaking red triangle), Needs attention (rippling bell-dot).
+   Every animation is switched off by .fx-reduced / .fx-hide on the lab root and by prefers-reduced-motion. */
+:root { --al-running: #34d399; --al-stuck: #fb923c; --al-error: #fb7185; --al-attention: #facc15; --al-idle: #64748b; }
+
+.al { --c: var(--al-idle); display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 9px 2px 6px; border: 1px solid color-mix(in srgb, var(--c) 55%, #0b121b); border-radius: 999px; background: color-mix(in srgb, var(--c) 13%, #0a1118); color: color-mix(in srgb, var(--c) 40%, #fff); font: 700 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .03em; white-space: nowrap; }
+.al.is-compact { padding: 2px; border-radius: 50%; }
+.al-running { --c: var(--al-running); } .al-stuck { --c: var(--al-stuck); } .al-error { --c: var(--al-error); } .al-attention { --c: var(--al-attention); }
+.al-word { text-transform: uppercase; }
+.al-label { overflow: hidden; color: #cfe0f1; font-weight: 600; text-overflow: ellipsis; letter-spacing: 0; }
+.al-glyph { flex: none; overflow: visible; }
+
+@keyframes al-spin { to { transform: rotate(360deg); } }
+@keyframes al-beat { 0%, 100% { transform: scale(.7); opacity: .6; } 50% { transform: scale(1.15); opacity: 1; } }
+@keyframes al-flip { 0%, 40% { transform: rotate(0); } 55%, 95% { transform: rotate(180deg); } 100% { transform: rotate(180deg); } }
+@keyframes al-sand { 0%, 40% { transform: translateY(0); opacity: 1; } 50% { transform: translateY(6px); opacity: .3; } 55% { opacity: 0; } 100% { opacity: 0; } }
+@keyframes al-shake { 0%, 100% { transform: translateX(0) rotate(0); } 15% { transform: translateX(-1.4px) rotate(-6deg); } 30% { transform: translateX(1.4px) rotate(6deg); } 45% { transform: translateX(-1px) rotate(-4deg); } 60% { transform: translateX(1px) rotate(4deg); } 75% { transform: translateX(0) rotate(0); } }
+@keyframes al-bounce { 0%, 60%, 100% { transform: translateY(0); } 70% { transform: translateY(-2.5px); } 80% { transform: translateY(0); } 90% { transform: translateY(-1.2px); } }
+@keyframes al-ripple { 0% { transform: scale(.7); opacity: .9; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes al-flash { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 0%, transparent); } 50% { box-shadow: 0 0 14px 2px color-mix(in srgb, var(--c) 70%, transparent); } }
+@keyframes al-stripes { to { background-position: 40px 0; } }
+@keyframes al-sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+.al-spin { transform-box: fill-box; transform-origin: center; animation: al-spin .9s linear infinite; }
+.al-beat { transform-box: fill-box; transform-origin: center; animation: al-beat 1.2s ease-in-out infinite; }
+.al-flip { transform-box: fill-box; transform-origin: center; animation: al-flip 3s ease-in-out infinite; }
+.al-sand { animation: al-sand 3s linear infinite; }
+.al-shake { transform-box: fill-box; transform-origin: 50% 90%; animation: al-shake .7s ease-in-out infinite; }
+.al-bounce { transform-box: fill-box; transform-origin: center; animation: al-bounce 1.8s ease-in-out infinite; }
+.al-ring { transform-box: fill-box; transform-origin: center; animation: al-ripple 1.8s ease-out infinite; }
+.al-ring2 { animation-delay: .9s; }
+.al.al-error { animation: al-flash .9s ease-in-out infinite; }
+.al.al-attention { animation: al-flash 2s ease-in-out infinite; }
+
+/* Page banner */
+.al-banner { --c: var(--al-idle); position: relative; display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 14px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--c) 60%, #0b121b); border-radius: 10px; background: linear-gradient(100deg, color-mix(in srgb, var(--c) 18%, #0b121b), #0a1118 70%); color: #e8f1fb; }
+.al-b-running { --c: var(--al-running); } .al-b-stuck { --c: var(--al-stuck); } .al-b-error { --c: var(--al-error); } .al-b-attention { --c: var(--al-attention); }
+.al-b-glyph { display: grid; flex: none; place-items: center; width: 42px; height: 42px; border-radius: 10px; background: color-mix(in srgb, var(--c) 16%, #0a1118); }
+.al-b-text { min-width: 0; flex: 1; }
+.al-b-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+.al-b-title b { color: var(--c); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.al-b-title span { font-weight: 650; }
+.al-b-detail { margin-top: 2px; font-size: 12.5px; line-height: 1.45; color: #b9c9db; }
+.al-b-detail em { color: #e9f2fb; font-style: normal; font-weight: 600; }
+.al-b-go { flex: none; padding: 5px 12px; border: 1px solid color-mix(in srgb, var(--c) 65%, #0b121b); border-radius: 7px; background: color-mix(in srgb, var(--c) 18%, #0a1118); color: #f1f7fd; font-size: 12px; font-weight: 700; cursor: pointer; }
+.al-b-go:hover { background: color-mix(in srgb, var(--c) 32%, #0a1118); }
+.al-b-bar { position: absolute; inset: auto 0 0 0; height: 3px; background: var(--c); opacity: .8; }
+.al-b-running .al-b-bar { background: linear-gradient(90deg, transparent, var(--c), transparent); animation: al-sweep 1.4s linear infinite; }
+.al-b-stuck .al-b-bar { height: 5px; background: repeating-linear-gradient(135deg, var(--c) 0 10px, #1a1208 10px 20px); background-size: 40px 100%; animation: al-stripes 1.2s linear infinite; }
+.al-b-error { animation: al-flash 1s ease-in-out infinite; }
+.al-b-error .al-b-bar { animation: al-flash .6s steps(2) infinite; }
+.al-b-attention .al-b-bar { animation: al-flash 2s ease-in-out infinite; }
+
+/* Status-strip chips */
+.al-strip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 6px; border: 1px solid #2b3b4e; border-radius: 6px; background: #0b121a; color: #cfe0f1; font-size: 12px; cursor: pointer; }
+.al-strip:hover { border-color: #6d9cbc; }
+.al-strip-none { display: inline-flex; align-items: center; gap: 6px; color: #7f93a8; }
+.al-chip { --c: var(--al-idle); display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 5px; border-radius: 999px; background: color-mix(in srgb, var(--c) 16%, #0a1118); color: color-mix(in srgb, var(--c) 45%, #fff); font: 700 11px/1.5 ui-monospace, monospace; }
+.al-chip span { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.al-chip.al-error { animation: al-flash .9s ease-in-out infinite; }
+
+/* Sidebar */
+.workspace-nav .al-nav { margin-left: auto; display: inline-flex; flex: none; }
+.workspace-nav.nav-collapsed button > span.al-nav { display: inline-flex; position: absolute; right: 2px; top: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .al, .al *, .al-banner, .al-banner *, .al-chip { animation: none !important; }
+}
+.fx-reduced .al, .fx-reduced .al *, .fx-reduced .al-banner, .fx-reduced .al-banner *, .fx-reduced .al-chip, .fx-hide .al-b-bar { animation: none !important; }

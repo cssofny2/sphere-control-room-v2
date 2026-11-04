@@ -5,6 +5,9 @@ import { parseSync, transformSync } from 'rolldown/utils';
 import { loadTypeScript } from './load-typescript.mjs';
 const planModule = await loadTypeScript(new URL('../src/simulation/plan.ts', import.meta.url));
 const runModule = await loadTypeScript(new URL('../src/domain/run.ts', import.meta.url));
+const operatorModule = await loadTypeScript(new URL('../src/features/operator.ts', import.meta.url));
+const scopeModule = await loadTypeScript(new URL('../src/features/scopeModel.ts', import.meta.url));
+const ldvModule = await loadTypeScript(new URL('../src/features/ldvModel.ts', import.meta.url));
 
 // Exercise the actual simulator helpers, not a duplicated physics model.
 const source = fs.readFileSync(new URL('../src/MetrologyLabV3.tsx', import.meta.url), 'utf8');
@@ -23,7 +26,7 @@ const selected = ast.body.filter(node => {
   return false;
 }).map(node => source.slice(node.start, node.end)).join('\n');
 const js = transformSync('simulator.ts', selected).code;
-const sandbox = { ...planModule, ...runModule };
+const sandbox = { ...planModule, ...runModule, ...operatorModule, ...scopeModule, ...ldvModule };
 vm.runInNewContext(`${js}\nglobalThis.logic={initialState,reducer,tick,getMeasurementValidation,evaluateScanRecord,buildSweep,trueFrequency,buildQualitySummary};`, sandbox);
 const L = sandbox.logic;
 const fresh = () => JSON.parse(JSON.stringify(L.initialState));

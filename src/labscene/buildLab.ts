@@ -32,6 +32,12 @@ export type Lab = {
   cameras: LabCamera[]; hideCameraHousing: (id: number | null) => void;
   /** How many meshes the static-geometry merge fused (draw-call saving). */
   mergeStats: MergeStats;
+  /** How the chamber walls are drawn: solid steel, see-through glass, or a blue wireframe. */
+  setShellStyle: (style: 'solid' | 'glass' | 'wire') => void;
+  /** Pulses a glow on the equipment that is working right now (ids from features/equipment). Pass null to hide all. */
+  setHighlights: (ids: Set<string> | null, t: number) => void;
+  /** World positions the glow (and the screen pins) are attached to. */
+  highlightAnchors: Record<string, THREE.Vector3>;
 };
 
 export function buildLab(renderer: THREE.WebGLRenderer): Lab {
@@ -79,6 +85,13 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   const cuttable = [M.shell, M.liner];
   const setCutaway = (on: boolean) => { for (const m of cuttable) { m.clippingPlanes = on ? cutPlanes : null; m.clipIntersection = true; m.needsUpdate = true; } };
   renderer.localClippingEnabled = true;
+  const setShellStyle = (style: 'solid' | 'glass' | 'wire') => {
+    for (const m of cuttable as THREE.MeshPhysicalMaterial[]) {
+      const glass = style === 'glass', wire = style === 'wire', see = glass || wire;
+      m.transparent = see; m.opacity = glass ? 0.16 : wire ? 0.95 : 1; m.depthWrite = !see; m.wireframe = wire;
+      m.color.set(wire ? 0x7dd3fc : m === M.liner ? 0xe6ebf0 : 0xdde2e8); m.needsUpdate = true;
+    }
+  };
 
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Object3D, x = 0, y = 0, z = 0, shadow = true) => {
     const m = new THREE.Mesh(track(geo), mat); m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true; parent.add(m); return m;
@@ -385,12 +398,47 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     vna: { power: false }, ldv: { power: false }, clock: { power: false }, scope: { power: false }, facility: { power: false }, experiment: {}, alarms: [],
   }, 0.016, 0);
   detailUpdate = detail.update;
-  const dispose = () => { props.dispose(); camProps.dispose(); detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, deskTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
+  // Glow markers for the equipment that is in use. They ignore depth so a pump behind a wall is still marked.
+  const hlTex = glowTex(); rack.updateMatrixWorld(true); wsG.updateMatrixWorld(true);
+  const HL: Record<string, { p: THREE.Vector3; size: number; color: number }> = {
+    breaker: { p: rack.localToWorld(new THREE.Vector3(0, 2.12, 0)), size: 0.3, color: 0xfbbf24 },
+    clock: { p: rack.localToWorld(new THREE.Vector3(-0.07, 1.74, 0.3)), size: 0.4, color: 0x22d3ee },
+    vna: { p: rack.localToWorld(new THREE.Vector3(-0.07, 1.46, 0.3)), size: 0.5, color: 0x5fd4ff },
+    scope: { p: rack.localToWorld(new THREE.Vector3(-0.07, 1.1, 0.3)), size: 0.5, color: 0xffe066 },
+    daq: { p: wsG.localToWorld(new THREE.Vector3(0.5, 1.25, 0.0)), size: 0.55, color: 0x34d399 },
+    ldv: { p: new THREE.Vector3(0, 1.98, 0.08), size: 0.45, color: 0xe879f9 },
+    rf: { p: new THREE.Vector3(-R - 0.11, CH_Y + 0.02, 0.22), size: 0.3, color: 0xe879f9 },
+    rough: { p: new THREE.Vector3(1.05, 0.3, 0.2), size: 0.55, color: 0x94a3b8 },
+    turbo: { p: new THREE.Vector3(0, 0.22, -0.1), size: 0.4, color: 0x7dd3fc },
+    vent: { p: new THREE.Vector3(0, CH_Y - R - 0.05, 0.3), size: 0.22, color: 0x4ade80 },
+    thermo: { p: new THREE.Vector3(0, CH_Y - 0.3, 0), size: 0.4, color: 0xfb923c },
+    faraday: { p: new THREE.Vector3(0, 1.85, -0.5), size: 0.45, color: 0xfbbf24 },
+    isolation: { p: new THREE.Vector3(0.5, 0.15, 0.45), size: 0.3, color: 0xa78bfa },
+    door: { p: new THREE.Vector3(-0.2, CH_Y, 0.74), size: 0.4, color: 0xfb7185 },
+    stage: { p: spherePos, size: 0.3, color: 0xc084fc },
+  };
+  const hlSprites: Record<string, THREE.Sprite> = {};
+  for (const [id, h] of Object.entries(HL)) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: hlTex, color: h.color, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false }));
+    sp.position.copy(h.p); sp.scale.set(h.size, h.size, 1); sp.renderOrder = 20; sp.visible = false; scene.add(sp); hlSprites[id] = sp;
+  }
+  const setHighlights = (ids: Set<string> | null, t: number) => {
+    let i = 0;
+    for (const [id, sp] of Object.entries(hlSprites)) {
+      const on = !!ids && ids.has(id); sp.visible = on; i++;
+      if (!on) continue;
+      const k = 0.5 + 0.5 * Math.sin(t * 4.2 + i * 1.3), base = HL[id].size;
+      (sp.material as THREE.SpriteMaterial).opacity = 0.32 + 0.4 * k; sp.scale.setScalar(base * (0.85 + 0.35 * k));
+      if (id === 'stage') sp.position.copy(spherePos);
+    }
+  };
+  const highlightAnchors: Record<string, THREE.Vector3> = Object.fromEntries(Object.entries(HL).map(([id, h]) => [id, h.p]));
+  const dispose = () => { for (const sp of Object.values(hlSprites)) { sp.material.dispose(); } hlTex.dispose(); props.dispose(); camProps.dispose(); detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, deskTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
   void target; void sl; void wl; void back; void left; void bez; void win; void dRing; void dBody; void topPort; void leftPort1; void leftPort2; void rightPort; void capOut; void cap; void liner; void shell; void fl;
   // Fuse the static parts of the room into a few big meshes. Everything that moves or toggles is listed here and left alone.
   const dynamicParts: THREE.Object3D[] = [yCar, xCar, column, ...bellows, post, sphere, sphereGlow, ghost, doorPivot, bench, turboFan, rough, laser, laserGlow, dot, halo, rfPulse, ...knobs.map(k => k.mesh), ...panels.map(p => p.led), ...isoLeds, ...detail.dynamic];
   const noMerge = typeof location !== 'undefined' && /[?&]nomerge\b/.test(location.search);
   const props = buildProps({ scene, room, M, track, add, box });
   const mergeStats = noMerge ? { before: 0, after: 0, groups: 0 } : mergeStaticMeshes(scene, { regionRoots: detail.pickables.map(p => p.root), dynamic: dynamicParts, track });
-  return { scene, update, setCutaway, dispose, spherePos, mergeStats, setDesk: (st: DeskState) => { deskSt = st; }, screensaver: { wake: () => { ssWake = lastT; }, setAfter: (sec: number) => { ssAfter = sec; }, get active() { return ssOn; } }, cameras: CAMERAS, hideCameraHousing: (id: number | null) => camProps.hideOnly(id), anchors: { ...anchors, ...detail.anchors }, phone: detail.phone, pickables: detail.pickables, setQuality: (q: Quality) => { detail.setQuality(q); key.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024); key.shadow.map?.dispose(); (key.shadow as any).map = null; }, turnKnob: detail.turnKnob };
+  return { scene, update, setCutaway, dispose, spherePos, mergeStats, setDesk: (st: DeskState) => { deskSt = st; }, screensaver: { wake: () => { ssWake = lastT; }, setAfter: (sec: number) => { ssAfter = sec; }, get active() { return ssOn; } }, cameras: CAMERAS, hideCameraHousing: (id: number | null) => camProps.hideOnly(id), anchors: { ...anchors, ...detail.anchors }, phone: detail.phone, pickables: detail.pickables, setShellStyle, setHighlights, highlightAnchors, setQuality: (q: Quality) => { detail.setQuality(q); key.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024); key.shadow.map?.dispose(); (key.shadow as any).map = null; }, turnKnob: detail.turnKnob };
 }
