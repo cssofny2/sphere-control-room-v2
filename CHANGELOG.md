@@ -4,6 +4,7 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Live Timeline page (`#/timeline`): pressure, temperature, fitted resonance and stage position sampled once per simulated second from start-up (the last hour is kept), with alarms and warnings, operator and system actions, and measurements marked on the same clock. Choose a 2 minute to 1 hour window, scrub back to read what the lab showed at any moment (read-only), jump from an event to its time, and export the telemetry as CSV. Short spikes survive downsampling. History is not saved across a reload.
 - Dr. Wire run review: phone him and say "review my run", "how did my run go" or "are my measurements any good". He reads the recorded data and says what is sound, the biggest problem (unlocked clock, failed fits, shielding or calibration off, temperature or pressure moving, repeats that scatter or drift, no repeats, unmeasured axes) and what to do next. It is computed, offline and read-only: a review starts no lab action.
 - Run review card on Experiment Runs shows the same findings as a list.
 - Accessibility: an axe-core audit of all 14 pages found 16 critical or serious problems; all are fixed (unlabelled sliders, checkboxes and selects, buttons nested in buttons, invalid ARIA on tabs, low-contrast text, empty table header, hidden-but-focusable content). A re-run reports none.

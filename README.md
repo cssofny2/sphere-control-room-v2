@@ -60,6 +60,7 @@ The repository's `vercel.json` selects Vite, installs the committed lockfile wit
 - **Fault Injector:** individual equipment faults plus blind troubleshooting drills.
 - **Lab Notebook:** tagged notes with instrument snapshots and Markdown export. Notes survive breaker cycles but not a page reload.
 - **Pump and stage simulation:** roughing/turbo lifecycle and commanded-versus-actual stage motion.
+- **Live Timeline:** an hour of per-second telemetry (pressure, temperature, fitted resonance, stage position) with event and measurement markers, scrub-back and CSV export. It is held in memory and not saved across reloads.
 - **Links, embedding and offline:** pages have hash addresses (`#/vna`); `?embed=1` gives a compact view for iframes (framing is allowed only from spheredesci.org via `public/_headers`, which Cloudflare reads; Vercel ignores that file); a service worker caches the app for offline use in production builds.
 - **Bundles and import:** Experiment Runs exports a checksummed `.sphere.json` bundle and imports bundles or CSV files after validation and a preview. The re-check rebuilds each record's trace from its saved settings and compares the resonance; it verifies recorded numbers and is not a full replay of a run.
 - **Saved sessions and run library:** measurements and notebook entries are autosaved in this browser (IndexedDB) and can be resumed after a reload; each run is archived in the Run library on Experiment Runs. Data never leaves the browser. If the browser blocks storage the app still works but nothing is kept after the page closes.

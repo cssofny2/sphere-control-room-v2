@@ -11,6 +11,7 @@ import { RunLibrary, SessionRestore } from './persistence/SessionUI';
 import { BundleImport } from './persistence/BundleUI';
 import { RunCompare } from './analysis/RunCompare';
 import { RunReviewCard } from './technician/RunReviewCard';
+import { Timeline, installTelemetry } from './features/Timeline';
 import { hashForPage, isEmbed, pageFromHash, shareUrl } from './features/route';
 import { installModalA11y } from './features/modalA11y';
 import { Announcer } from './features/Announcer';
@@ -834,6 +835,8 @@ export default function MetrologyLab() {
   useEffect(() => installActivityTracker(cb => onLabTransition(cb)), []);
   // Dialogs get a dialog role, focus handling, a Tab trap and Escape-to-close.
   useEffect(() => installModalA11y(), []);
+  // The live timeline samples the lab once per simulated second from the start, so history exists when its page is opened.
+  useEffect(() => installTelemetry(), []);
   // Deep links: the address bar follows the page (#/vna), and opening or editing a #/page link switches to it.
   const activePage = state.ui.active;
   useEffect(() => {
@@ -1042,6 +1045,7 @@ export default function MetrologyLab() {
         ["dashboard", "Operator Console", Radio],
         ["chamber", "3D Chamber & Stage", Wind],
         ["copilot", "AI Copilot", BrainCircuit],
+        ["timeline", "Live Timeline", Activity],
       ]
     },
     {
@@ -1254,6 +1258,7 @@ export default function MetrologyLab() {
           {active === "runs" && <><PageAlert k="experiment" name="Experiment run" onGo={navigate} /><Runs state={state} dispatch={dispatch} exportCsv={exportCsv} exportJson={exportJson} sweep={performSweep} HelpInfo={HelpInfo} /></>}
           {active === "training" && <TrainingMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "copilot" && <LabCopilot state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
+          {active === "timeline" && <Timeline />}
           {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "faults" && <FaultInjector state={state} dispatch={dispatch} />}
           {active === "challenges" && <ChallengeMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
