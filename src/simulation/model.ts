@@ -3,6 +3,8 @@
 // without the UI. Simulator output is illustrative and is not experimental evidence.
 
 export const BASE_FREQUENCY = 230500;
+/** Teaching-model location sensitivity (Hz per mm). Shown to students only when the blind (hidden truth) mode is off. */
+export const LOCATION_HZ_PER_MM = { x: 45.2, y: -12.5, z: 80.1 } as const;
 
 export interface ModelEffects {
   location?: boolean; temperature?: boolean; pressure?: boolean; clockDrift?: boolean;
@@ -41,7 +43,7 @@ export function noise(i: number, seed: number): number {
 
 export function trueFrequency(state: ModelState): number {
   const { stage, chamber, model, clock, failures } = state;
-  const loc = model.location ? (stage.actualX ?? stage.x) * 45.2 + (stage.actualY ?? stage.y) * -12.5 + (stage.actualZ ?? stage.z) * 80.1 : 0;
+  const loc = model.location ? (stage.actualX ?? stage.x) * LOCATION_HZ_PER_MM.x + (stage.actualY ?? stage.y) * LOCATION_HZ_PER_MM.y + (stage.actualZ ?? stage.z) * LOCATION_HZ_PER_MM.z : 0;
   const thermal = model.temperature ? (chamber.temperature - 20) * 5 : 0;
   const air = model.pressure ? (chamber.pressure > 1 ? -250 : -Math.log10(Math.max(chamber.pressure, 1e-8)) * .3) : 0;
   const clockDrift = (model.clockDrift && (!clock.locked || clock.cableFault)) || failures.clockDrift ? 15.5 : 0;

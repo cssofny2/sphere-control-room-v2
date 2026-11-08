@@ -5,6 +5,7 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 ## Unreleased
 
 - Compare runs: pick two to four saved runs on Experiment Runs for an overlay of resonance by position, per-position differences from the baseline with combined uncertainty (z, flagged above 2), and the lab conditions that differ (temperature, pressure, clock, shielding, calibration, model version).
+- Spatial Field Explorer: a field model (weighted linear fit of resonance against X, Y and Z with coefficient uncertainties; axes with under 2 mm of spread are reported as unknown), a real coverage figure (share of the stage cube within 10 mm of a measurement, replacing records/25) and ranked suggestions for where to measure next, each with a Go button for the stage. The model's true sensitivities are shown only when blind mode is off.
 - Reproducibility bundles: the Bundle button on Experiment Runs exports a versioned, SHA-256 checksummed `.sphere.json` (model and app versions, citation block, runs, measurements, notebook) instead of dumping the whole app state.
 - Validated import: bundles are checked for structure, limits, hostile keys and checksum before anything is added; a preview shows counts, warnings and a re-check that rebuilds each record's trace from its saved settings. CSV files import through an auto-detected column mapping with a preview.
 - CSV export now escapes fields correctly.
