@@ -1,7 +1,8 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { onLabTransition, useLab } from '../state/labStores';
 import { fitTrace } from '../simulation/measurement';
+import { SaveImageButton, EmptyState } from './UiBits';
 import { Ring, downsample, markersFrom, sampleAt, sampleOf, telemetryCsv, type Marker, type Sample } from './telemetry';
 
 // One ring for the whole session. It is filled whether or not the Timeline page is open.
@@ -17,6 +18,18 @@ export function installTelemetry(): () => void {
     const tf = trace && trace.length ? fitTrace(trace) : null;
     if (ring.push(sampleOf(next as never, tf && tf.fit.ok ? tf.fit.f0Hz : null))) listeners.forEach(f => f());
   });
+}
+
+/** The latest telemetry samples (about the last `max`), refreshed once a second, for sparklines elsewhere in the app. */
+export function useTelemetrySamples(max = 90): readonly Sample[] {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    let timer: number | null = null;
+    const f = () => { if (timer === null) timer = window.setTimeout(() => { timer = null; bump(n => n + 1); }, 1000); };
+    listeners.add(f);
+    return () => { listeners.delete(f); if (timer !== null) window.clearTimeout(timer); };
+  }, []);
+  return ring.toArray().slice(-max);
 }
 
 const COLORS = { alarm: '#fb7185', action: '#94a3b8', measurement: '#5fd4ff' } as const;
@@ -46,6 +59,7 @@ export const Timeline = memo(function Timeline() {
   const records = useLab(s => s.experiment.records as never[]);
   const [windowS, setWindowS] = useState(600);
   const [cursor, setCursor] = useState<number | null>(null);
+  const panelsRef = useRef<HTMLDivElement>(null);
 
   const all = ring.toArray();
   const end = all.length ? all[all.length - 1].t : 0;
@@ -71,11 +85,12 @@ export const Timeline = memo(function Timeline() {
               <option value={120}>2 min</option><option value={600}>10 min</option><option value={1800}>30 min</option><option value={3600}>1 hour</option>
             </select>
           </label>
+          <SaveImageButton targetRef={panelsRef} title="Live timeline" />
           <button onClick={exportCsv} disabled={!all.length} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 font-semibold hover:bg-zinc-700 disabled:opacity-40">Export CSV</button>
         </div>
       </div>
 
-      {!shown.length ? <p className="rounded border border-zinc-800 bg-zinc-950 p-6 text-center text-sm text-zinc-500">No samples yet. Switch the main breaker on and the lab starts recording.</p> : (
+      {!shown.length ? <EmptyState title="No samples yet" icon="◔">Switch the main breaker on and the lab starts recording pressure, temperature, resonance and stage position every simulated second.</EmptyState> : (
         <>
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs">
             <label className="flex items-center gap-3">
@@ -91,6 +106,7 @@ export const Timeline = memo(function Timeline() {
               </div>
             )}
           </div>
+          <div ref={panelsRef} className="space-y-4">
           {PANELS.map(p => {
             const data = downsample(shown, 300, p.get).map(s => ({ t: s.t, v: p.get(s) }));
             return (
@@ -112,6 +128,7 @@ export const Timeline = memo(function Timeline() {
               </div>
             );
           })}
+          </div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs">
             <div className="mb-1 font-bold uppercase text-zinc-300">Events in this window <span className="font-normal normal-case text-zinc-500">(red = alarm or warning, blue = measurement)</span></div>
             <ul className="max-h-[220px] space-y-0.5 overflow-auto">

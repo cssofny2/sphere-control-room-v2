@@ -153,3 +153,12 @@ button.status-chip { border: 1px solid #2b3b4e; cursor: pointer; }
 @media (forced-colors: active) {
   .lab-root :focus-visible { outline: 3px solid Highlight; }
 }
+
+/* Compact layout (Workspace tools): tighter spacing for small screens and dense data. */
+.density-compact .workspace-instrument { padding: 8px 10px 16px; }
+.density-compact .space-y-4 > :not(:last-child), .density-compact .space-y-3 > :not(:last-child) { margin-block-end: .5rem !important; }
+.density-compact .p-4 { padding: .6rem !important; }
+.density-compact .p-3 { padding: .5rem !important; }
+.density-compact .gap-4 { gap: .5rem !important; }
+.density-compact .gap-3 { gap: .4rem !important; }
+.density-compact table td, .density-compact table th { padding: 3px 6px !important; }
