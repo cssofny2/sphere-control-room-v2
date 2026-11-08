@@ -121,7 +121,9 @@ Impact = scientific credibility + what users lose today + reach (education, open
 **Scope.** `src/technician/reviewRun.ts`: deterministic findings from run stats (coverage gaps, drift vs time, repeatability, environment mismatch, calibration state, reference usage, quality-gate failures), each with severity and a suggested next action. "Review my run" intent in `intents.ts`/`actions.ts`; spoken and shown on his desk screen. Optional LLM paraphrase through the existing `server.ts` path (same-origin check, rate limit, daily cap); the model only rephrases computed findings and cannot start lab actions (existing safety rule).
 **Tests.** `scripts/technician-review.test.mjs` in the style of the other technician suites; offline path needs no API key.
 
-## 10. Live acquisition timeline and scrub-back — M
+## 10. Live acquisition timeline and scrub-back — M — DONE (branch `feat/timeline`)
+
+> Not delivered: persisting the telemetry across reloads (it is memory-only) and PNG export.
 
 **Scope.** 1 Hz telemetry ring buffer slice (pressure, temperature, f0, stage position, turbo RPM; ~1 h) persisted via #2; `src/features/Timeline.tsx` with synchronized Recharts panels and shared brush, markers for alarms, operator actions (events already carry time, subsystem, run id, xyz) and scan points; scrub freezes a read-only telemetry view (not full state replay); export PNG/CSV.
 **Tests.** Ring-buffer bounds and downsampling; marker alignment fixtures.
