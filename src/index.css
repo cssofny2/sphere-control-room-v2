@@ -140,3 +140,14 @@ button.status-chip { border: 1px solid #2b3b4e; cursor: pointer; }
   .workspace-header { min-height: 42px; padding-block: 2px; }
   .workspace-status { padding-block: 2px; }
 }
+
+/* Accessibility: muted text meets 4.5:1 contrast on the dark panels, and a stronger focus ring is used when asked for. */
+.lab-root .text-zinc-500 { color: #9a9aa8; }
+.lab-root .text-zinc-600 { color: #8b8b99; }
+@media (prefers-contrast: more) {
+  .lab-root :focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  .lab-root .text-zinc-400, .lab-root .text-zinc-500, .lab-root .text-zinc-600 { color: #d4d4d8; }
+}
+@media (forced-colors: active) {
+  .lab-root :focus-visible { outline: 3px solid Highlight; }
+}

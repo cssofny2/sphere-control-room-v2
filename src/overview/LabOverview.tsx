@@ -424,7 +424,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
             <p className="ov-scrollhint">Swipe sideways to see the whole map.</p>
           </div>
 
-          <aside className="ov-side" aria-label="Equipment inspector">
+          <div className="ov-side" role="region" aria-label="Equipment inspector">
             <div className="ov-panel" style={{ '--c': selToken.hex } as React.CSSProperties}>
               <div className="ov-panel-h"><h2>Inspector<Q k="ov.inspector" /></h2></div>
               <div className="ov-insp-title">
@@ -474,7 +474,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
                 })}
               </div>
             </div>
-          </aside>
+          </div>
         </div>
 
         <div className="ov-lower">
@@ -493,8 +493,8 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
           <div className="ov-panel">
             <div className="ov-panel-h">
               <div className="ov-tabs" role="tablist" aria-label="Alarms and events">
-                <button type="button" role="tab" className="ov-seg" aria-selected={feedTab === 'alarms'} aria-pressed={feedTab === 'alarms'} onClick={() => setFeedTab('alarms')}>Alarms ({openAlarms.length})</button>
-                <button type="button" role="tab" className="ov-seg" aria-selected={feedTab === 'events'} aria-pressed={feedTab === 'events'} onClick={() => setFeedTab('events')}>Recent events</button>
+                <button type="button" role="tab" className="ov-seg" aria-selected={feedTab === 'alarms'} onClick={() => setFeedTab('alarms')}>Alarms ({openAlarms.length})</button>
+                <button type="button" role="tab" className="ov-seg" aria-selected={feedTab === 'events'} onClick={() => setFeedTab('events')}>Recent events</button>
               </div>
               <Q k={feedTab === 'alarms' ? 'ov.alarms' : 'ov.events'} />
               {feedTab === 'alarms'
@@ -534,7 +534,7 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
                 {(['lab', 'state', 'name'] as const).map(m => <button key={m} type="button" className="ov-seg" aria-pressed={sort === m} onClick={() => setSort(m)}>{m === 'lab' ? 'Lab order' : m === 'state' ? 'Problems first' : 'Name'}</button>)}
               </div>
             </div>
-            <div className="ov-th" aria-hidden="true"><span>Equipment</span><span>State<Q k="ov.state" /></span><span>Main reading<Q k="ov.main_reading" /></span><span /></div>
+            <div className="ov-th"><span>Equipment</span><span>State<Q k="ov.state" /></span><span>Main reading<Q k="ov.main_reading" /></span><span /></div>
             {tableRows.map(e => {
               const t = lab.visualToken(stateMap[e.id]);
               return (

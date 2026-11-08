@@ -71,7 +71,7 @@ export function RunLibrary({ dispatch, refreshKey }: { dispatch: Dispatch; refre
       <p className="mb-2 text-[11px] text-zinc-500">Runs are saved automatically in this browser{kind === 'memory' ? ' (storage is blocked here, so they last only until you close the page)' : ''}. They stay after you clear the ledger or switch the breaker off.</p>
       <div className="max-h-[220px] overflow-auto">
         <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500"><tr><th className="p-2">Run</th><th className="p-2">Records</th><th className="p-2">Last measurement</th><th className="p-2" /></tr></thead>
+          <thead className="sticky top-0 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500"><tr><th className="p-2">Run</th><th className="p-2">Records</th><th className="p-2">Last measurement</th><th className="p-2"><span className="sr-only">Actions</span></th></tr></thead>
           <tbody>
             {rows?.length ? rows.map(r => (
               <tr key={r.runId} className="border-t border-zinc-900">

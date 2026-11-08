@@ -4,6 +4,11 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Accessibility: an axe-core audit of all 14 pages found 16 critical or serious problems; all are fixed (unlabelled sliders, checkboxes and selects, buttons nested in buttons, invalid ARIA on tabs, low-contrast text, empty table header, hidden-but-focusable content). A re-run reports none.
+- Dialogs: every pop-up now has a dialog role and name, moves focus in, keeps Tab inside, closes on Escape through its Close or Cancel button, and returns focus to what opened it.
+- Screen readers: new alarms are announced assertively and each recorded measurement politely, without moving focus.
+- Colour-vision-safe Viridis and Cividis palettes for the spatial maps; stronger focus rings under `prefers-contrast: more` and forced-colors support.
+- Mobile: no page scrolls sideways at 360 px; the Experiment Runs button row and a chamber control now wrap.
 - Deep links: every workspace page has an address (`#/vna`, `#/runs`, ...) that follows the page and opens it when pasted; "Copy link to this page" is in Workspace tools. Unknown or malformed links are ignored.
 - Embed mode: `?embed=1` opens in instrument focus (no navigation drawer or journal) for iframes. `public/_headers` now allows framing only by spheredesci.org and www.spheredesci.org (it used to deny all framing).
 - Offline: a web app manifest and a service worker let the simulator open offline after one visit. The worker caches built assets and the page, loads pages network-first, and never touches `/api/` (Dr. Wire, search, mail, voice) or other origins.
