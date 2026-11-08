@@ -4,6 +4,8 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- UI and visualization upgrades: **Save image** on the VNA trace, Live Timeline and Run comparison charts (exports a PNG); the S11 plot shades the resonance linewidth (FWHM, Q); tiny trend sparklines for resonance, temperature and pressure on the Operator Console; thin-space digit grouping for large numbers (230 500.123); friendly empty states; toasts for copy link, exports, restores and run complete/stopped; keyboard shortcuts (`?` lists them, `g` then a letter jumps to a page); a Compact layout option under Workspace tools; the spatial colour scale now has tick values and a hover readout; the live operation window starts collapsed on short screens.
+
 - 3D Engineering model: measured points are now drawn where the stage was when each was taken (green valid, amber suspect or failed; newest 200, 60 when zoomed out), with a legend and per-point tooltips.
 - Fixed a crash that blanked the whole app: the Operator Console resonance tile threw when the latest record had no S11 depth or uncertainty (records from a CSV import or an older session). It now shows what it has. A page error boundary also keeps any future page crash from taking down the app: it shows a message with Try again and Reload.
 - `npm run deploy:cloudflare` builds and deploys the Worker; the Cloudflare account is now set in `wrangler.jsonc`, so the deploy is non-interactive.

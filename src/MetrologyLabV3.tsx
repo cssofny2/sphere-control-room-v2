@@ -11,7 +11,11 @@ import { RunLibrary, SessionRestore } from './persistence/SessionUI';
 import { BundleImport } from './persistence/BundleUI';
 import { RunCompare } from './analysis/RunCompare';
 import { RunReviewCard } from './technician/RunReviewCard';
-import { Timeline, installTelemetry } from './features/Timeline';
+import { Timeline, installTelemetry, useTelemetrySamples } from './features/Timeline';
+import { EmptyState, SaveImageButton, ShortcutsDialog, Sparkline } from './features/UiBits';
+import { ToastHost, toast } from './features/toast';
+import { INITIAL_CHORD, isTypingTarget, stepHotkey } from './features/hotkeys';
+import { fmtNum } from './features/format';
 import { markerRadius, pointMarkers } from './features/pointMarkers';
 import { PageBoundary } from './features/PageBoundary';
 import { LearningPaths } from './curriculum/LearningPaths';
@@ -54,7 +58,7 @@ import { ScopePowerArt, StartupChecklist } from './features/StartupChecklist';
 import { CAM_PRESETS, ChamberViewControls, VIEW_MODES, type CamPreset, type ChamberViewId, type ViewMode } from './features/ChamberViewControls';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot
+  AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, ReferenceDot, ReferenceArea
 } from 'recharts';
 import {
   Power, Settings, Activity, Thermometer, Wind, Target, Maximize, AlertCircle,
@@ -858,6 +862,27 @@ export default function MetrologyLab() {
   useEffect(() => installModalA11y(), []);
   // The live timeline samples the lab once per simulated second from the start, so history exists when its page is opened.
   useEffect(() => installTelemetry(), []);
+  // Keyboard shortcuts: "?" lists them, "g" then a letter goes to a page. Ignored while typing or with a dialog open.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  useEffect(() => {
+    let chord = INITIAL_CHORD;
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target as HTMLElement) || document.querySelector("div.fixed.inset-0")) return;
+      const r = stepHotkey(chord, e, Date.now()); chord = r.state;
+      if (r.action?.type === "help") { e.preventDefault(); setShortcutsOpen(true); }
+      else if (r.action?.type === "goto") { e.preventDefault(); dispatch({ type: "SET_UI", patch: { active: r.action.page } }); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // A run finishing is worth a heads-up wherever you are in the app.
+  useEffect(() => onLabTransition((prev, next) => {
+    if (!prev.experiment?.active || next.experiment?.active) return;
+    const status = next.experiment?.contract?.status, n = next.experiment?.records?.length ?? 0;
+    if (status === "completed") toast(`Run complete: ${n} measurement${n === 1 ? "" : "s"} recorded.`, "success");
+    else if (status === "cancelled") toast("Run stopped.", "warn");
+    else toast("Run ended.", "info");
+  }), []);
   // Deep links: the address bar follows the page (#/vna), and opening or editing a #/page link switches to it.
   const activePage = state.ui.active;
   useEffect(() => {
@@ -872,7 +897,7 @@ export default function MetrologyLab() {
   }, [activePage]);
   const copyPageLink = () => {
     const url = shareUrl(activePage, window.location);
-    const done = () => dispatch({ type: "EVENT", text: `Link to this page copied: ${url}`, subsystem: "SYSTEM" });
+    const done = () => { dispatch({ type: "EVENT", text: `Link to this page copied: ${url}`, subsystem: "SYSTEM" }); toast("Link to this page copied.", "success"); };
     if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done, () => window.prompt("Copy this link", url));
     else window.prompt("Copy this link", url);
   };
@@ -920,7 +945,8 @@ export default function MetrologyLab() {
   const valid = validationResult.overall === "VALID";
   const unresolved = state.alarms.filter(a => !a.acknowledged).length;
   const active = state.ui.active;
-  const [fx, setFx] = useState(() => ({ reduced: typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches, hide: false }));
+  const [fx, setFx] = useState(() => ({ reduced: typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches, hide: false, compact: (() => { try { return localStorage.getItem("sphere.density") === "compact"; } catch { return false; } })() }));
+  useEffect(() => { try { localStorage.setItem("sphere.density", fx.compact ? "compact" : "comfortable"); } catch { /* storage may be blocked */ } }, [fx.compact]);
   FX = fx;
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
 
@@ -1111,12 +1137,14 @@ export default function MetrologyLab() {
   };
 
   return (
-    <div ref={labRootRef} className={`lab-root workspace-shell ${focusMode ? "workspace-focus" : ""} ${fx.reduced ? "fx-reduced" : ""} ${fx.hide ? "fx-hide" : ""} bg-[#06080d] font-sans text-zinc-100 selection:bg-sky-500/40`}>
+    <div ref={labRootRef} className={`lab-root workspace-shell ${focusMode ? "workspace-focus" : ""} ${fx.reduced ? "fx-reduced" : ""} ${fx.hide ? "fx-hide" : ""} ${fx.compact ? "density-compact" : ""} bg-[#06080d] font-sans text-zinc-100 selection:bg-sky-500/40`}>
       <style>{TW_FALLBACK}</style>
       <Announcer />
+      <ToastHost />
+      {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       <WorkspaceHeader state={state} navOptions={navGroups.flatMap(group => group.items.map(([id, label]) => ({ id, label })))} focus={focusMode} fullscreen={fullscreen} journalOpen={journalOpen && !focusMode} alarms={unresolved}
         onNavigate={navigate} onNavigation={toggleNavigation} onJournal={toggleJournal} onFocus={() => { setFocusMode(v => !v); setNavDrawerOpen(false); }} onFullscreen={toggleFullscreen}
-        onSearch={() => set("ui", { cmdPaletteOpen: true })} onTool={tool => tool === "share" ? copyPageLink() : set("ui", { [({ wizard: "wizardOpen", videos: "videoModal", procedure: "manualOpen", glossary: "glossaryOpen" })[tool]]: true })}
+        onSearch={() => set("ui", { cmdPaletteOpen: true })} onTool={tool => tool === "share" ? copyPageLink() : tool === "shortcuts" ? setShortcutsOpen(true) : set("ui", { [({ wizard: "wizardOpen", videos: "videoModal", procedure: "manualOpen", glossary: "glossaryOpen" })[tool]]: true })}
         operator={state.operator} onOperator={() => setOperatorOpen(true)} onMode={mode => dispatch({ type: "SET_MODE", mode })} onSpeed={speed => set("facility", { speed })} detailsOpen={detailsOpen} onDetails={() => setDetailsOpen(v => !v)} settings={<FxSettings fx={fx} setFx={setFx} />}
         onPower={() => {
           if (state.facility.power) set("ui", { confirmModal: { title: "Open Main Breaker?", desc: "Opening the main breaker will cut AC power to all instruments and reset session state.", onConfirm: () => { dispatch({ type: "POWER", value: false }); set("ui", { confirmModal: null }); } } });
@@ -2170,6 +2198,7 @@ function S11Plot({ trace, compact = false, progress = null }) {
         <YAxis domain={[-35, 2]} ticks={[-35, -30, -25, -20, -15, -10, -5, 0]} stroke={SCREEN.axis} fontSize={fs} tickLine={false} width={compact ? 32 : 46} label={axisLabel("S11 (dB)", -90)} />
         <Tooltip content={<ScreenTip xFmt={v => `${Number(v).toFixed(2)} Hz`} yFmt={v => `${Number(v).toFixed(2)} dB`} />} />
         <ReferenceLine y={-10} stroke="#3d5a73" strokeDasharray="3 5" />
+        {f0 && !compact && <ReferenceArea x1={f0.f0Hz - f0.fwhmHz / 2} x2={f0.f0Hz + f0.fwhmHz / 2} fill={SCREEN.fit} fillOpacity={0.09} stroke={SCREEN.fit} strokeOpacity={0.25} ifOverflow="hidden" label={{ value: `FWHM ${f0.fwhmHz.toFixed(1)} Hz · Q ${Math.round(f0.q)}`, position: "insideTopRight", fill: "#ffd08a", fontSize: 9 }} />}
         {(f0 || min) && <ReferenceLine x={f0 ? f0.f0Hz : min.freq} stroke={SCREEN.fit} strokeOpacity={0.35} strokeDasharray="2 4" />}
         <Line name="S11" dataKey="s11" stroke={SCREEN.s11} dot={false} strokeWidth={compact ? 1.5 : 2} isAnimationActive={false} />
  {!compact && fitOk && <Line name="Fit" dataKey="fit" stroke={SCREEN.fit} dot={false} strokeDasharray="5 4" strokeOpacity={0.7} strokeWidth={1.2} isAnimationActive={false} />}
@@ -2335,6 +2364,7 @@ function ramp(stops, t) {
 
 function SpatialMaps({ records, view, state }) {
   const [o, setO] = useState({ order: true, planned: true, quality: true, labels: false, unc: true });
+  const [hover, setHover] = useState<any>(null);
   const pl = state && state.experiment && (state.experiment.plan || state.experiment.planned || state.experiment.scanPlan);
   const planned = Array.isArray(pl) ? pl.filter(q => q && typeof q.x === "number") : [];
   const metric = view.metric;
@@ -2398,7 +2428,7 @@ function SpatialMaps({ records, view, state }) {
             ))}
             <line x1={sx(0)} y1={O} x2={sx(0)} y2={O + S} stroke="#24384c" />
             <line x1={O} y1={sy(0)} x2={O + S} y2={sy(0)} stroke="#24384c" />
-            <SpatialMarks p={p} records={records} stage={state.stage} planned={planned} o={o} sx={sx} sy={sy} colorOf={r => ramp(stops, norm(get(r)))} get={get} unit={unit} />
+            <SpatialMarks onHover={setHover} p={p} records={records} stage={state.stage} planned={planned} o={o} sx={sx} sy={sy} colorOf={r => ramp(stops, norm(get(r)))} get={get} unit={unit} />
             <g fontSize="9" fill="#6b7c90" style={{ fontFamily: "ui-monospace, monospace" }}>
               <text x={O} y={O + S + 12}>-35</text>
               <text x={sx(0)} y={O + S + 12} textAnchor="middle">{p.a.toUpperCase()} (mm)</text>
@@ -2411,10 +2441,10 @@ function SpatialMaps({ records, view, state }) {
           </svg>
         ))}
       </div>
-      <div className="mt-3 flex items-center gap-2 font-mono text-[10px] text-zinc-400">
-        <span>{lo.toFixed(2)}{unit}</span>
-        <div className="h-2.5 flex-1 rounded" style={{ background: `linear-gradient(90deg, ${stops.join(",")})` }} />
-        <span>{hi.toFixed(2)}{unit}</span>
+      <div className="mt-3 font-mono text-[10px] text-zinc-400">
+        <div className="h-2.5 w-full rounded" role="img" aria-label={`Colour scale from ${lo.toFixed(2)}${unit} to ${hi.toFixed(2)}${unit}`} style={{ background: `linear-gradient(90deg, ${stops.join(",")})` }} />
+        <div className="mt-0.5 flex justify-between" aria-hidden="true">{[0, 0.25, 0.5, 0.75, 1].map(t => <span key={t}>{(lo + (hi - lo) * t).toFixed(2)}</span>)}<span>{String(unit).trim()}</span></div>
+        <div className="mt-1 min-h-4 text-zinc-300" role="status">{hover ? `#${hover.sequence} at ${Number(hover.x).toFixed(1)}, ${Number(hover.y).toFixed(1)}, ${Number(hover.z).toFixed(1)} mm: ${Number(get(hover)).toFixed(2)}${unit}` : "Hover a point to read its value."}</div>
       </div>
       <div className="mt-1 text-[10px] text-zinc-500">
         Solid = valid · dashed amber ring = suspect · ✕ = invalid · square = planned · diamond = stage · yellow ring = next target · larger and brighter = nearer in depth.{view.interpolation !== "none" && records.length < 3 ? " Interpolation needs at least 3 points." : ""}
@@ -2506,6 +2536,7 @@ function FxSettings({ fx, setFx }) {
     <div className="workspace-fx-settings">
       <label className="flex items-center gap-1"><input type="checkbox" checked={fx.reduced} onChange={e => setFx({ ...fx, reduced: e.target.checked })} /> Reduce motion</label>
       <label className="flex items-center gap-1"><input type="checkbox" checked={fx.hide} onChange={e => setFx({ ...fx, hide: e.target.checked })} /> Hide decorative effects</label>
+      <label className="flex items-center gap-1"><input type="checkbox" checked={!!fx.compact} onChange={e => setFx({ ...fx, compact: e.target.checked })} /> Compact layout</label>
     </div>
   );
 }
@@ -2525,7 +2556,7 @@ function ChamberView({ state, cv, setCv }) {
   );
 }
 
-function SpatialMarks({ p, records, stage, planned, o, sx, sy, colorOf, get, unit }) {
+function SpatialMarks({ p, records, stage, planned, o, sx, sy, colorOf, get, unit, onHover = null }: any) {
   const dk = ["x", "y", "z"].find(k => k !== p.a && k !== p.b);
   const seq = [...records].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
   const rest = planned.filter(q => !seq.some(r => Math.hypot(r.x - q.x, r.y - q.y, r.z - q.z) < 0.6));
@@ -2543,7 +2574,7 @@ function SpatialMarks({ p, records, stage, planned, o, sx, sy, colorOf, get, uni
         const pointState=getMeasurementVisualState(r), bad=pointState==="fault", sus=pointState==="warning";
         const vt=visualToken(pointState), c=colorOf(r);
         return (
-          <g key={r.id} opacity={0.55 + d * 0.45}>
+          <g key={r.id} opacity={0.55 + d * 0.45} onMouseEnter={() => onHover?.(r)} onMouseLeave={() => onHover?.(null)}>
             <ellipse cx={cx + 2} cy={cy + 4 + (1 - d) * 5} rx={4 * k} ry={1.6 * k} fill="#000" opacity=".6" />
             {o.unc && <circle cx={cx} cy={cy} r={4 * k + Math.min(14, 3 + 10 * Math.sqrt(Math.max(0, r.uncertaintyHz || 0)))} fill={c} opacity=".18" />}
             {bad ? <g stroke="#ef4444" strokeWidth="2"><line x1={cx - 4} y1={cy - 4} x2={cx + 4} y2={cy + 4} /><line x1={cx - 4} y1={cy + 4} x2={cx + 4} y2={cy - 4} /></g>
@@ -2823,6 +2854,7 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
   const valid = validationResult.overall === "VALID";
   const records = state.experiment.records;
   const latestRecord = records[0];
+  const trend = useTelemetrySamples(90);
   const liveFit = useMemo(() => (state.vna.power && state.vna.trace?.length ? fitTrace(state.vna.trace) : null), [state.vna.power, state.vna.trace]);
 
   return (
@@ -2877,8 +2909,9 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Current Resonance <HelpInfo termKey="center_freq" /></div>
-          <div className="mt-2 text-lg font-bold text-sky-300">{latestRecord ? `${latestRecord.resonance.toFixed(2)} Hz` : liveFit?.fit.ok ? `${liveFit.fit.f0Hz.toFixed(2)} Hz` : "No fit yet"}</div>
+          <div className="mt-2 text-lg font-bold text-sky-300">{latestRecord ? `${fmtNum(latestRecord.resonance, 2)} Hz` : liveFit?.fit.ok ? `${fmtNum(liveFit.fit.f0Hz, 2)} Hz` : "No fit yet"}</div>
           <div className="mt-1 text-[11px] text-zinc-500">{latestRecord ? (latestRecord.fit?.ok === false ? "Fit failed · lowest sample" : `${Number.isFinite(latestRecord.uncertaintyHz) ? `± ${latestRecord.uncertaintyHz.toFixed(3)} Hz` : "imported or unfitted"}${Number.isFinite(latestRecord.depth) ? ` · S11 min ${latestRecord.depth.toFixed(2)} dB` : ""}`) : liveFit?.fit.ok ? `± ${liveFit.fit.sigmaF0Hz.toFixed(3)} Hz · live trace fit` : "Power the VNA and sweep to measure"}</div>
+          <div className="mt-2"><Sparkline values={trend.map(s => s.f0Hz)} label="Fitted resonance" /></div>
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Measurement Quality <HelpInfo termKey="faraday_cage" /></div>
@@ -2891,6 +2924,7 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
           <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Thermal Stability <HelpInfo termKey="thermostat" /></div>
           <div className="mt-2 text-lg font-bold text-orange-300">{state.chamber.temperature.toFixed(3)} °C</div>
           <div className="mt-1 text-[11px] text-zinc-500">Drift rate: 0.01 °C/min</div>
+          <div className="mt-2 flex items-center gap-3"><div><div className="text-[9px] uppercase text-zinc-500">Temperature</div><Sparkline values={trend.map(s => s.temperatureC)} label="Temperature" color="#fdba74" /></div><div><div className="text-[9px] uppercase text-zinc-500">Pressure</div><Sparkline values={trend.map(s => s.pressureTorr)} log label="Pressure" color="#7dd3fc" /></div></div>
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Stage Position <HelpInfo termKey="location_variable" /></div>
@@ -3232,6 +3266,7 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
   const trace = vna.trace;
   const traceFit = useMemo(() => fitTrace(trace), [trace]);
+  const plotRef = useRef<HTMLDivElement>(null);
   const [prog, setProg] = useState(null);
   const raf = useRef(0);
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
@@ -3279,9 +3314,9 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
           <div className="rounded border-2 border-zinc-600 bg-black p-3 shadow-inner">
             <div className="flex justify-between items-center border-b border-zinc-800 pb-2 mb-2 text-xs font-bold uppercase text-zinc-300">
               <span className="flex items-center text-sky-400"><Radio className="h-4 w-4 mr-2" /> S11 Log Magnitude (CH1) <HelpInfo termKey="s11" /></span>
-              <span className={`text-[10px] ${vna.calibrated ? "text-emerald-400" : "text-amber-400"}`}>{vna.calibrated ? `CAL VALID (${vna.calibrationType})` : "UNCAL"}</span>
+              <span className="flex items-center gap-2"><SaveImageButton targetRef={plotRef} title="S11 trace" /><span className={`text-[10px] ${vna.calibrated ? "text-emerald-400" : "text-amber-400"}`}>{vna.calibrated ? `CAL VALID (${vna.calibrationType})` : "UNCAL"}</span></span>
             </div>
-            <div className="relative h-[320px] overflow-hidden"><S11Plot trace={trace} progress={prog} />{prog != null && <AnimatedScanCursor p={prog} />}{vna.resonanceHold && <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-400/50 bg-amber-950/85 px-2 py-1 font-mono text-[9px] text-amber-200">RESONANCE HOLD</div>}{vna.fitVisible && traceFit.fit.ok && <div className="absolute right-3 top-2 z-10"><TelemetryReadout label="Fit f₀" value={traceFit.fit.f0Hz.toFixed(2)} unit="Hz" sub={`± ${traceFit.fit.sigmaF0Hz.toFixed(2)} Hz · Q ${Math.round(traceFit.fit.q)}`} /></div>}{vna.recordPacket && <div className="absolute bottom-3 right-3 rounded border border-blue-400/50 bg-blue-950/90 px-3 py-2 text-[10px] text-blue-200 animate-pulse">DATA PACKET → RUN RECORD</div>}{vna.spatialCommitPulse && <div className="absolute bottom-3 left-3 rounded-full border-2 border-cyan-300 bg-cyan-400/20 px-3 py-1 text-[9px] text-cyan-100">SPATIAL POINT COMMITTED</div>}</div>
+            <div ref={plotRef} className="relative h-[320px] overflow-hidden">{!trace.length && <div className="absolute inset-0 z-10 grid place-items-center p-4"><EmptyState title={!vna.power ? "The VNA is off" : !vna.rf ? "RF output is off" : "Waiting for the first sweep"} icon="〜">{!vna.power ? "Switch the VNA power on, then enable RF output, to see the S11 trace and the resonance dip." : !vna.rf ? "Enable RF output so the analyzer can drive the sphere and draw a trace." : "The trace appears as soon as the analyzer completes a sweep."}</EmptyState></div>}<S11Plot trace={trace} progress={prog} />{prog != null && <AnimatedScanCursor p={prog} />}{vna.resonanceHold && <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-400/50 bg-amber-950/85 px-2 py-1 font-mono text-[9px] text-amber-200">RESONANCE HOLD</div>}{vna.fitVisible && traceFit.fit.ok && <div className="absolute right-3 top-2 z-10"><TelemetryReadout label="Fit f₀" value={traceFit.fit.f0Hz.toFixed(2)} unit="Hz" sub={`± ${traceFit.fit.sigmaF0Hz.toFixed(2)} Hz · Q ${Math.round(traceFit.fit.q)}`} /></div>}{vna.recordPacket && <div className="absolute bottom-3 right-3 rounded border border-blue-400/50 bg-blue-950/90 px-3 py-2 text-[10px] text-blue-200 animate-pulse">DATA PACKET → RUN RECORD</div>}{vna.spatialCommitPulse && <div className="absolute bottom-3 left-3 rounded-full border-2 border-cyan-300 bg-cyan-400/20 px-3 py-1 text-[9px] text-cyan-100">SPATIAL POINT COMMITTED</div>}</div>
           </div>
 
           <div className="mt-4 flex justify-between items-center pt-3 border-t border-zinc-700">
@@ -3356,7 +3391,7 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
             </div>
             {!trace.length ? <p className="text-xs text-zinc-500">Enable the VNA and capture a trace.</p> : traceFit.fit.ok ? (
               <>
-                <FitRow label="Fitted f₀" value={`${traceFit.fit.f0Hz.toFixed(3)} ± ${traceFit.fit.sigmaF0Hz.toFixed(3)} Hz`} />
+                <FitRow label="Fitted f₀" value={`${fmtNum(traceFit.fit.f0Hz, 3)} ± ${traceFit.fit.sigmaF0Hz.toFixed(3)} Hz`} />
                 <FitRow label="Q factor" value={`${Math.round(traceFit.fit.q).toLocaleString()} ± ${Math.round(traceFit.fit.sigmaQ).toLocaleString()}`} />
                 <FitRow label="Linewidth (FWHM)" value={`${traceFit.fit.fwhmHz.toFixed(2)} Hz`} />
                 <FitRow label="Dip bottom" value={`${traceFit.fit.minDb.toFixed(2)} dB (baseline ${traceFit.fit.baselineDb.toFixed(2)} dB)`} />
@@ -3511,7 +3546,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
                   <tr key={r.id} className="border-t border-zinc-900 hover:bg-zinc-900/50">
                     <td className="p-2 font-mono text-zinc-400">{r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : "Now"}</td>
                     <td className="p-2 font-mono text-sky-200">{r.x.toFixed(1)}, {r.y.toFixed(1)}, {r.z.toFixed(1)}</td>
-                    <td className="p-2 font-mono">{r.resonance.toFixed(3)}</td>
+                    <td className="p-2 font-mono">{fmtNum(r.resonance, 3)}</td>
                     <td className="p-2 font-mono text-zinc-400">{r.fit?.ok === false ? "no fit" : Number.isFinite(r.uncertaintyHz) ? r.uncertaintyHz.toFixed(3) : "–"}</td>
                     <td className="p-2">{r.q ? Math.round(r.q) : "–"}</td>
                     <td className={`p-2 font-bold ${r.valid ? "text-emerald-400" : "text-amber-400"}`}>{r.valid ? "VALID" : "SUSPECT"}</td>
@@ -3535,7 +3570,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
                   <tr key={p.key} className="border-t border-zinc-900">
                     <td className="p-2 font-mono text-sky-200">{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</td>
                     <td className="p-2 font-mono">{p.n}{p.failed ? <span className="text-amber-400" title="Fits that failed and are excluded"> +{p.failed}✕</span> : null}{p.superseded ? <span className="text-zinc-500" title="Earlier attempts replaced by a rescan"> ({p.superseded} rescanned)</span> : null}</td>
-                    <td className="p-2 font-mono">{p.n ? p.meanHz.toFixed(3) : "–"}</td>
+                    <td className="p-2 font-mono">{p.n ? fmtNum(p.meanHz, 3) : "–"}</td>
                     <td className="p-2 font-mono text-zinc-400">{p.sdHz === null ? "needs ≥ 2" : p.sdHz.toFixed(3)}</td>
                     <td className="p-2 font-mono">{p.standardUncertaintyHz === null ? "–" : p.standardUncertaintyHz.toFixed(3)}</td>
                     <td className="p-2 font-mono text-emerald-300">{p.expandedUncertaintyHz === null ? "–" : `± ${p.expandedUncertaintyHz.toFixed(3)}`}</td>

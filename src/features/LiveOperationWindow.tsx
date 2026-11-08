@@ -111,7 +111,7 @@ export default function LiveOperationWindow({ onOpenPage }: { onOpenPage?: (page
   const acts = useSyncExternalStore(subscribeActivity, getActivities, getActivities);
   const s = useLabSnapshot(160);
   const wall = useWallClock();
-  const [collapsed, setCollapsed] = useState<boolean>(() => { try { const j = JSON.parse(localStorage.getItem(KEY) || '{}'); return j.collapsed ?? (typeof window !== 'undefined' && window.innerWidth < 900); } catch { return false; } });
+  const [collapsed, setCollapsed] = useState<boolean>(() => { try { const j = JSON.parse(localStorage.getItem(KEY) || '{}'); return j.collapsed ?? (typeof window !== 'undefined' && window.innerWidth < 900 || window.innerHeight < 720); } catch { return false; } });
   const [pos, setPos] = useState<{ x: number; y: number } | null>(() => { try { const j = JSON.parse(localStorage.getItem(KEY) || '{}'); return j.pos || null; } catch { return null; } });
   const [pick, setPick] = useState<number | null>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);

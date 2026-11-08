@@ -1,4 +1,6 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { SaveImageButton } from '../features/UiBits';
+import { fmtNum } from '../features/format';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getKV } from '../persistence/store';
 import { parseArchive, UNRECORDED } from '../persistence/sessions';
@@ -31,6 +33,7 @@ export const RunCompare = memo(function RunCompare({ ledger, refreshKey }: { led
     return [...m].map(([runId, records]) => ({ runId, records }));
   }, [saved, ledger]);
 
+  const chartRef = useRef<HTMLDivElement>(null);
   const toggle = (id: string) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : p.length < MAX_RUNS ? [...p, id] : p));
   const runs = picked.map(id => options.find(o => o.runId === id)).filter((o): o is NonNullable<typeof o> => !!o).map(o => ({ label: short(o.runId), records: o.records }));
   const cmp = useMemo(() => compareRuns(runs), [picked, options]);
@@ -55,7 +58,8 @@ export const RunCompare = memo(function RunCompare({ ledger, refreshKey }: { led
           </div>
           {runs.length >= 2 && (
             <div className="mt-3 space-y-3">
-              <div className="h-[220px]" role="img" aria-label={`Resonance by ${cmp.axis} position for each selected run`}>
+              <div className="flex justify-end"><SaveImageButton targetRef={chartRef} title="Run comparison" /></div>
+              <div ref={chartRef} className="h-[220px]" role="img" aria-label={`Resonance by ${cmp.axis} position for each selected run`}>
                 <ResponsiveContainer>
                   <LineChart data={chart} margin={{ top: 8, right: 12, bottom: 16, left: 4 }}>
                     <CartesianGrid stroke="#142030" />
@@ -83,7 +87,7 @@ export const RunCompare = memo(function RunCompare({ ledger, refreshKey }: { led
                     {cmp.rows.map(r => (
                       <tr key={r.key} className="border-t border-zinc-900">
                         <td className="p-1 font-mono text-sky-200">{r.x.toFixed(1)}, {r.y.toFixed(1)}, {r.z.toFixed(1)}</td>
-                        {r.cells.map((c, i) => <td key={i} className="p-1 font-mono">{c ? c.meanHz.toFixed(3) : '–'}</td>)}
+                        {r.cells.map((c, i) => <td key={i} className="p-1 font-mono">{c ? fmtNum(c.meanHz, 3) : '–'}</td>)}
                         {r.deltas.slice(1).map((d, i) => (
                           <td key={i} className={`p-1 font-mono ${d?.significant ? 'font-bold text-amber-300' : 'text-zinc-400'}`}>
                             {d ? `${d.deltaHz >= 0 ? '+' : ''}${d.deltaHz.toFixed(3)}${d.z !== null ? ` (${d.z.toFixed(1)})` : ''}${d.significant ? ' ▲' : ''}` : '–'}
