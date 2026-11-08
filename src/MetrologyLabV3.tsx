@@ -9,6 +9,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { dispatch, getLabState, initLabStores, onLabTransition, resetLabStores, useEnvironmentStore, useInstrumentStore, useLab } from './state/labStores';
 import { RunLibrary, SessionRestore } from './persistence/SessionUI';
 import { BundleImport } from './persistence/BundleUI';
+import { RunCompare } from './analysis/RunCompare';
 import { buildBundle } from './domain/bundle';
 import { COMMIT } from './siteInfo';
 import { createAutosave } from './persistence/autosave';
@@ -3428,6 +3429,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
 
         <div className="space-y-4 min-w-0">
         <RunLibrary dispatch={dispatch} refreshKey={records.length} />
+        <RunCompare ledger={records} refreshKey={records.length} />
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3">Measurement Ledger ({records.length})</div>
           <div className="max-h-[460px] overflow-auto">
