@@ -4,6 +4,7 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Compare runs: pick two to four saved runs on Experiment Runs for an overlay of resonance by position, per-position differences from the baseline with combined uncertainty (z, flagged above 2), and the lab conditions that differ (temperature, pressure, clock, shielding, calibration, model version).
 - Reproducibility bundles: the Bundle button on Experiment Runs exports a versioned, SHA-256 checksummed `.sphere.json` (model and app versions, citation block, runs, measurements, notebook) instead of dumping the whole app state.
 - Validated import: bundles are checked for structure, limits, hostile keys and checksum before anything is added; a preview shows counts, warnings and a re-check that rebuilds each record's trace from its saved settings. CSV files import through an auto-detected column mapping with a preview.
 - CSV export now escapes fields correctly.

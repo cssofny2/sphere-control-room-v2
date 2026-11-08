@@ -77,7 +77,7 @@ Impact = scientific credibility + what users lose today + reach (education, open
 
 **Tests.** Round-trip equality; checksum tamper detection; hostile inputs (NaN, huge arrays, `__proto__` keys, oversize files); older-version bundle migration.
 
-## 5. Run comparison and overlay — M
+## 5. Run comparison and overlay — M — DONE (branch `feat/run-compare`)
 
 **Scope.** `src/analysis/compare.ts` (pure) and a Compare tab on Runs. Pick 2–4 saved runs (#2). Overlay f0-vs-position lines with Recharts (already a dependency); match positions by rounded coordinates; per-position Δ table with Welch t-test using #1's σ; difference map by letting `SpatialMaps` take a second record set; conditions diff (temperature, pressure, clock lock, Faraday/isolation, model flags) with a rule-based "what changed" line (e.g. "+15 Hz offset ≈ ΔT 3 °C × 5 Hz/°C").
 **Tests.** Pure-function fixtures for matching, deltas, t-test, conditions diff.
