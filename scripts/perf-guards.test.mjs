@@ -27,3 +27,8 @@ const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
   assert.ok(!/animation:\s*ov-glow[^;]*infinite/.test(ov) && /st-active \.ov-card-body[^}]*animation: none/.test(ov), 'active cards no longer pulse a filter forever');
   console.log('PASS paint-expensive attention animations are finite');
 }
+{
+  const css = read('../src/index.css');
+  assert.ok(/\.workspace-instrument > \* \{ flex-shrink: 0; \}/.test(css), 'children of the scrolling page never shrink (the alert banner was squeezed to a 22 px sliver)');
+  console.log('PASS page children keep their height instead of being squeezed');
+}

@@ -4,6 +4,8 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Fixed the page alert banner ("Needs attention", "Take me there") being squeezed to a 22 px sliver with its text cut off: children of the scrolling page column no longer shrink.
+
 - Performance: profiled every page and fixed the slow ones. Live Timeline 12 to 58 frames a second (the page had no props, so each 20 Hz lab tick rebuilt four charts; it is now memoized and redraws at most once a second). VNA 14 to 46 (the live trace is rebuilt about 5 times a second instead of 20, and the SVG glow filter on it is gone). Lab Overview 23 to 53 unpowered, 30 to 41 fully powered (memoized with a 4 Hz snapshot; the permanent filter pulse on every active card and two decorative background sweeps removed).
 - Fewer distracting animations: alarm and attention flashes and shakes now run a few cycles and settle into a steady glow instead of flashing forever (they repainted a box-shadow every frame); the always-on LED brightness pulse and the drifting dashboard particles are removed. Reduced-motion settings still apply.
 
