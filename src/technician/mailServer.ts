@@ -11,7 +11,7 @@
 //   UPSTASH_REDIS_REST_URL / _TOKEN  optional durable inbox. Without it the inbox is in memory and can be lost when the function restarts.
 //   ANTHROPIC_API_KEY                optional, for AI-written replies. Without it he answers from his built-in notes.
 // Message bodies are never logged. Mail content is treated as untrusted text and can never trigger lab actions.
-import { createLimiter, createSpend, clientKey, json, originAllowed, safeEqual, type Env } from './guards';
+import { createLimiter, createSpend, capUsd, clientKey, json, originAllowed, safeEqual, type Env } from './guards';
 
 export type Mail = { id: string; from: string; subject: string; text: string; receivedAt: number; messageId?: string; delivered: boolean; replied: boolean };
 export type MailStore = { load(): Promise<Mail[]>; save(m: Mail[]): Promise<void>; durable: boolean };
@@ -65,7 +65,7 @@ const SIGNATURE = '\n\n—\nDr. Wire, S.P.H.E.R.E. Metrology Lab (simulation cha
 
 export function createMailHandler(deps: MailDeps) {
   const env = deps.env, store = storeFor(deps), nowMs = deps.now || (() => Date.now()); const f = deps.fetchImpl || fetch;
-  const limited = createLimiter(), spend = createSpend(); const sent: number[] = [];
+  const limited = createLimiter(), spend = createSpend(); const sent: number[] = []; const sending = new Set<string>();
   return async function handle(req: Request): Promise<Response> {
     if (req.method !== 'POST') return json(405, { error: 'method_not_allowed' }, { allow: 'POST' });
     if (!originAllowed(req, env)) return json(403, { error: 'forbidden_origin' });
@@ -86,7 +86,7 @@ export function createMailHandler(deps: MailDeps) {
       }
       case 'draft': {
         if (!env.ANTHROPIC_API_KEY || !deps.client) return json(503, { error: 'no_key' });
-        if (spend.over(nowMs(), Number(env.TECHNICIAN_DAILY_CAP_USD ?? 5))) return json(503, { error: 'cap_reached' });
+        if (spend.over(nowMs(), capUsd(env.TECHNICIAN_DAILY_CAP_USD, 5))) return json(503, { error: 'cap_reached' });
         const m = (await store.load()).find(x => x.id === String(b.id || '')); if (!m) return json(404, { error: 'not_found' });
         let snap = ''; try { snap = JSON.stringify(b.snapshot ?? {}).slice(0, 3000); } catch { snap = '{}'; }
         try {
@@ -99,18 +99,19 @@ export function createMailHandler(deps: MailDeps) {
       case 'send': {
         if (!canSend) return json(503, { error: 'send_not_configured' });
         const all = await store.load(); const m = all.find(x => x.id === String(b.id || '')); if (!m) return json(404, { error: 'not_found' });
-        if (m.replied) return json(409, { error: 'already_replied' });
+        if (m.replied || sending.has(m.id)) return json(409, { error: 'already_replied' });
         if (!allowedSenders(env).includes(m.from)) return json(403, { error: 'sender_not_allowed' });
         const text = clip(b.body, 1800).trim(); if (!text) return json(400, { error: 'empty_body' });
         const now = nowMs(); while (sent.length && now - sent[0] > 24 * 3600e3) sent.shift(); if (sent.length >= 30 || sent.filter(t => now - t < 3600e3).length >= 10) return json(429, { error: 'send_limit' });
         const subject = /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`;
         const payload: any = { from: `Dr. Wire <${addr(env.TECHNICIAN_EMAIL_ADDRESS)}>`, to: [m.from], subject, text: text + SIGNATURE };
         if (m.messageId) payload.headers = { 'In-Reply-To': m.messageId, References: m.messageId };
+        sending.add(m.id);
         try {
           const r = await f('https://api.resend.com/emails', { method: 'POST', headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
           if (!r.ok) return json(502, { error: 'send_failed' });
-        } catch { return json(502, { error: 'send_failed' }); }
-        sent.push(now); await store.save(all.map(x => (x.id === m.id ? { ...x, replied: true, delivered: true } : x)));
+          sent.push(now); await store.save((await store.load()).map(x => (x.id === m.id ? { ...x, replied: true, delivered: true } : x)));
+        } catch { return json(502, { error: 'send_failed' }); } finally { sending.delete(m.id); }
         return json(200, { ok: true, to: m.from });
       }
       default: return json(400, { error: 'bad_action' });

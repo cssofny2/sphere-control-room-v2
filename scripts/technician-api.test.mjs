@@ -51,3 +51,8 @@ const read = async res => { const carry = { buf: '' }; const out = []; const dec
 // upstream failure surfaces as an error event without leaking details
 nowT += 86400000;
 { const bad = API.createHandler({ env, now: () => nowT, client: () => ({ messages: { stream() { return { on() { }, async finalMessage() { const e = new Error('secret details'); e.status = 500; throw e; } }; } } }) }); const ev = await read(await bad(req(good, { ip: '6.6.6.6' }))); assert.equal(ev[0].type, 'error'); assert.ok(!JSON.stringify(ev).includes('secret')); console.log('PASS upstream errors become a generic error event'); }
+// an invalid cap value must fall back to the default instead of disabling the cap
+{ const G = await loadTypeScript(new URL('../src/technician/guards.ts', import.meta.url));
+  assert.equal(G.capUsd('abc', 5), 5); assert.equal(G.capUsd('', 5), 5); assert.equal(G.capUsd(undefined, 5), 5); assert.equal(G.capUsd('-1', 5), 5); assert.equal(G.capUsd('Infinity', 5), 5); assert.equal(G.capUsd('2.5', 5), 2.5);
+  nowT += 86400000; const { handler } = mk({ text: ['x'], usage: { input_tokens: 0, output_tokens: 1000000 } }, { ...env, TECHNICIAN_DAILY_CAP_USD: 'abc' });
+  await read(await handler(req(good, { ip: '4.4.4.4' }))); await read(await handler(req(good, { ip: '4.4.4.5' }))); assert.equal((await handler(req(good, { ip: '4.4.4.6' }))).status, 503); console.log('PASS invalid spend cap falls back to the default'); }

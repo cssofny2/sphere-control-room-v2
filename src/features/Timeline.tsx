@@ -3,6 +3,8 @@ import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Too
 import { onLabTransition, useLab } from '../state/labStores';
 import { fitTrace } from '../simulation/measurement';
 import { SaveImageButton, EmptyState } from './UiBits';
+import { useUnits } from './useUnits';
+import { fromTorr, fromCelsius } from './units';
 import { Ring, downsample, markersFrom, sampleAt, sampleOf, telemetryCsv, type Marker, type Sample } from './telemetry';
 
 // One ring for the whole session. It is filled whether or not the Timeline page is open.
@@ -19,6 +21,9 @@ export function installTelemetry(): () => void {
     if (ring.push(sampleOf(next as never, tf && tf.fit.ok ? tf.fit.f0Hz : null))) listeners.forEach(f => f());
   });
 }
+
+/** Every sample still in the ring (up to an hour of simulated time), oldest first. */
+export const telemetrySnapshot = (): readonly Sample[] => ring.toArray();
 
 /** The latest telemetry samples (about the last `max`), refreshed once a second, for sparklines elsewhere in the app. */
 export function useTelemetrySamples(max = 90): readonly Sample[] {
@@ -60,6 +65,10 @@ export const Timeline = memo(function Timeline() {
   const [windowS, setWindowS] = useState(600);
   const [cursor, setCursor] = useState<number | null>(null);
   const panelsRef = useRef<HTMLDivElement>(null);
+  // Display units only change what is drawn; samples, the CSV export and the model stay in Torr and °C.
+  const units = useUnits();
+  const panels = PANELS.map(p => p.key === 'p' ? { ...p, unit: units.pressure, get: (s: Sample) => fromTorr(s.pressureTorr, units.pressure) }
+    : p.key === 'c' ? { ...p, unit: units.temperature, get: (s: Sample) => fromCelsius(s.temperatureC, units.temperature) } : p);
 
   const all = ring.toArray();
   const end = all.length ? all[all.length - 1].t : 0;
@@ -100,14 +109,14 @@ export const Timeline = memo(function Timeline() {
             </label>
             {at && (
               <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-zinc-300" role="status">
-                <span>P {at.pressureTorr.toExponential(1)} Torr</span><span>T {at.temperatureC.toFixed(2)} °C</span>
+                <span>P {fromTorr(at.pressureTorr, units.pressure).toExponential(1)} {units.pressure}</span><span>T {fromCelsius(at.temperatureC, units.temperature).toFixed(2)} {units.temperature}</span>
                 <span>f₀ {at.f0Hz === null ? '–' : `${at.f0Hz.toFixed(2)} Hz`}</span><span>Stage {at.x.toFixed(1)}, {at.y.toFixed(1)}, {at.z.toFixed(1)} mm</span>
                 <span className="text-zinc-500">A read-only look at the readings; the lab itself is unchanged.</span>
               </div>
             )}
           </div>
           <div ref={panelsRef} className="space-y-4">
-          {PANELS.map(p => {
+          {panels.map(p => {
             const data = downsample(shown, 300, p.get).map(s => ({ t: s.t, v: p.get(s) }));
             return (
               <div key={p.key} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
@@ -117,7 +126,7 @@ export const Timeline = memo(function Timeline() {
                     <LineChart data={data} syncId="timeline" margin={{ top: 4, right: 10, bottom: 0, left: 0 }}>
                       <CartesianGrid stroke="#142030" />
                       <XAxis type="number" dataKey="t" domain={[start, end]} stroke="#6b7c90" fontSize={10} tickFormatter={fmtT} />
-                      <YAxis scale={p.log ? 'log' : 'auto'} domain={p.log ? [1e-6, 1000] : ['auto', 'auto']} allowDataOverflow={p.log} stroke="#6b7c90" fontSize={10} width={58} tickFormatter={v => (p.log ? Number(v).toExponential(0) : Number(v).toFixed(p.digits > 1 ? 1 : 0))} />
+                      <YAxis scale={p.log ? 'log' : 'auto'} domain={p.log ? [fromTorr(1e-6, units.pressure), fromTorr(1000, units.pressure)] : ['auto', 'auto']} allowDataOverflow={p.log} stroke="#6b7c90" fontSize={10} width={58} tickFormatter={v => (p.log ? Number(v).toExponential(0) : Number(v).toFixed(p.digits > 1 ? 1 : 0))} />
                       <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #24384c', fontSize: 11 }} labelFormatter={v => `t ${fmtT(Number(v))}`} formatter={(v: number) => (v === null ? '–' : p.log ? `${Number(v).toExponential(2)} ${p.unit}` : `${Number(v).toFixed(p.digits)} ${p.unit}`)} />
                       {markers.filter(m => m.kind !== 'action').slice(-40).map((m, i) => <ReferenceLine key={i} x={m.t} stroke={COLORS[m.kind]} strokeOpacity={0.55} strokeDasharray={m.kind === 'alarm' ? undefined : '2 3'} />)}
                       {cursor !== null && <ReferenceLine x={cursor} stroke="#ffffff" />}

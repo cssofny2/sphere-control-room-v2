@@ -19,6 +19,10 @@ import { fmtNum } from './features/format';
 import { markerRadius, pointMarkers } from './features/pointMarkers';
 import { PageBoundary } from './features/PageBoundary';
 import { LearningPaths } from './curriculum/LearningPaths';
+import { Insights } from './insights/Insights';
+import { SettingsPage } from './features/SettingsPage';
+import { TemplatePicker } from './simulation/TemplatePicker';
+import { installDisplaySettings } from './features/displaySettings';
 import { hashForPage, isEmbed, pageFromHash, shareUrl } from './features/route';
 import { installModalA11y } from './features/modalA11y';
 import { Announcer } from './features/Announcer';
@@ -66,7 +70,7 @@ import {
   Zap, BookOpen, Book, HelpCircle, X, Info, ShieldCheck, Download, Archive, ListOrdered, Save, BrainCircuit, TimerReset,
   AlertTriangle, Radio, ScanLine, Waves, FlaskConical, Cpu, Award, CheckSquare, FileText,
   Sliders, Disc, Compass, Box, Orbit, Cuboid, Video, PlaySquare, MonitorPlay, Tv, Wrench, Compass as CompassIcon,
-  Search, Command, Filter, Terminal, Layers, FileSpreadsheet
+  Search, Command, Filter, Terminal, Layers, FileSpreadsheet, Gauge, SlidersHorizontal
 } from 'lucide-react';
 
 const ALERT_ALL: AlertKey[] = ["facility", "clock", "vna", "scope", "ldv", "chamber", "pumps", "stage", "experiment", "spatial"];
@@ -862,6 +866,8 @@ export default function MetrologyLab() {
   useEffect(() => installModalA11y(), []);
   // The live timeline samples the lab once per simulated second from the start, so history exists when its page is opened.
   useEffect(() => installTelemetry(), []);
+  // Remembered display settings (contrast, text size, motion, palette) are applied once at start-up.
+  useEffect(() => { installDisplaySettings(); }, []);
   // Keyboard shortcuts: "?" lists them, "g" then a letter goes to a page. Ignored while typing or with a dialog open.
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useEffect(() => {
@@ -1111,6 +1117,7 @@ export default function MetrologyLab() {
       group: "Research",
       items: [
         ["runs", "Experiment Runs", FlaskConical],
+        ["insights", "Insights", Gauge],
         ["notebook", "Lab Notebook", FileText],
       ]
     },
@@ -1121,6 +1128,12 @@ export default function MetrologyLab() {
         ["training", "Training & Checklist", CheckSquare],
         ["challenges", "Challenge Mode", Award],
         ["faults", "Fault Injector", AlertTriangle],
+      ]
+    },
+    {
+      group: "Preferences",
+      items: [
+        ["settings", "Display & Units", SlidersHorizontal],
       ]
     }
   ];
@@ -1312,6 +1325,8 @@ export default function MetrologyLab() {
           {active === "training" && <TrainingMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "copilot" && <LabCopilot state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "timeline" && <Timeline />}
+          {active === "insights" && <Insights records={state.experiment.records} events={state.events} operator={operatorFullName(state.operator)} />}
+          {active === "settings" && <SettingsPage />}
           {active === "learn" && <LearningPaths dispatch={dispatch} learnerName={operatorFullName(state.operator)} />}
           {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "faults" && <FaultInjector state={state} dispatch={dispatch} />}
@@ -3520,6 +3535,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
 
       <div className="grid gap-4 xl:grid-cols-[.85fr_1.5fr]">
         <div className="space-y-3">
+          <TemplatePicker disabled={state.experiment.active} onPick={t => set("experiment", { ...t.settings })} />
           <PlanBuilder draft={getAxisPlanInput(state)} active={state.experiment.active} contract={state.experiment.contract}
             onChange={patch => { const { seed, anchor, ...settings } = patch; set("experiment", { ...settings, ...("seed" in patch ? { planSeed: seed } : {}) }); }} />
 
