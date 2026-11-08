@@ -19,10 +19,8 @@ import { fmtNum } from './features/format';
 import { markerRadius, pointMarkers } from './features/pointMarkers';
 import { PageBoundary } from './features/PageBoundary';
 import { LearningPaths } from './curriculum/LearningPaths';
-import { Insights } from './insights/Insights';
 import { fromTorr, fmtTemperature, getUnits } from './features/units';
 import { useUnits } from './features/useUnits';
-import { SettingsPage } from './features/SettingsPage';
 import { TemplatePicker } from './simulation/TemplatePicker';
 import { installDisplaySettings } from './features/displaySettings';
 import { hashForPage, isEmbed, pageFromHash, shareUrl } from './features/route';
@@ -35,6 +33,8 @@ import { COMMIT } from './siteInfo';
 import { createAutosave } from './persistence/autosave';
 import { MAX_RECORDS, mergeRecords } from './persistence/sessions';
 import type { KV } from './persistence/store';
+const Insights = lazy(() => import('./insights/Insights').then(m => ({ default: m.Insights })));
+const SettingsPage = lazy(() => import('./features/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
 const Schematic = lazy(() => import('./engineering/Schematic'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
@@ -1320,7 +1320,7 @@ export default function MetrologyLab() {
         <section className="workspace-instrument min-w-0 bg-zinc-950 flex flex-col" aria-label="Active instrument workspace" tabIndex={-1}>
           <PageBoundary pageKey={String(active)}>
           {active === "dashboard" && <><PageAlert k="facility" name="Facility" onGo={navigate} /><Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} onSaveOperator={saveProfile} /></>}
-          {active === "overview" && <LabOverview state={overviewState} dispatch={dispatch} quality={recordQuality} reduced={FX.reduced || FX.hide} lab={{ getSubsystemVisualState, visualToken, fmtPressure, WARMUP_SECONDS, resolveHelp }} />}
+          {active === "overview" && <LabOverview state={overviewState} dispatch={dispatch} quality={recordQuality} reduced={FX.reduced || FX.hide} lab={{ getSubsystemVisualState, visualToken, fmtPressure: fmtPressureShown, WARMUP_SECONDS, resolveHelp }} />}
           {active === "chamber" && <><PageAlert k={["chamber", "pumps", "stage"]} name="Chamber & stage" onGo={navigate} /><Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
           {active === "spatial" && <><PageAlert k="spatial" name="Data quality" onGo={navigate} /><SpatialField state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
           {active === "vna" && <><PageAlert k="vna" name="VNA" onGo={navigate} /><Vna sweep={stableSweep} HelpInfo={HelpInfo} /></>}
@@ -1331,8 +1331,8 @@ export default function MetrologyLab() {
           {active === "training" && <TrainingMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "copilot" && <LabCopilot state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "timeline" && <Timeline />}
-          {active === "insights" && <Insights records={state.experiment.records} events={state.events} operator={operatorFullName(state.operator)} />}
-          {active === "settings" && <SettingsPage />}
+          {active === "insights" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading insights…</div>}><Insights records={state.experiment.records} events={state.events} operator={operatorFullName(state.operator)} /></Suspense>}
+          {active === "settings" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading settings…</div>}><SettingsPage /></Suspense>}
           {active === "learn" && <LearningPaths dispatch={dispatch} learnerName={operatorFullName(state.operator)} />}
           {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "faults" && <FaultInjector state={state} dispatch={dispatch} />}

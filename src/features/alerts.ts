@@ -13,6 +13,10 @@ export type AlertInfo = { level: AlertLevel; label: string; detail: string; fix?
 export const ALERT_ORDER: AlertLevel[] = ['error', 'stuck', 'attention', 'running', 'idle'];
 export const ALERT_WORD: Record<AlertLevel, string> = { idle: 'Idle', running: 'Running', stuck: 'Stuck', error: 'Error', attention: 'Needs attention' };
 export const ALERT_HEX: Record<AlertLevel, string> = { idle: '#64748b', running: '#34d399', stuck: '#fb923c', error: '#fb7185', attention: '#facc15' };
+/** Okabe-Ito colours for the colour-vision-safe palette: blue, orange, vermillion and yellow stay apart for red-green colour blindness. */
+export const ALERT_HEX_CVD: Record<AlertLevel, string> = { idle: '#64748b', running: '#56b4e9', stuck: '#e69f00', error: '#d55e00', attention: '#f0e442' };
+/** The colour for an alert level under the chosen palette. */
+export const alertHex = (level: AlertLevel, palette: 'default' | 'cvd' = 'default'): string => (palette === 'cvd' ? ALERT_HEX_CVD : ALERT_HEX)[level];
 export const ALERT_RANK: Record<AlertLevel, number> = { error: 0, stuck: 1, attention: 2, running: 3, idle: 4 };
 
 const ALARM_PATTERN: Record<AlertKey, RegExp> = {

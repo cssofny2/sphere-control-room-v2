@@ -1,7 +1,8 @@
 import React from 'react';
 import './alerts.css';
-import { ALERT_HEX, ALERT_WORD, getAlert, summarizeAlerts, worstAlert, type AlertInfo, type AlertKey, type AlertLevel } from './alerts';
+import { ALERT_WORD, alertHex, getAlert, summarizeAlerts, worstAlert, type AlertInfo, type AlertKey, type AlertLevel } from './alerts';
 import { useLab } from '../state/labStores';
+import { useDisplay } from './useUnits';
 
 const SEP = '␟';
 const pack = (a: AlertInfo) => [a.level, a.label, a.detail, a.fix || '', a.page || ''].join(SEP);
@@ -21,7 +22,7 @@ export function PageAlert({ k, name, onGo }: { k: AlertKey | AlertKey[]; name: s
 
 /** Small animated picture for each alert word. The shape differs as well as the colour, so it never relies on colour alone. */
 export function AlertGlyph({ level, size = 16 }: { level: AlertLevel; size?: number }) {
-  const c = ALERT_HEX[level];
+  const c = alertHex(level, useDisplay().palette);
   const common = { width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': true, focusable: false } as const;
   if (level === 'running') return (
     <svg {...common} className="al-glyph al-g-running"><circle cx="12" cy="12" r="9" fill="none" stroke={c} strokeOpacity=".25" strokeWidth="3" /><path className="al-spin" d="M12 3a9 9 0 0 1 9 9" fill="none" stroke={c} strokeWidth="3" strokeLinecap="round" /><circle cx="12" cy="12" r="2.6" fill={c} className="al-beat" /></svg>
