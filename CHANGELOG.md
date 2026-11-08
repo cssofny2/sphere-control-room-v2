@@ -4,6 +4,11 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Measurement engine: sweeps are fitted with a Lorentzian dip, so f₀ and Q are measured with a standard uncertainty from the fit instead of using the lowest sample and fixed placeholders (0.25 Hz uncertainty, 0.05 Hz repeat SD, Q 1200/4500). The S11 "Fit" line is now the real fit (it used to be the noise-free model, which leaked the true resonance). Model version is now `sphere-teaching-model-v2`.
+- Experiment Runs: ledger shows per-record uncertainty; new "Repeatability by position" table (n, mean, SD, u, 95 % U); rescanned attempts count once. CSV export gains `uncertainty_hz` and `fit_ok`.
+- Quality gate: a failed resonance fit is a critical failure and triggers the adaptive rescan.
+- Dashboard "Current Resonance" shows the fitted live trace; before any trace it says so instead of showing the model's true value.
+- The resonance model moved out of `MetrologyLabV3.tsx` into `src/simulation/model.ts`.
 - Lab Overview: flat map only; every box has an animated illustration drawn from live state; signal packets travel along active lines.
 - Animated alerts (Running, Stuck, Error, Needs attention) on the sidebar, status strip, page banners and lab map.
 - Live date and time in the header, journal and instrument screens; operator profile (name, nickname, initials) stamped on journal entries, alarms, notebook notes and exports and shared with Dr. Wire.

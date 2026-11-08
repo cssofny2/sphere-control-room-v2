@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/domain/**/*.ts", "src/simulation/plan.ts", "tests/domain-contracts.typecheck.ts"]
+  "include": ["src/domain/**/*.ts", "src/simulation/plan.ts", "src/simulation/model.ts", "src/simulation/measurement.ts", "src/simulation/stats.ts", "tests/domain-contracts.typecheck.ts"]
 }

@@ -9,7 +9,7 @@ export type EventId = Identifier<'event'>;
 export type Axis = 'x' | 'y' | 'z';
 export type RunStatus = 'running' | 'paused' | 'cancelled' | 'completed' | 'faulted';
 export const RUN_SCHEMA_VERSION = 1 as const;
-export const MODEL_VERSION = 'sphere-teaching-model-v1';
+export const MODEL_VERSION = 'sphere-teaching-model-v2';
 
 let identityCounter = 0;
 export function createIdentifier<K extends string>(kind: K): Identifier<K> {

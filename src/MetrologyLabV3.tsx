@@ -14,6 +14,9 @@ import PlanBuilder from './PlanBuilder';
 import { createIdentifier, createRunContract, captureSettings, MODEL_VERSION, type RunContract, type SimulationEvent } from './domain/run';
 import type { AcquisitionContract } from './domain/acquisition';
 import { buildAxisPlan, buildPointPlan, validateAxisSettings, type PlanIssue } from './simulation/plan';
+import { BASE_FREQUENCY, buildSweep, trueFrequency } from './simulation/model';
+import { failureMessage, fitTrace, measureTrace } from './simulation/measurement';
+import { summarizePositions } from './simulation/stats';
 import { paletteEntries, execute as executeAction } from './technician/actions';
 import { installLabSelectionSync } from './engineering/selection';
 import { APP_VERSION, AUTHOR, COPYRIGHT_LINE } from './siteInfo';
@@ -45,7 +48,6 @@ import {
 } from 'lucide-react';
 
 const ALERT_ALL: AlertKey[] = ["facility", "clock", "vna", "scope", "ldv", "chamber", "pumps", "stage", "experiment", "spatial"];
-const BASE_FREQUENCY = 230500;
 const AMBIENT_C = 22.0;
 const LIMIT_MM = 35.0;
 const WARMUP_SECONDS = 15;
@@ -274,6 +276,7 @@ function getMeasurementValidation(state) {
 function evaluateScanRecord(record,state){
   const checks=[
     {id:"record_valid",pass:record.valid===true,weight:3,label:"Measurement validity"},
+    {id:"fit",pass:record.fit?.ok!==false,weight:3,label:"Resonance fit converged"},
     {id:"uncertainty",pass:Number(record.uncertaintyHz)<=1,weight:2,label:"Uncertainty ≤ 1 Hz"},
     {id:"clock",pass:record.clockLocked===true,weight:3,label:"Clock locked"},
     {id:"calibration",pass:record.vnaCalibrated===true,weight:2,label:"VNA calibrated"},
@@ -283,7 +286,7 @@ function evaluateScanRecord(record,state){
     {id:"stage",pass:(state.stage.positionError??0)<.075,weight:3,label:"Stage within tolerance"}
   ];
   const failed=checks.filter(c=>!c.pass),score=Math.round(100*(checks.reduce((a,c)=>a+(c.pass?c.weight:0),0)/checks.reduce((a,c)=>a+c.weight,0)));
-  const critical=failed.some(c=>["clock","stage","record_valid"].includes(c.id));
+  const critical=failed.some(c=>["clock","stage","record_valid","fit"].includes(c.id));
   return {status:failed.length===0?"accepted":critical||score<70?"failed":"suspect",score,checks,failed:failed.map(c=>c.id),reason:failed.map(c=>c.label).join(", ")||"All quality checks passed"};
 }
 
@@ -517,62 +520,6 @@ function reducer(state, action) {
     case "TICK": return tick(state, action.dt);
     default: return state;
   }
-}
-
-function noise(i, seed) {
-  const x = Math.sin((i + 1) * 12.9898 + seed * 0.12345) * 43758.5453;
-  return x - Math.floor(x);
-}
-
-function trueFrequency(state) {
-  const { stage, chamber, model, clock, failures } = state;
-  const loc = model.location ? (stage.actualX ?? stage.x) * 45.2 + (stage.actualY ?? stage.y) * -12.5 + (stage.actualZ ?? stage.z) * 80.1 : 0;
-  const thermal = model.temperature ? (chamber.temperature - 20) * 5 : 0;
-  const air = model.pressure ? (chamber.pressure > 1 ? -250 : -Math.log10(Math.max(chamber.pressure, 1e-8)) * .3) : 0;
-  const clockDrift = (model.clockDrift && (!clock.locked || clock.cableFault)) || failures.clockDrift ? 15.5 : 0;
-  const fixture = model.fixtureDrift ? (stage.x * .2) + (stage.z * .25) : 0;
-  return BASE_FREQUENCY + loc + thermal + air + clockDrift + fixture;
-}
-
-function buildSweep(state) {
-  const resonance = trueFrequency(state);
-  const { vna, chamber, facility, failures, clock } = state;
-  const q = chamber.pressure > 1 ? 1200 : 4500;
-  const rfNoise = (state.model.rfNoise && !chamber.faraday) || failures.emiSpike ? 4.5 : .18;
-  const clockNoise = clock.locked && !clock.cableFault && !failures.clockDrift ? .02 : 1.2;
-  const n = Math.max(101, Math.min(1001, vna.points));
-
-  let start = vna.startFrequency;
-  let stop = vna.stopFrequency;
-  if (vna.center && vna.span) {
-    start = vna.center - vna.span / 2;
-    stop = vna.center + vna.span / 2;
-  }
-
-  return Array.from({ length: n }, (_, i) => {
-    let f = start + (i / (n - 1)) * (stop - start);
-    if (vna.sweepMode === "log") {
-      const logStart = Math.log10(Math.max(1000, start));
-      const logStop = Math.log10(Math.max(2000, stop));
-      f = Math.pow(10, logStart + (i / (n - 1)) * (logStop - logStart));
-    }
-    const normalized = 2 * (f - resonance) / (resonance / q);
-    const dip = -28 / (1 + normalized * normalized);
-    const averagingGain = vna.averagingEnabled ? Math.sqrt(Math.max(1, vna.averagingCount)) : 1;
-    const bandwidthGain = Math.sqrt(clamp((vna.ifbw || 100) / 100, 0.01, 10));
-    const jitter = (noise(i + facility.simulationTime * 7, facility.seed) - .5) * (rfNoise + clockNoise) * bandwidthGain / averagingGain;
-    let s11Val = -2 + dip + jitter;
-
-    if (vna.traceMath === "ref" && vna.reference.length === n) {
-      s11Val = vna.reference[i].s11;
-    } else if (vna.traceMath === "diff" && vna.reference.length === n) {
-      s11Val = s11Val - vna.reference[i].s11;
-    } else if (vna.traceMath === "ratio" && vna.reference.length === n) {
-      s11Val = s11Val / (vna.reference[i].s11 || 1);
-    }
-
-    return { freq: f, s11: s11Val, fit: -2 + dip };
-  });
 }
 
 function buildScope(state) {
@@ -944,7 +891,7 @@ export default function MetrologyLab() {
     sweepRunId.current = state.experiment.active ? state.experiment.id : null;
     const trace = buildSweep(state);
     dispatch({ type: "PATCH", domain: "vna", patch: { trace, sweeping: true, acquisitionPhase: "sweeping", sweepProgress: 0, sweepId: (state.vna.sweepId || 0) + 1, resonanceHold: false, fitVisible: false, recordPacket: false, spatialCommitPulse: false } });
-    const min = trace.reduce((a, b) => a.s11 < b.s11 ? a : b);
+    const measured = measureTrace(trace, BASE_FREQUENCY);
     const isVal = validationResult.overall === "VALID";
     const planned = state.experiment.scanActive ? state.experiment.contract?.plan.acquisitions[state.experiment.currentScanIndex] : null;
     const acquisitionId = createIdentifier('acquisition'), timestamp = new Date().toISOString();
@@ -966,17 +913,17 @@ export default function MetrologyLab() {
       contract: acquisitionContract, dataOrigin: "simulation", modelVersion: MODEL_VERSION,
       sequence: (state.experiment.captureCount || 0) + 1,
       repeatIndex: acquisitionContract?.repeatIndex ?? 1,
+      attemptIndex: acquisitionContract?.attemptIndex ?? 1,
       timestamp,
       x: state.stage.actualX ?? state.stage.x,
       y: state.stage.actualY ?? state.stage.y,
       z: state.stage.actualZ ?? state.stage.z,
-      resonance: min.freq,
-      resonanceShift: min.freq - BASE_FREQUENCY,
-      depth: min.s11,
-      q: state.chamber.pressure > 1 ? 1200 : 4500,
-      uncertaintyHz: 0.25,
-      repeatMeanHz: min.freq,
-      repeatSdHz: 0.05,
+      resonance: measured.resonance,
+      resonanceShift: measured.resonanceShift,
+      depth: measured.depth,
+      q: measured.q,
+      uncertaintyHz: measured.uncertaintyHz,
+      fit: measured.fit,
       sampleCount: 1,
       valid: isVal,
       temp: state.chamber.temperature,
@@ -996,16 +943,16 @@ export default function MetrologyLab() {
     sweepTimers.current.push(window.setTimeout(() => dispatch({ type: "PATCH", domain: "vna", patch: { resonanceHold: false, fitVisible: true, acquisitionPhase: "fitting", sweepProgress: 1 } }), duration * .84));
     sweepTimers.current.push(window.setTimeout(() => {
       if (state.experiment.active) dispatch({ type: "RECORD", record });
-      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "complete", sweepProgress: 1, fitVisible: true, recordPacket: state.experiment.active, spatialCommitPulse: state.experiment.active, lastMetrics: { f0: min.freq, minS11: min.s11, q: record.q, quality: validationResult.overall }, lastSweepCompletedAt: Date.now() } });
-      dispatch({ type: "EVENT", text: `Sweep complete: ${min.freq.toFixed(2)} Hz, ${min.s11.toFixed(2)} dB, Q ${record.q}.`, subsystem: "VNA", x: state.stage.x, y: state.stage.y, z: state.stage.z });
+      dispatch({ type: "PATCH", domain: "vna", patch: { sweeping: false, acquisitionPhase: "complete", sweepProgress: 1, fitVisible: true, recordPacket: state.experiment.active, spatialCommitPulse: state.experiment.active, lastMetrics: { f0: measured.resonance, minS11: measured.depth, q: measured.q, uncertaintyHz: measured.uncertaintyHz, fitOk: measured.fit.ok, quality: validationResult.overall }, lastSweepCompletedAt: Date.now() } });
+      dispatch({ type: "EVENT", text: measured.problem === null ? `Sweep complete: f0 ${measured.resonance.toFixed(3)} ± ${measured.uncertaintyHz.toFixed(3)} Hz, ${measured.depth.toFixed(2)} dB, Q ${Math.round(measured.q)}.` : `Sweep complete but the resonance fit failed (${measured.problem}) Lowest sample ${measured.resonance.toFixed(2)} Hz.`, level: measured.problem === null ? "info" : "warning", subsystem: "VNA", x: state.stage.x, y: state.stage.y, z: state.stage.z });
     }, duration));
     sweepTimers.current.push(window.setTimeout(() => dispatch({ type: "PATCH", domain: "vna", patch: { recordPacket: false, spatialCommitPulse: false, acquisitionPhase: "idle" } }), duration + 850));
   };
 
   const exportCsv = () => {
     const rows = [
-      ["run_id", "timestamp", "x_mm", "y_mm", "z_mm", "resonance_hz", "s11_db", "q", "valid", "temperature_c", "pressure_torr"],
-      ...state.experiment.records.map(r => [r.runId, r.timestamp, r.x, r.y, r.z, r.resonance, r.depth, r.q, r.valid, r.temp, r.pressure])
+      ["run_id", "timestamp", "x_mm", "y_mm", "z_mm", "resonance_hz", "s11_db", "q", "valid", "temperature_c", "pressure_torr", "uncertainty_hz", "fit_ok"],
+      ...state.experiment.records.map(r => [r.runId, r.timestamp, r.x, r.y, r.z, r.resonance, r.depth, r.q, r.valid, r.temp, r.pressure, r.uncertaintyHz, r.fit ? r.fit.ok : ""])
     ];
     const blob = new Blob([rows.map(r => r.join(",")).join("\n")], { type: "text/csv" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${state.experiment.id || "sphere-run"}.csv`; a.click(); URL.revokeObjectURL(a.href);
@@ -2119,8 +2066,12 @@ function GlowDefs({ id, color }) {
 }
 
 function S11Plot({ trace, compact = false, progress = null }) {
-  const shown = progress == null ? trace : trace.slice(0, Math.max(2, Math.ceil(trace.length * progress)));
-  const min = progress == null && trace.length ? trace.reduce((a, b) => (a.s11 < b.s11 ? a : b)) : null;
+  const tf = progress == null && trace.length ? fitTrace(trace) : null;
+  const fitOk = tf && tf.fit.ok && !tf.displayDiffers ? tf : null;
+  const rows = fitOk ? trace.map((p, i) => ({ ...p, fit: fitOk.curve[i] })) : trace;
+  const shown = progress == null ? rows : rows.slice(0, Math.max(2, Math.ceil(trace.length * progress)));
+  const f0 = tf && tf.fit.ok ? tf.fit : null;
+  const min = progress == null && trace.length && !f0 ? trace.reduce((a, b) => (a.s11 < b.s11 ? a : b)) : null;
   const fs = compact ? 9 : 10;
   const axisLabel = (value, angle) => compact ? undefined : { value, angle, position: angle ? "insideLeft" as const : "insideBottom" as const, offset: angle ? 4 : -8, fill: SCREEN.axis, fontSize: 10 };
   return (
@@ -2133,10 +2084,11 @@ function S11Plot({ trace, compact = false, progress = null }) {
         <YAxis domain={[-35, 2]} ticks={[-35, -30, -25, -20, -15, -10, -5, 0]} stroke={SCREEN.axis} fontSize={fs} tickLine={false} width={compact ? 32 : 46} label={axisLabel("S11 (dB)", -90)} />
         <Tooltip content={<ScreenTip xFmt={v => `${Number(v).toFixed(2)} Hz`} yFmt={v => `${Number(v).toFixed(2)} dB`} />} />
         <ReferenceLine y={-10} stroke="#3d5a73" strokeDasharray="3 5" />
-        {min && <ReferenceLine x={min.freq} stroke={SCREEN.fit} strokeOpacity={0.35} strokeDasharray="2 4" />}
+        {(f0 || min) && <ReferenceLine x={f0 ? f0.f0Hz : min.freq} stroke={SCREEN.fit} strokeOpacity={0.35} strokeDasharray="2 4" />}
         <Line name="S11" dataKey="s11" stroke={SCREEN.s11} dot={false} strokeWidth={compact ? 1.5 : 2} isAnimationActive={false} style={{ filter: "url(#glow-s11)" }} />
-        {!compact && <Line name="Fit" dataKey="fit" stroke={SCREEN.fit} dot={false} strokeDasharray="5 4" strokeOpacity={0.7} strokeWidth={1.2} isAnimationActive={false} />}
-        {min && <ReferenceDot x={min.freq} y={min.s11} r={4} fill={SCREEN.fit} stroke="#fff" strokeWidth={1} label={compact ? undefined : { value: `${min.freq.toFixed(1)} Hz · ${min.s11.toFixed(1)} dB`, position: "right", fill: "#ffd08a", fontSize: 10 }} />}
+ {!compact && fitOk && <Line name="Fit" dataKey="fit" stroke={SCREEN.fit} dot={false} strokeDasharray="5 4" strokeOpacity={0.7} strokeWidth={1.2} isAnimationActive={false} />}
+        {f0 && <ReferenceDot x={f0.f0Hz} y={f0.minDb} r={4} fill={SCREEN.fit} stroke="#fff" strokeWidth={1} label={compact ? undefined : { value: `${f0.f0Hz.toFixed(2)} ± ${f0.sigmaF0Hz.toFixed(2)} Hz · ${f0.minDb.toFixed(1)} dB`, position: "right", fill: "#ffd08a", fontSize: 10 }} />}
+        {min && <ReferenceDot x={min.freq} y={min.s11} r={4} fill={SCREEN.fit} stroke="#fff" strokeWidth={1} label={compact ? undefined : { value: `no fit · lowest ${min.freq.toFixed(1)} Hz`, position: "right", fill: "#ffd08a", fontSize: 10 }} />}
       </LineChart>
     </ResponsiveContainer>
     </>
@@ -2507,7 +2459,7 @@ function SpatialMarks({ p, records, stage, planned, o, sx, sy, colorOf, get, uni
         return (
           <g key={r.id} opacity={0.55 + d * 0.45}>
             <ellipse cx={cx + 2} cy={cy + 4 + (1 - d) * 5} rx={4 * k} ry={1.6 * k} fill="#000" opacity=".6" />
-            {o.unc && <circle cx={cx} cy={cy} r={4 * k + Math.min(14, (r.uncertaintyHz || 0) * 8)} fill={c} opacity=".18" />}
+            {o.unc && <circle cx={cx} cy={cy} r={4 * k + Math.min(14, 3 + 10 * Math.sqrt(Math.max(0, r.uncertaintyHz || 0)))} fill={c} opacity=".18" />}
             {bad ? <g stroke="#ef4444" strokeWidth="2"><line x1={cx - 4} y1={cy - 4} x2={cx + 4} y2={cy + 4} /><line x1={cx - 4} y1={cy + 4} x2={cx + 4} y2={cy - 4} /></g>
               : <circle cx={cx} cy={cy} r={4 * k} fill={c} stroke={o.quality ? vt.hex : "#0b1220"} strokeWidth={r.q > 3000 ? 2.5 : 1.2} strokeDasharray={o.quality && sus ? "2 2" : undefined} />}
             {o.labels && <text x={cx + 6} y={cy - 6} fontSize="8" fill="#cbd5e1">{o.order ? `#${r.sequence}` : get(r).toFixed(1)}</text>}
@@ -2780,6 +2732,7 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
   const valid = validationResult.overall === "VALID";
   const records = state.experiment.records;
   const latestRecord = records[0];
+  const liveFit = useMemo(() => (state.vna.power && state.vna.trace?.length ? fitTrace(state.vna.trace) : null), [state.vna.power, state.vna.trace]);
 
   return (
     <div className="space-y-4">
@@ -2833,8 +2786,8 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Current Resonance <HelpInfo termKey="center_freq" /></div>
-          <div className="mt-2 text-lg font-bold text-sky-300">{latestRecord ? `${latestRecord.resonance.toFixed(2)} Hz` : `${f0.toFixed(2)} Hz`}</div>
-          <div className="mt-1 text-[11px] text-zinc-500">S11 Min: {latestRecord ? `${latestRecord.depth.toFixed(2)} dB` : "-28.5 dB"}</div>
+          <div className="mt-2 text-lg font-bold text-sky-300">{latestRecord ? `${latestRecord.resonance.toFixed(2)} Hz` : liveFit?.fit.ok ? `${liveFit.fit.f0Hz.toFixed(2)} Hz` : "No fit yet"}</div>
+          <div className="mt-1 text-[11px] text-zinc-500">{latestRecord ? (latestRecord.fit?.ok === false ? "Fit failed · lowest sample" : `± ${Number(latestRecord.uncertaintyHz).toFixed(3)} Hz · S11 min ${latestRecord.depth.toFixed(2)} dB`) : liveFit?.fit.ok ? `± ${liveFit.fit.sigmaF0Hz.toFixed(3)} Hz · live trace fit` : "Power the VNA and sweep to measure"}</div>
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Measurement Quality <HelpInfo termKey="faraday_cage" /></div>
@@ -3181,11 +3134,10 @@ function ScanAutomationPanel({state,dispatch}){
 const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo: any }) {
   const vna = useInstrumentStore(useShallow(s => ({ power: s.vna.power, rf: s.vna.rf, sweeping: s.vna.sweeping, calibrated: s.vna.calibrated, calibrationType: s.vna.calibrationType, acquisitionPhase: s.vna.acquisitionPhase, sweepProgress: s.vna.sweepProgress, sweepMode: s.vna.sweepMode, triggerMode: s.vna.triggerMode, traceMath: s.vna.traceMath, center: s.vna.center, span: s.vna.span, ifbw: s.vna.ifbw, trace: s.vna.trace, resonanceHold: s.vna.resonanceHold, recordPacket: s.vna.recordPacket, spatialCommitPulse: s.vna.spatialCommitPulse, lastMetrics: s.vna.lastMetrics, fitVisible: s.vna.fitVisible })));
   const facilityPower = useEnvironmentStore(s => s.facility.power);
-  const pressure = useEnvironmentStore(s => s.chamber.pressure);
   const status = useLab(s => instStatus(s, "vna"));
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
   const trace = vna.trace;
-  const min = trace.length ? trace.reduce((a,b)=>a.s11 < b.s11 ? a : b) : null;
+  const traceFit = useMemo(() => fitTrace(trace), [trace]);
   const [prog, setProg] = useState(null);
   const raf = useRef(0);
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
@@ -3207,7 +3159,7 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
   const acqState = vna.sweeping ? "active" : vna.acquisitionPhase === "complete" ? "stable" : vna.power && vna.rf ? "ready" : "standby";
   return (
     <div className="space-y-4">
-      <div className={`rounded-lg border p-3 ${visualClass(acqState)}`}><div className="flex flex-wrap items-center gap-3"><StatusLED status={acqState}/><div className="flex-1"><div className="text-xs font-bold uppercase">VNA Acquisition · {(vna.acquisitionPhase || "idle").replaceAll("_"," ")}</div><div className="mt-1 h-1.5 overflow-hidden rounded bg-black/60"><div className="h-full bg-cyan-300 transition-[width]" style={{width:`${Math.round((vna.sweepProgress||0)*100)}%`}}/></div></div>{vna.lastMetrics && <div className="grid grid-cols-4 gap-2 font-mono text-[9px]"><span>f₀ {vna.lastMetrics.f0.toFixed(2)} Hz</span><span>MIN {vna.lastMetrics.minS11.toFixed(2)} dB</span><span>Q {vna.lastMetrics.q}</span><span>{vna.lastMetrics.quality}</span></div>}</div></div>
+      <div className={`rounded-lg border p-3 ${visualClass(acqState)}`}><div className="flex flex-wrap items-center gap-3"><StatusLED status={acqState}/><div className="flex-1"><div className="text-xs font-bold uppercase">VNA Acquisition · {(vna.acquisitionPhase || "idle").replaceAll("_"," ")}</div><div className="mt-1 h-1.5 overflow-hidden rounded bg-black/60"><div className="h-full bg-cyan-300 transition-[width]" style={{width:`${Math.round((vna.sweepProgress||0)*100)}%`}}/></div></div>{vna.lastMetrics && <div className="grid grid-cols-4 gap-2 font-mono text-[9px]"><span>f₀ {vna.lastMetrics.f0.toFixed(2)}{vna.lastMetrics.fitOk === false ? "" : ` ± ${Number(vna.lastMetrics.uncertaintyHz).toFixed(2)}`} Hz</span><span>MIN {vna.lastMetrics.minS11.toFixed(2)} dB</span><span>Q {vna.lastMetrics.fitOk === false ? "–" : Math.round(vna.lastMetrics.q)}</span><span>{vna.lastMetrics.quality}</span></div>}</div></div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold flex items-center">Keysight E5080B VNA Hardware Front Panel <HelpInfo termKey="vna" /></h1>
@@ -3235,7 +3187,7 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
               <span className="flex items-center text-sky-400"><Radio className="h-4 w-4 mr-2" /> S11 Log Magnitude (CH1) <HelpInfo termKey="s11" /></span>
               <span className={`text-[10px] ${vna.calibrated ? "text-emerald-400" : "text-amber-400"}`}>{vna.calibrated ? `CAL VALID (${vna.calibrationType})` : "UNCAL"}</span>
             </div>
-            <div className="relative h-[320px] overflow-hidden"><S11Plot trace={trace} progress={prog} />{prog != null && <AnimatedScanCursor p={prog} />}{vna.resonanceHold && <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-400/50 bg-amber-950/85 px-2 py-1 font-mono text-[9px] text-amber-200">RESONANCE HOLD</div>}{vna.fitVisible && min && <div className="absolute right-3 top-2 z-10"><TelemetryReadout label="Fit f₀" value={min.freq.toFixed(2)} unit="Hz" sub={`${min.s11.toFixed(1)} dB`} /></div>}{vna.recordPacket && <div className="absolute bottom-3 right-3 rounded border border-blue-400/50 bg-blue-950/90 px-3 py-2 text-[10px] text-blue-200 animate-pulse">DATA PACKET → RUN RECORD</div>}{vna.spatialCommitPulse && <div className="absolute bottom-3 left-3 rounded-full border-2 border-cyan-300 bg-cyan-400/20 px-3 py-1 text-[9px] text-cyan-100">SPATIAL POINT COMMITTED</div>}</div>
+            <div className="relative h-[320px] overflow-hidden"><S11Plot trace={trace} progress={prog} />{prog != null && <AnimatedScanCursor p={prog} />}{vna.resonanceHold && <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-400/50 bg-amber-950/85 px-2 py-1 font-mono text-[9px] text-amber-200">RESONANCE HOLD</div>}{vna.fitVisible && traceFit.fit.ok && <div className="absolute right-3 top-2 z-10"><TelemetryReadout label="Fit f₀" value={traceFit.fit.f0Hz.toFixed(2)} unit="Hz" sub={`± ${traceFit.fit.sigmaF0Hz.toFixed(2)} Hz · Q ${Math.round(traceFit.fit.q)}`} /></div>}{vna.recordPacket && <div className="absolute bottom-3 right-3 rounded border border-blue-400/50 bg-blue-950/90 px-3 py-2 text-[10px] text-blue-200 animate-pulse">DATA PACKET → RUN RECORD</div>}{vna.spatialCommitPulse && <div className="absolute bottom-3 left-3 rounded-full border-2 border-cyan-300 bg-cyan-400/20 px-3 py-1 text-[9px] text-cyan-100">SPATIAL POINT COMMITTED</div>}</div>
           </div>
 
           <div className="mt-4 flex justify-between items-center pt-3 border-t border-zinc-700">
@@ -3308,13 +3260,16 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
             <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-2 flex items-center justify-between">
               <span>Lorentzian Fit Analysis</span> <HelpInfo termKey="vna" />
             </div>
-            {min ? (
+            {!trace.length ? <p className="text-xs text-zinc-500">Enable the VNA and capture a trace.</p> : traceFit.fit.ok ? (
               <>
-                <FitRow label="Fitted f₀" value={`${min.freq.toFixed(3)} Hz`} />
-                <FitRow label="Minimum S11" value={`${min.s11.toFixed(2)} dB`} />
-                <FitRow label="Q factor" value={(pressure > 1 ? 1200 : 4500).toLocaleString()} />
+                <FitRow label="Fitted f₀" value={`${traceFit.fit.f0Hz.toFixed(3)} ± ${traceFit.fit.sigmaF0Hz.toFixed(3)} Hz`} />
+                <FitRow label="Q factor" value={`${Math.round(traceFit.fit.q).toLocaleString()} ± ${Math.round(traceFit.fit.sigmaQ).toLocaleString()}`} />
+                <FitRow label="Linewidth (FWHM)" value={`${traceFit.fit.fwhmHz.toFixed(2)} Hz`} />
+                <FitRow label="Dip bottom" value={`${traceFit.fit.minDb.toFixed(2)} dB (baseline ${traceFit.fit.baselineDb.toFixed(2)} dB)`} />
+                <FitRow label="Residual RMS" value={`${traceFit.fit.rmsResidualDb.toFixed(3)} dB · R² ${traceFit.fit.r2.toFixed(4)}`} />
+                <p className="pt-1 text-[10px] leading-snug text-zinc-500">± is one standard deviation from the fit of {traceFit.fit.points} points. It covers random noise only, not clock, calibration or stage-position errors.{traceFit.displayDiffers ? " The screen shows trace math; the fit uses the measured trace." : ""}</p>
               </>
-            ) : <p className="text-xs text-zinc-500">Enable the VNA and capture a trace.</p>}
+            ) : <p className="text-xs text-amber-300" role="status">Fit failed: {failureMessage(traceFit.fit)}</p>}
           </div>
         </div>
       </div>
@@ -3395,8 +3350,8 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
   const records = state.experiment.records;
   const validation = validateAxisSettings(getAxisPlanInput(state));
-  const mean = records.length ? records.reduce((n,r)=>n+r.resonance,0)/records.length : 0;
-  const sd = records.length > 1 ? Math.sqrt(records.reduce((n,r)=>n+(r.resonance-mean)**2,0)/(records.length-1)) : 0;
+  const positions = useMemo(() => summarizePositions([...records].reverse()), [records]);
+  const repeated = positions.filter(p => p.n > 1).length;
 
   const launchPlan = () => {
     dispatch({ type: "START_SCAN", kind: "axis" });
@@ -3439,17 +3394,18 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
 
           <div className="rounded border border-zinc-800 bg-zinc-900 p-3 text-xs mt-4">
             <div className="text-zinc-500">Run ID: <span className="font-mono text-sky-300">{state.experiment.id || "None"}</span></div>
-            <div className="mt-2 text-zinc-500">All-record spread: <span className="font-mono text-zinc-200">{records.length > 1 ? `σ = ${sd.toFixed(3)} Hz` : "Awaiting captures"}</span><span className="block text-xs">(Not per-position repeatability.)</span></div>
+            <div className="mt-2 text-zinc-500">Positions measured: <span className="font-mono text-zinc-200">{positions.length}</span> · with repeats: <span className="font-mono text-zinc-200">{repeated}</span><span className="block text-xs">Repeatability is per position, in the table below the ledger.</span></div>
             {state.experiment.planErrors.length > 0 && <div className="mt-2 text-rose-200" role="alert">{state.experiment.planErrors.map(issue => issue.message).join(" ")}</div>}
           </div>
         </div>
 
+        <div className="space-y-4 min-w-0">
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3">Measurement Ledger</div>
           <div className="max-h-[460px] overflow-auto">
             <table className="w-full text-left text-xs">
               <thead className="sticky top-0 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500">
-                <tr><th className="p-2">Time</th><th className="p-2">XYZ mm</th><th className="p-2">f₀ Hz</th><th className="p-2">Q</th><th className="p-2">Quality</th></tr>
+                <tr><th className="p-2">Time</th><th className="p-2">XYZ mm</th><th className="p-2">f₀ Hz</th><th className="p-2" title="Standard uncertainty of the fit (random noise only)">u Hz</th><th className="p-2">Q</th><th className="p-2">Quality</th></tr>
               </thead>
               <tbody>
                 {records.length ? records.map(r => (
@@ -3457,13 +3413,38 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
                     <td className="p-2 font-mono text-zinc-400">{r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : "Now"}</td>
                     <td className="p-2 font-mono text-sky-200">{r.x.toFixed(1)}, {r.y.toFixed(1)}, {r.z.toFixed(1)}</td>
                     <td className="p-2 font-mono">{r.resonance.toFixed(3)}</td>
-                    <td className="p-2">{r.q}</td>
+                    <td className="p-2 font-mono text-zinc-400">{r.fit?.ok === false ? "no fit" : Number.isFinite(r.uncertaintyHz) ? r.uncertaintyHz.toFixed(3) : "–"}</td>
+                    <td className="p-2">{r.q ? Math.round(r.q) : "–"}</td>
                     <td className={`p-2 font-bold ${r.valid ? "text-emerald-400" : "text-amber-400"}`}>{r.valid ? "VALID" : "SUSPECT"}</td>
                   </tr>
-                )) : <tr><td colSpan={5} className="p-8 text-center text-zinc-500">No recorded measurements. Start a run and trigger sweeps.</td></tr>}
+                )) : <tr><td colSpan={6} className="p-8 text-center text-zinc-500">No recorded measurements. Start a run and trigger sweeps.</td></tr>}
               </tbody>
             </table>
           </div>
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
+          <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-1">Repeatability by position</div>
+          <p className="mb-2 text-[11px] text-zinc-500">Mean resonance with its standard uncertainty u: the larger of the repeat scatter (SD/√n) and the fit uncertainty. U is expanded with 95 % coverage (k = 2, or Student's t when repeats govern). A rescanned repeat counts once, by its latest attempt. Random noise only; clock, calibration and position errors are not included.</p>
+          <div className="max-h-[300px] overflow-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500">
+                <tr><th className="p-2">XYZ mm</th><th className="p-2">n</th><th className="p-2">Mean f₀ Hz</th><th className="p-2">SD Hz</th><th className="p-2">u Hz</th><th className="p-2">U (95 %) Hz</th></tr>
+              </thead>
+              <tbody>
+                {positions.length ? positions.map(p => (
+                  <tr key={p.key} className="border-t border-zinc-900">
+                    <td className="p-2 font-mono text-sky-200">{p.x.toFixed(1)}, {p.y.toFixed(1)}, {p.z.toFixed(1)}</td>
+                    <td className="p-2 font-mono">{p.n}{p.failed ? <span className="text-amber-400" title="Fits that failed and are excluded"> +{p.failed}✕</span> : null}{p.superseded ? <span className="text-zinc-500" title="Earlier attempts replaced by a rescan"> ({p.superseded} rescanned)</span> : null}</td>
+                    <td className="p-2 font-mono">{p.n ? p.meanHz.toFixed(3) : "–"}</td>
+                    <td className="p-2 font-mono text-zinc-400">{p.sdHz === null ? "needs ≥ 2" : p.sdHz.toFixed(3)}</td>
+                    <td className="p-2 font-mono">{p.standardUncertaintyHz === null ? "–" : p.standardUncertaintyHz.toFixed(3)}</td>
+                    <td className="p-2 font-mono text-emerald-300">{p.expandedUncertaintyHz === null ? "–" : `± ${p.expandedUncertaintyHz.toFixed(3)}`}</td>
+                  </tr>
+                )) : <tr><td colSpan={6} className="p-6 text-center text-zinc-500">Statistics appear after the first measurement.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
         </div>
       </div>
     </div>
