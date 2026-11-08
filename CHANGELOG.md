@@ -4,6 +4,9 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Deep links: every workspace page has an address (`#/vna`, `#/runs`, ...) that follows the page and opens it when pasted; "Copy link to this page" is in Workspace tools. Unknown or malformed links are ignored.
+- Embed mode: `?embed=1` opens in instrument focus (no navigation drawer or journal) for iframes. `public/_headers` now allows framing only by spheredesci.org and www.spheredesci.org (it used to deny all framing).
+- Offline: a web app manifest and a service worker let the simulator open offline after one visit. The worker caches built assets and the page, loads pages network-first, and never touches `/api/` (Dr. Wire, search, mail, voice) or other origins.
 - Compare runs: pick two to four saved runs on Experiment Runs for an overlay of resonance by position, per-position differences from the baseline with combined uncertainty (z, flagged above 2), and the lab conditions that differ (temperature, pressure, clock, shielding, calibration, model version).
 - Spatial Field Explorer: a field model (weighted linear fit of resonance against X, Y and Z with coefficient uncertainties; axes with under 2 mm of spread are reported as unknown), a real coverage figure (share of the stage cube within 10 mm of a measurement, replacing records/25) and ranked suggestions for where to measure next, each with a Go button for the stage. The model's true sensitivities are shown only when blind mode is off.
 - Reproducibility bundles: the Bundle button on Experiment Runs exports a versioned, SHA-256 checksummed `.sphere.json` (model and app versions, citation block, runs, measurements, notebook) instead of dumping the whole app state.

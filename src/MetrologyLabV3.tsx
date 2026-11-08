@@ -10,6 +10,7 @@ import { dispatch, getLabState, initLabStores, onLabTransition, resetLabStores, 
 import { RunLibrary, SessionRestore } from './persistence/SessionUI';
 import { BundleImport } from './persistence/BundleUI';
 import { RunCompare } from './analysis/RunCompare';
+import { hashForPage, isEmbed, pageFromHash, shareUrl } from './features/route';
 import { FieldAnalysis } from './spatial/FieldAnalysis';
 import { coverage as spatialCoverage } from './spatial/field';
 import { buildBundle } from './domain/bundle';
@@ -702,7 +703,8 @@ export default function MetrologyLab() {
   const [journalOpen, setJournalOpen] = useState(false);
   const [journalWidth, setJournalWidth] = useState(320);
   const [journalHeight, setJournalHeight] = useState(240);
-  const [focusMode, setFocusMode] = useState(false);
+  // ?embed=1 (for iframes on other pages) starts in instrument focus: no navigation drawer or journal.
+  const [focusMode, setFocusMode] = useState(() => { try { return isEmbed(window.location.search); } catch { return false; } });
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
   const [navCompact, setNavCompact] = useState(() => window.matchMedia('(max-width: 1439px)').matches);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -827,6 +829,24 @@ export default function MetrologyLab() {
   const clearProfile = useCallback(() => { saveOperator({ ...EMPTY_OPERATOR }); dispatch({ type: "SET_OPERATOR", profile: { ...EMPTY_OPERATOR } }); }, []);
   // Every change in the lab (any button, slider, the palette, Dr. Wire) is explained in the live operation window.
   useEffect(() => installActivityTracker(cb => onLabTransition(cb)), []);
+  // Deep links: the address bar follows the page (#/vna), and opening or editing a #/page link switches to it.
+  const activePage = state.ui.active;
+  useEffect(() => {
+    const apply = () => { const p = pageFromHash(window.location.hash); if (p) dispatch({ type: "SET_UI", patch: { active: p } }); };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, []);
+  useEffect(() => {
+    const h = hashForPage(activePage);
+    if (h && window.location.hash !== h) { try { window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${h}`); } catch { /* sandboxed frames may forbid it */ } }
+  }, [activePage]);
+  const copyPageLink = () => {
+    const url = shareUrl(activePage, window.location);
+    const done = () => dispatch({ type: "EVENT", text: `Link to this page copied: ${url}`, subsystem: "SYSTEM" });
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done, () => window.prompt("Copy this link", url));
+    else window.prompt("Copy this link", url);
+  };
   // Autosave to this browser (IndexedDB) once the person has answered the resume offer, so a fresh start never overwrites it first.
   const [saveKv, setSaveKv] = useState<KV | null>(null);
   useEffect(() => {
@@ -1062,7 +1082,7 @@ export default function MetrologyLab() {
       <style>{TW_FALLBACK}</style>
       <WorkspaceHeader state={state} navOptions={navGroups.flatMap(group => group.items.map(([id, label]) => ({ id, label })))} focus={focusMode} fullscreen={fullscreen} journalOpen={journalOpen && !focusMode} alarms={unresolved}
         onNavigate={navigate} onNavigation={toggleNavigation} onJournal={toggleJournal} onFocus={() => { setFocusMode(v => !v); setNavDrawerOpen(false); }} onFullscreen={toggleFullscreen}
-        onSearch={() => set("ui", { cmdPaletteOpen: true })} onTool={tool => set("ui", { [({ wizard: "wizardOpen", videos: "videoModal", procedure: "manualOpen", glossary: "glossaryOpen" })[tool]]: true })}
+        onSearch={() => set("ui", { cmdPaletteOpen: true })} onTool={tool => tool === "share" ? copyPageLink() : set("ui", { [({ wizard: "wizardOpen", videos: "videoModal", procedure: "manualOpen", glossary: "glossaryOpen" })[tool]]: true })}
         operator={state.operator} onOperator={() => setOperatorOpen(true)} onMode={mode => dispatch({ type: "SET_MODE", mode })} onSpeed={speed => set("facility", { speed })} detailsOpen={detailsOpen} onDetails={() => setDetailsOpen(v => !v)} settings={<FxSettings fx={fx} setFx={setFx} />}
         onPower={() => {
           if (state.facility.power) set("ui", { confirmModal: { title: "Open Main Breaker?", desc: "Opening the main breaker will cut AC power to all instruments and reset session state.", onConfirm: () => { dispatch({ type: "POWER", value: false }); set("ui", { confirmModal: null }); } } });
