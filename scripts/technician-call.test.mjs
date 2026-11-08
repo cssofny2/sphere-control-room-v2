@@ -129,3 +129,20 @@ const flush = async () => { for (let i = 0; i < 20; i++) await new Promise(r => 
   const t = F2.fluent('I think we have a vacuum leak. Cause: gas is getting in. Effect: pressure keeps rising. Check: watch the pressure rate. Fix: clear the leak fault. We do not know yet.');
   assert.ok(!/(Cause|Effect|Check|Fix):/.test(t) && /don't know/.test(t), t); assert.equal(F2.fluent(t), t);
   console.log('PASS fluent: labels become sentences, contractions are used, and it is idempotent'); }
+
+// "Review my run": answered from the recorded data, read-only, and never starts a lab action.
+{
+  const X = setup(); await X.call.start();
+  X.s = { ...X.s, experiment: { ...X.s.experiment, records: [
+    { id: 'a', runId: 'r', timestamp: '2026-11-08T00:00:01Z', x: 0, y: 0, z: 0, resonance: 230500, uncertaintyHz: 0.04, fit: { ok: true }, clockLocked: false, valid: false },
+    { id: 'b', runId: 'r', timestamp: '2026-11-08T00:00:02Z', x: 0, y: 0, z: 0, resonance: 230500.1, uncertaintyHz: 0.04, fit: { ok: true }, clockLocked: true, valid: true } ] } };
+  const before = JSON.stringify(X.s);
+  await X.call.submit('review my run'); await flush();
+  const said = X.call.captions.filter(c => c.who === 'wire').map(c => c.text).join(' ');
+  assert.match(said, /looked at 2 measurements/); assert.match(said, /clock/i);
+  assert.equal(JSON.stringify(X.s), before, 'a review changes nothing in the lab');
+  assert.equal(X.runner.current, null, 'and starts no task');
+  const empty = setup(); await empty.call.start(); await empty.call.submit('how did my run go'); await flush();
+  assert.ok(empty.call.captions.some(c => c.who === 'wire' && /nothing in the ledger/.test(c.text)));
+  console.log('PASS Dr. Wire reviews the run from the data and touches nothing');
+}
