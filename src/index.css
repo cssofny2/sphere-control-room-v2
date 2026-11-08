@@ -162,3 +162,17 @@ button.status-chip { border: 1px solid #2b3b4e; cursor: pointer; }
 .density-compact .gap-4 { gap: .5rem !important; }
 .density-compact .gap-3 { gap: .4rem !important; }
 .density-compact table td, .density-compact table th { padding: 3px 6px !important; }
+
+/* Display settings (Display & Units page): text size, contrast, reduced motion and a colour-vision-safe palette. */
+html.disp-text-115 { font-size: 115%; }
+html.disp-text-130 { font-size: 130%; }
+html.disp-high-contrast .lab-root { --hc-border: #e4e4e7; }
+html.disp-high-contrast .lab-root :focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+html.disp-high-contrast .lab-root .text-zinc-300, html.disp-high-contrast .lab-root .text-zinc-400, html.disp-high-contrast .lab-root .text-zinc-500, html.disp-high-contrast .lab-root .text-zinc-600 { color: #f4f4f5; }
+html.disp-high-contrast .lab-root [class*="border-zinc-"] { border-color: #a1a1aa; }
+html.disp-reduce-motion *, html.disp-reduce-motion *::before, html.disp-reduce-motion *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+/* Okabe-Ito: blue for good, orange for bad, so red/green confusion cannot hide status. Words and symbols are always shown too. */
+html.disp-cvd .lab-root [class*="text-emerald-"], html.disp-cvd .lab-root [class*="text-green-"] { color: #56b4e9; }
+html.disp-cvd .lab-root [class*="text-rose-"], html.disp-cvd .lab-root [class*="text-red-"] { color: #e69f00; }
+html.disp-cvd .lab-root [class*="bg-emerald-"] { background-color: #0b3a57; }
+html.disp-cvd .lab-root [class*="bg-rose-"] { background-color: #5a3a00; }
