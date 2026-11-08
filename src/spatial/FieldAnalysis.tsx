@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { LOCATION_HZ_PER_MM } from '../simulation/model';
 import { coverage, fitField, suggestPoints, type FieldRecord } from './field';
 
@@ -10,6 +10,7 @@ export function FieldAnalysis({ records, blind, dispatch, canMove }: { records: 
   const why = 'reason' in fit ? fit.reason : '';
   const cov = useMemo(() => coverage(records), [records]);
   const next = useMemo(() => suggestPoints(records, 5), [records]);
+  const [repeats, setRepeats] = useState(3);
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl space-y-3 text-xs">
       <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2">Field model and next points</div>
@@ -44,6 +45,14 @@ export function FieldAnalysis({ records, blind, dispatch, canMove }: { records: 
             ))}
           </ul>
         ) : <p className="text-zinc-500">The stage is already well covered at this spacing.</p>}
+        {next.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label className="text-zinc-400">Repeats each
+              <select aria-label="Repeats per suggested point" value={repeats} onChange={e => setRepeats(Number(e.target.value))} className="ml-1 rounded border border-zinc-700 bg-zinc-900 p-1">{[1, 2, 3, 5].map(n => <option key={n} value={n}>{n}</option>)}</select>
+            </label>
+            <button disabled={!canMove} onClick={() => dispatch({ type: 'START_SCAN', kind: 'points', positions: next.map(p => ({ x: p.x, y: p.y, z: p.z })), repeats, randomized: true })} className="rounded border border-emerald-600 bg-emerald-900 px-3 py-1.5 font-bold text-white hover:bg-emerald-800 disabled:opacity-40" title={canMove ? 'Start a validated run of these points in random order' : 'Power on the lab first'}>Run these {next.length} points</button>
+          </div>
+        )}
       </div>
     </div>
   );

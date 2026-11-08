@@ -84,7 +84,7 @@ Impact = scientific credibility + what users lose today + reach (education, open
 **Scope.** `src/analysis/compare.ts` (pure) and a Compare tab on Runs. Pick 2–4 saved runs (#2). Overlay f0-vs-position lines with Recharts (already a dependency); match positions by rounded coordinates; per-position Δ table with Welch t-test using #1's σ; difference map by letting `SpatialMaps` take a second record set; conditions diff (temperature, pressure, clock lock, Faraday/isolation, model flags) with a rule-based "what changed" line (e.g. "+15 Hz offset ≈ ΔT 3 °C × 5 Hz/°C").
 **Tests.** Pure-function fixtures for matching, deltas, t-test, conditions diff.
 
-## 6. Adaptive sampling planner, field-model fit, 3D annotations — L — PARTLY DONE (branch `feat/spatial-planner`)
+## 6. Adaptive sampling planner, field-model fit, 3D annotations — L — MOSTLY DONE (#43, then `feat/add-to-plan`)
 
 > Delivered: field fit, real coverage, maximin point suggestions with Go-to-stage. Not delivered: a multi-point `custom` plan kind for "Add to plan", and 3D point annotations.
 
