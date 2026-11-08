@@ -4,6 +4,7 @@ import { placeFrom } from './smalltalk';
 export type Intent =
   | { type: 'task'; id: string; params: Record<string, unknown> }
   | { type: 'cancel' }
+  | { type: 'review' }
   | { type: 'estop' }
   | { type: 'lookup'; query: string }
   | { type: 'food'; place: string | null; request: string }
@@ -17,6 +18,8 @@ export function parseCommand(text: string, state?: any): Intent {
   const q = word(text.toLowerCase().replace(/[,;]/g, ' ').replace(/\s+/g, ' ').trim());
   if (/\b(emergency stop|e-?stop|stop everything|halt everything|abort everything)\b/.test(q)) return { type: 'estop' };
   if (/\b(cancel|stop|forget) (the |that |this |your )?(task|job|that|what you('| a)re doing)\b/.test(q)) return { type: 'cancel' };
+  // "Review my run", "how did my run go", "are my measurements any good": read-only, answered from the recorded data.
+  if (/\b(review|critique|assess|evaluate|grade|go over|look over|how('?s| did| is| was| are| were| does)|any good|good enough|sound)\b.*\b(my|the|this|our) (run|runs|data|measurements?|results?|experiment|scan|ledger)\b|\b(my|the|this|our) (run|data|measurements?|results?|experiment|scan|ledger)\b.*\b(any good|look ok(ay)?|good enough|go|went)\b/.test(q) && !/\b(start|begin|stop|export|clear|delete|pause|resume)\b/.test(q)) return { type: 'review' };
   const T = (id: string, params: Record<string, unknown> = {}): Intent => ({ type: 'task', id, params });
   const ask = /\b(what|why|how|explain|is|are|does|do you know)\b/.test(q) && !/\b(please|can you|could you)\b/.test(q);
   const A = (action: string, params: Record<string, unknown> = {}): Intent => T('action', { action, params });

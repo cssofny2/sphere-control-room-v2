@@ -10,6 +10,7 @@ import { dispatch, getLabState, initLabStores, onLabTransition, resetLabStores, 
 import { RunLibrary, SessionRestore } from './persistence/SessionUI';
 import { BundleImport } from './persistence/BundleUI';
 import { RunCompare } from './analysis/RunCompare';
+import { RunReviewCard } from './technician/RunReviewCard';
 import { hashForPage, isEmbed, pageFromHash, shareUrl } from './features/route';
 import { installModalA11y } from './features/modalA11y';
 import { Announcer } from './features/Announcer';
@@ -3459,6 +3460,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
 
         <div className="space-y-4 min-w-0">
         <RunLibrary dispatch={dispatch} refreshKey={records.length} />
+        <RunReviewCard records={records} />
         <RunCompare ledger={records} refreshKey={records.length} />
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3">Measurement Ledger ({records.length})</div>

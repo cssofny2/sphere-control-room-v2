@@ -112,7 +112,9 @@ Impact = scientific credibility + what users lose today + reach (education, open
 **Scope.** Hash router synced with `navigate` (`#/vna`, `#/runs/<id>`, `#/lesson/<id>`); Share button; `?embed=1` hides header/journal; change `_headers` to `frame-ancestors https://spheredesci.org` (and the www host) while keeping DENY semantics for everyone else; web app manifest + service worker precache so the simulator works offline (Dr. Wire cloud features degrade as they already do); `seo-plugin.mjs` emits the manifest and `seo.test.mjs` asserts it.
 **Tests.** Router round-trip; headers test; embed-mode render; SW precache list matches the build.
 
-## 9. Dr. Wire run-review coach — M
+## 9. Dr. Wire run-review coach — M — DONE (branch `feat/run-review`)
+
+> Deterministic review only; the optional AI paraphrase through server.ts was not added, because the computed review already reads naturally and adds no spend or injection surface.
 
 **Why.** Dr. Wire is the project's most-invested feature but cannot reason about measurement results. With #1's numbers he can.
 

@@ -4,6 +4,8 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Dr. Wire run review: phone him and say "review my run", "how did my run go" or "are my measurements any good". He reads the recorded data and says what is sound, the biggest problem (unlocked clock, failed fits, shielding or calibration off, temperature or pressure moving, repeats that scatter or drift, no repeats, unmeasured axes) and what to do next. It is computed, offline and read-only: a review starts no lab action.
+- Run review card on Experiment Runs shows the same findings as a list.
 - Accessibility: an axe-core audit of all 14 pages found 16 critical or serious problems; all are fixed (unlabelled sliders, checkboxes and selects, buttons nested in buttons, invalid ARIA on tabs, low-contrast text, empty table header, hidden-but-focusable content). A re-run reports none.
 - Dialogs: every pop-up now has a dialog role and name, moves focus in, keeps Tab inside, closes on Escape through its Close or Cancel button, and returns focus to what opened it.
 - Screen readers: new alarms are announced assertively and each recorded measurement politely, without moving focus.

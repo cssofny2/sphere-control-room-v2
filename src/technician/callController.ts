@@ -6,6 +6,7 @@ import type { FactsPlus } from './facts';
 import { buildSnapshot } from './snapshot';
 import { createSentenceChunker, LLMUnavailable, streamTechnician, type Block, type Msg } from './llm';
 import { parseCommand, isNo, isYes } from './intents';
+import { reviewRun, spokenReview } from './reviewRun';
 import { answerPending, smallTalk, DEFAULT_SHIFT, shiftAnswer, type Pending, type Shift, type TalkResult } from './smalltalk';
 import type { Flows } from './flows';
 import { ACTION_BY_ID } from './actions';
@@ -260,6 +261,7 @@ export function createCallController(deps: CallDeps) {
     // Jobs at the computer are handled here so the confirmation and the hand-off are always the same.
     const intent = parseCommand(text, deps.getState());
     // Personal and everyday questions (pay, family, plans, favorites) have consistent in-character answers; the lab commands above them take priority.
+    if (intent?.type === 'review') { reply(named(spokenReview(reviewRun(deps.getState().experiment?.records ?? []))), 'answer', 'neutral'); return; }
     if (!intent || intent.type === 'lookup') { const ch = chatter.reply(text, chatCtx()); if (ch) { reply(named(ch.text)); pending = ch.ask ?? null; return; } }
     if (intent?.type === 'food') { if (intent.place) runFood(intent.place, intent.request); else { reply("Sure. Where from? I can do McDonald's on DoorDash, or tell me another place."); pending = { topic: 'food_place' }; } return; }
     if (intent?.type === 'part') { runPart(intent.part, intent.qty, intent.urgent); return; }
