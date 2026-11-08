@@ -87,6 +87,7 @@ export default function WorkspaceHeader(props: Props) {
               <button onClick={() => tool('videos')}>Videos</button>
               <button onClick={() => tool('procedure')}>Procedure</button>
               <button onClick={() => tool('glossary')}>Glossary</button>
+              <button onClick={() => tool('share')}>Copy link to this page</button>
               <button aria-pressed={props.detailsOpen} onClick={props.onDetails}>{props.detailsOpen ? 'Hide detailed telemetry' : 'Show detailed telemetry'}</button>
               <label>Operating mode
                 <select aria-label="Operating mode" value={props.state.facility.mode} onChange={e => props.onMode(e.target.value)}>

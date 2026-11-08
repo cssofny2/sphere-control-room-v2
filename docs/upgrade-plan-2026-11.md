@@ -101,7 +101,9 @@ Impact = scientific credibility + what users lose today + reach (education, open
 **Scope.** Searchable keyboard parts list for the 3D views (roadmap #14, builds on `engineering/parts.ts` + `selection.ts`); colour-vision-safe ramps (viridis/cividis) and a `prefers-contrast` pass; `aria-live` region for alarms and run events; focus trap/return for all dialogs; 360 px layout pass with no horizontal scroll; automated axe checks added to the mounted jsdom suite. i18n scaffolding (en/es for chrome and glossary) as an optional stretch.
 **Tests.** axe violations = 0 on each page; keyboard-only walkthrough script.
 
-## 8. Deep links, embed mode, offline PWA — S–M
+## 8. Deep links, embed mode, offline PWA — S–M — DONE (branch `feat/links-embed-pwa`)
+
+> Not delivered: deep links to a specific run or lesson (lessons do not exist yet; runs live only in the local browser store). Header changes affect Cloudflare deploys only; vercel.json sends no framing headers.
 
 **Why.** The only URL state is `?labdebug` / `?nomerge`; pages can't be linked. `public/_headers` sets `X-Frame-Options: DENY` and `frame-ancestors 'none'`, so the lab cannot be embedded in spheredesci.org/vl or the whitepaper.
 
