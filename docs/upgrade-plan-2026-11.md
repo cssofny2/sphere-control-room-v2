@@ -41,7 +41,7 @@ Impact = scientific credibility + what users lose today + reach (education, open
 
 **Done when.** No hard-coded uncertainty, Q or repeat SD remains in record creation; README caveat removed.
 
-## 2. Durable sessions and run library — M
+## 2. Durable sessions and run library — M — DONE (branch `feat/durable-sessions`)
 
 **Why.** Reloading loses everything (README: notes "survive breaker cycles but not a page reload"). The ledger is hard-capped at 200 (`:498`), events at 200 (`:209`), and the ledger table renders every row unvirtualized.
 
@@ -65,7 +65,7 @@ Impact = scientific credibility + what users lose today + reach (education, open
 
 **Tests.** `scripts/curriculum.test.mjs`: every lesson has a scripted golden solution that passes headlessly through the reducer, and a no-op run that fails — guards against physics changes silently breaking lessons.
 
-## 4. Reproducibility bundles and validated import — M
+## 4. Reproducibility bundles and validated import — M — DONE (branch `feat/repro-bundles`, stacked on `feat/durable-sessions`)
 
 **Why.** `exportJson` dumps the entire app `state` (UI flags, modals and all, `:1014`); `exportCsv` skips CSV escaping and drops quality, uncertainty and repeat columns (`:1005`) although `csvEscape` already exists (`:290`). Zenodo/ORCID metadata shows open science is a project goal.
 
