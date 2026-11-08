@@ -41,7 +41,7 @@ Impact = scientific credibility + what users lose today + reach (education, open
 
 **Done when.** No hard-coded uncertainty, Q or repeat SD remains in record creation; README caveat removed.
 
-## 2. Durable sessions and run library — M
+## 2. Durable sessions and run library — M — DONE (branch `feat/durable-sessions`)
 
 **Why.** Reloading loses everything (README: notes "survive breaker cycles but not a page reload"). The ledger is hard-capped at 200 (`:498`), events at 200 (`:209`), and the ledger table renders every row unvirtualized.
 

@@ -6,7 +6,11 @@ import HelpDialog from './overview/HelpDialog';
 // The realistic WebGL lab loads on demand so three.js stays out of the main bundle.
 // The chunk also carries the audio engine (Foley) and the technician voice system, so none of it downloads until the 3D view is allowed to mount.
 import { useShallow } from 'zustand/react/shallow';
-import { dispatch, initLabStores, onLabTransition, resetLabStores, useEnvironmentStore, useInstrumentStore, useLab } from './state/labStores';
+import { dispatch, getLabState, initLabStores, onLabTransition, resetLabStores, useEnvironmentStore, useInstrumentStore, useLab } from './state/labStores';
+import { RunLibrary, SessionRestore } from './persistence/SessionUI';
+import { createAutosave } from './persistence/autosave';
+import { MAX_RECORDS, mergeRecords } from './persistence/sessions';
+import type { KV } from './persistence/store';
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
 const Schematic = lazy(() => import('./engineering/Schematic'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
@@ -498,7 +502,7 @@ function reducer(state, action) {
     case "RECORD": {
       const record = action.record;
       if (!record || typeof record.id !== "string" || !record.id || !state.experiment.active || record.runId !== state.experiment.id || record.contract?.runId !== state.experiment.id || record.contract?.id !== record.id || state.experiment.records.some(r => r.id === record.id)) return state;
-      return { ...state, experiment: { ...state.experiment, captureCount: (state.experiment.captureCount || 0) + 1, records: [record, ...state.experiment.records].slice(0, 200) } };
+      return { ...state, experiment: { ...state.experiment, captureCount: (state.experiment.captureCount || 0) + 1, records: [record, ...state.experiment.records].slice(0, MAX_RECORDS) } };
     }
     case "SET_FAILURE": {
       const label = FAULT_CATALOG[action.key]?.title || action.key;
@@ -516,6 +520,12 @@ function reducer(state, action) {
     }
     case "REVEAL_FAULT_DRILL": return { ...state, faultDrill: { ...state.faultDrill, revealed: true } };
     case "NOTEBOOK_ADD": return addEvent({ ...state, notebook: [action.entry, ...state.notebook].slice(0, 300) }, `Notebook entry added (${action.entry.tag}).`, "info", "NOTEBOOK");
+    case "RESTORE_SESSION": {
+      const records = Array.isArray(action.records) ? mergeRecords(state.experiment.records, action.records) : state.experiment.records;
+      const have = new Set(state.notebook.map(n => n.id));
+      const notebook = Array.isArray(action.notebook) ? [...state.notebook, ...action.notebook.filter(n => n && !have.has(n.id))].slice(0, 300) : state.notebook;
+      return addEvent({ ...state, notebook, experiment: { ...state.experiment, records } }, `Restored ${records.length - state.experiment.records.length} saved measurement(s) from this browser.`, "info", "RESEARCH");
+    }
     case "NOTEBOOK_DELETE": return { ...state, notebook: state.notebook.filter(n => n.id !== action.id) };
     case "TICK": return tick(state, action.dt);
     default: return state;
@@ -811,6 +821,17 @@ export default function MetrologyLab() {
   const clearProfile = useCallback(() => { saveOperator({ ...EMPTY_OPERATOR }); dispatch({ type: "SET_OPERATOR", profile: { ...EMPTY_OPERATOR } }); }, []);
   // Every change in the lab (any button, slider, the palette, Dr. Wire) is explained in the live operation window.
   useEffect(() => installActivityTracker(cb => onLabTransition(cb)), []);
+  // Autosave to this browser (IndexedDB) once the person has answered the resume offer, so a fresh start never overwrites it first.
+  const [saveKv, setSaveKv] = useState<KV | null>(null);
+  useEffect(() => {
+    if (!saveKv) return;
+    const saver = createAutosave(saveKv, () => ({ records: getLabState().experiment.records, notebook: getLabState().notebook }));
+    let last: unknown[] | null = null, lastNotes: unknown[] | null = null;
+    const off = onLabTransition((_prev, next) => { if (next.experiment.records !== last || next.notebook !== lastNotes) { last = next.experiment.records; lastNotes = next.notebook; saver.schedule(); } });
+    const onHide = () => { void saver.flush(); };
+    window.addEventListener('pagehide', onHide);
+    return () => { off(); window.removeEventListener('pagehide', onHide); saver.cancel(); };
+  }, [saveKv]);
 
   useEffect(() => {
     const e=state.experiment;
@@ -1044,6 +1065,7 @@ export default function MetrologyLab() {
       />
       <div className="workspace-status" aria-label="Essential laboratory status">
         <AlertStrip state={state} onOpen={() => navigate("overview")} />
+        <SessionRestore dispatch={dispatch} onResolved={setSaveKv} />
         <span className="status-chip"><span>Clock</span><strong>{clockStatus}</strong></span>
         <span className="status-chip"><span>Pressure</span><strong>{fmtPressure(state.chamber.pressure)}</strong></span>
         <span className={`status-chip ${tempStable ? "" : "status-warning"}`}><span>Temp</span><strong>{state.chamber.temperature.toFixed(2)} °C</strong></span>
@@ -2002,7 +2024,7 @@ function LabNotebook({ state, dispatch, validationResult, f0 }) {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-bold flex items-center gap-2"><FileText size={20} className="text-sky-300" /> Lab Notebook</h1>
-        <p className="mt-1 text-sm text-zinc-400">Each entry automatically records a snapshot of the instrument state. The notebook survives breaker cycles but is cleared on page reload.</p>
+        <p className="mt-1 text-sm text-zinc-400">Each entry automatically records a snapshot of the instrument state. The notebook survives breaker cycles and is saved in this browser, so it comes back after a reload if you choose to resume.</p>
       </div>
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 space-y-2">
         <textarea value={text} onChange={e => setText(e.target.value)} rows={3} placeholder="Write an observation, hypothesis or note…" className="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-sm text-zinc-100" />
@@ -3352,6 +3374,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
   const validation = validateAxisSettings(getAxisPlanInput(state));
   const positions = useMemo(() => summarizePositions([...records].reverse()), [records]);
   const repeated = positions.filter(p => p.n > 1).length;
+  const [ledgerRows, setLedgerRows] = useState(300);
 
   const launchPlan = () => {
     dispatch({ type: "START_SCAN", kind: "axis" });
@@ -3400,15 +3423,16 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
         </div>
 
         <div className="space-y-4 min-w-0">
+        <RunLibrary dispatch={dispatch} refreshKey={records.length} />
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
-          <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3">Measurement Ledger</div>
+          <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3">Measurement Ledger ({records.length})</div>
           <div className="max-h-[460px] overflow-auto">
             <table className="w-full text-left text-xs">
               <thead className="sticky top-0 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500">
                 <tr><th className="p-2">Time</th><th className="p-2">XYZ mm</th><th className="p-2">f₀ Hz</th><th className="p-2" title="Standard uncertainty of the fit (random noise only)">u Hz</th><th className="p-2">Q</th><th className="p-2">Quality</th></tr>
               </thead>
               <tbody>
-                {records.length ? records.map(r => (
+                {records.length ? records.slice(0, ledgerRows).map(r => (
                   <tr key={r.id} className="border-t border-zinc-900 hover:bg-zinc-900/50">
                     <td className="p-2 font-mono text-zinc-400">{r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : "Now"}</td>
                     <td className="p-2 font-mono text-sky-200">{r.x.toFixed(1)}, {r.y.toFixed(1)}, {r.z.toFixed(1)}</td>
@@ -3420,6 +3444,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
                 )) : <tr><td colSpan={6} className="p-8 text-center text-zinc-500">No recorded measurements. Start a run and trigger sweeps.</td></tr>}
               </tbody>
             </table>
+            {records.length > ledgerRows && <button onClick={() => setLedgerRows(n => n + 500)} className="m-2 rounded border border-zinc-600 px-3 py-1 text-xs hover:bg-zinc-800">Show more ({records.length - ledgerRows} older not shown)</button>}
           </div>
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">

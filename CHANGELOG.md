@@ -4,6 +4,9 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Durable sessions: measurements and notebook entries are autosaved to this browser (IndexedDB, memory fallback when storage is blocked). After a reload a "Resume your last session?" prompt brings them back; autosave waits for your answer so starting fresh never overwrites the saved session.
+- Run library on Experiment Runs: every run is archived automatically and survives clearing the ledger or switching the breaker off; Load, Export (JSON) and Delete per run.
+- The 200-record ledger cap is now 50,000; the ledger table shows the newest 300 rows with "Show more".
 - Measurement engine: sweeps are fitted with a Lorentzian dip, so f₀ and Q are measured with a standard uncertainty from the fit instead of using the lowest sample and fixed placeholders (0.25 Hz uncertainty, 0.05 Hz repeat SD, Q 1200/4500). The S11 "Fit" line is now the real fit (it used to be the noise-free model, which leaked the true resonance). Model version is now `sphere-teaching-model-v2`.
 - Experiment Runs: ledger shows per-record uncertainty; new "Repeatability by position" table (n, mean, SD, u, 95 % U); rescanned attempts count once. CSV export gains `uncertainty_hz` and `fit_ok`.
 - Quality gate: a failed resonance fit is a critical failure and triggers the adaptive rescan.
