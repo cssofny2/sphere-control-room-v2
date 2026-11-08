@@ -20,6 +20,8 @@ import { markerRadius, pointMarkers } from './features/pointMarkers';
 import { PageBoundary } from './features/PageBoundary';
 import { LearningPaths } from './curriculum/LearningPaths';
 import { Insights } from './insights/Insights';
+import { fromTorr, fmtTemperature, getUnits } from './features/units';
+import { useUnits } from './features/useUnits';
 import { SettingsPage } from './features/SettingsPage';
 import { TemplatePicker } from './simulation/TemplatePicker';
 import { installDisplaySettings } from './features/displaySettings';
@@ -212,7 +214,10 @@ const initialState = {
 const clamp = (val, min, max) => Math.min(max, Math.max(min, val));
 const uid = () => createIdentifier('run');
 const now = () => new Date().toLocaleTimeString();
-const fmtPressure = p => p >= 10 ? `${p.toFixed(1)} Torr` : `${p.toExponential(1)} Torr`;
+const fmtPressure = p => p >= 10 ? `${p.toFixed(1)} Torr` : `${p.toExponential(1)} Torr`;   // pure Torr: used by simulator logic and stored notes
+// Display-only formatters follow the unit chosen on the Display & Units page; the model itself stays in Torr and °C.
+const fmtPressureShown = p => { const u = getUnits().pressure, v = fromTorr(p, u); return v >= 10 ? `${v.toFixed(1)} ${u}` : `${v.toExponential(1)} ${u}`; };
+const fmtTemp = (c, digits = 2) => fmtTemperature(c, getUnits().temperature, digits);
 // Turns a help key ("ov.*" overview terms or older glossary terms) into the entry the help dialog shows.
 const resolveHelp = (key) => {
   const e = OVERVIEW_HELP[key] || GLOSSARY[key];
@@ -727,6 +732,7 @@ function useThrottled<T>(value: T, ms: number): T {
 }
 
 export default function MetrologyLab() {
+  useUnits(); // re-render when the display units change
   // The shell still needs the whole picture (header, alarms, validation); instrument panels subscribe to their own slice.
   const state: any = useLab(s => s);
   useEffect(() => () => resetLabStores(), []);
@@ -1168,8 +1174,8 @@ export default function MetrologyLab() {
         <AlertStrip state={state} onOpen={() => navigate("overview")} />
         <SessionRestore dispatch={dispatch} onResolved={setSaveKv} />
         <span className="status-chip"><span>Clock</span><strong>{clockStatus}</strong></span>
-        <span className="status-chip"><span>Pressure</span><strong>{fmtPressure(state.chamber.pressure)}</strong></span>
-        <span className={`status-chip ${tempStable ? "" : "status-warning"}`}><span>Temp</span><strong>{state.chamber.temperature.toFixed(2)} °C</strong></span>
+        <span className="status-chip"><span>Pressure</span><strong>{fmtPressureShown(state.chamber.pressure)}</strong></span>
+        <span className={`status-chip ${tempStable ? "" : "status-warning"}`}><span>Temp</span><strong>{fmtTemp(state.chamber.temperature)}</strong></span>
         <button className="status-chip" aria-label="Inspect measurement quality" onClick={() => set("ui", { validatorModalOpen: true })}><span>Quality</span><strong>{recordQuality}</strong></button>
         <span className="status-chip status-run" title={state.experiment.id || "No active run"}><span>Run</span><strong>{state.experiment.active ? "RECORDING" : recordingState}</strong></span>
         <button className={`status-chip ${unresolved ? "status-warning" : ""}`} aria-label={`Open alarms: ${unresolved}`} onClick={() => { setFocusMode(false); setJournalOpen(true); set("ui", { alarmsOpen: true }); }}><AlertTriangle size={13} /><span>Alarms</span><strong>{unresolved}</strong></button>
@@ -1209,14 +1215,14 @@ export default function MetrologyLab() {
           <div className={`flex items-center gap-1.5 rounded px-2 py-1 border ${
             state.chamber.pressure < 1e-3 ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-900 text-zinc-300"
           }`}>
-            <span>PRES: <strong>{fmtPressure(state.chamber.pressure)}</strong></span>
+            <span>PRES: <strong>{fmtPressureShown(state.chamber.pressure)}</strong></span>
           </div>
 
           <div className={`flex items-center gap-1.5 rounded px-2 py-1 border ${
             tempStable ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-amber-500/40 bg-amber-500/10 text-amber-300"
           }`}>
             {tempStable ? <CheckCircle2 size={12} className="text-emerald-400" /> : <AlertTriangle size={12} className="text-amber-400" />}
-            <span>TEMP: <strong>{state.chamber.temperature.toFixed(2)}°C</strong></span>
+            <span>TEMP: <strong>{fmtTemp(state.chamber.temperature)}</strong></span>
           </div>
 
           <div className="flex items-center gap-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sky-300">
@@ -1691,8 +1697,8 @@ function VnaCalibrationModal({ state, dispatch, close }) {
 
           <div className="bg-zinc-950 p-3 rounded border border-zinc-800 text-[11px] font-mono space-y-1 text-zinc-400">
             <div>Current Freq Range: {(state.vna.center - state.vna.span/2).toFixed(0)} Hz — {(state.vna.center + state.vna.span/2).toFixed(0)} Hz</div>
-            <div>Chamber Temp at Cal: {state.chamber.temperature.toFixed(2)} °C</div>
-            <div>Pressure at Cal: {fmtPressure(state.chamber.pressure)}</div>
+            <div>Chamber Temp at Cal: {fmtTemp(state.chamber.temperature)}</div>
+            <div>Pressure at Cal: {fmtPressureShown(state.chamber.pressure)}</div>
           </div>
 
           {calibrating && (
@@ -2349,7 +2355,7 @@ function ChamberSVG({ state, mini = false, cv = null }) {
             <text x="300" y="54" textAnchor="middle" fill="#7dd3fc">QUARTZ VIEWPORT</text>
             <text x="72" y="158" fill="#94a3b8">VAC</text>
             <text x="508" y="158" fill="#94a3b8">RF</text>
-            <text x="72" y="320" fill="#9fb3c8" fontSize="11">P {fmtPressure(chamber.pressure)}  ·  T {chamber.temperature.toFixed(2)} °C</text>
+            <text x="72" y="320" fill="#9fb3c8" fontSize="11">P {fmtPressureShown(chamber.pressure)}  ·  T {fmtTemp(chamber.temperature)}</text>
             <text x="72" y="304" fill={Math.abs(drift) < 0.03 ? "#86efac" : "#fdba74"} fontSize="11">{Math.abs(drift) < 0.03 ? "● stable" : drift > 0 ? "▲ +" + drift.toFixed(3) : "▼ " + drift.toFixed(3)} °C vs setpoint</text>
             <text x="528" y="320" textAnchor="end" fill="#9fb3c8" fontSize="11">X {actual.x.toFixed(1)}  Y {actual.y.toFixed(1)}  Z {actual.z.toFixed(1)} mm</text>
           </g>
@@ -2611,7 +2617,7 @@ function LivingTelemetryBar({state,validationResult,unresolved}){
   const cells=[
     ["SIM",`${Math.floor(state.facility.simulationTime)} s`,"facility"], ["POWER",state.facility.power?"ON":"OFF","facility"],
     ["CLOCK",state.clock.locked?"LOCKED":state.clock.power?`WARM ${Math.min(100,state.clock.warmup/WARMUP_SECONDS*100).toFixed(0)}%`:"OFF","clock"],
-    ["PRESS",`${pressureTrend} ${fmtPressure(state.chamber.pressure)}`,"chamber"], ["TEMP",`${state.chamber.temperature.toFixed(2)} °C (${drift>=0?"+":""}${drift.toFixed(2)})`,"chamber"],
+    ["PRESS",`${pressureTrend} ${fmtPressureShown(state.chamber.pressure)}`,"chamber"], ["TEMP",`${state.chamber.temperature.toFixed(2)} °C (${drift>=0?"+":""}${drift.toFixed(2)})`,"chamber"],
     ["XYZ",`${state.stage.x.toFixed(1)} / ${state.stage.y.toFixed(1)} / ${state.stage.z.toFixed(1)}`,"stage"], ["RUN",state.experiment.active?state.experiment.id||"ACTIVE":"IDLE","experiment"],
     ["VNA RF",state.vna.rf?"ON":"OFF","vna"], ["LDV",state.ldv.shutter?"OPEN":"CLOSED","ldv"], ["QUALITY",validationResult.overall,"spatial"], ["ALARMS",String(unresolved),"facility"]
   ];
@@ -2662,7 +2668,7 @@ function ScreenFace({ k, st }) {
   else if (k === "scp") { const a = st.scope.trace.filter((_, i) => i % 3 === 0); body = <><polyline fill="none" stroke="#ffe066" strokeWidth="1.2" points={a.map((q, i) => `${(i / Math.max(1, a.length - 1)) * W},${H / 2 - (q.value / 1.5) * (H / 2)}`).join(" ")} />{T(4, 10, "CH1", "#ffe066", 8)}</>; }
   else if (k === "clk") body = st.clock.cableFault ? T(8, 34, "■ FAULT", "#f87171", 14) : st.clock.locked ? T(8, 34, "● LOCKED 10 MHz", "#4ade80", 13) : T(8, 34, `◐ WARMUP ${Math.min(100, (st.clock.warmup / WARMUP_SECONDS) * 100).toFixed(0)}%`, "#fbbf24", 13);
   else if (k === "ldv") { const sg = st.ldv.shutter ? clamp(93 - Math.abs(st.stage.x) * 0.8 - Math.abs(st.stage.z) * 0.6 - (!st.chamber.isolation ? 18 : 0), 5, 99) : 0; body = <>{T(8, 14, `RETURN ${sg.toFixed(0)}%  ${st.ldv.shutter ? "SHUTTER OPEN" : "SHUTTER CLOSED"}`, "#e879f9", 9)}<rect x="8" y="26" width="224" height="12" fill="#1a1020" /><rect x="8" y="26" width={sg * 2.24} height="12" fill="#d946ef" /></>; }
-  else body = <>{T(8, 22, `P ${fmtPressure(st.chamber.pressure)}`, "#7dd3fc", 13)}{T(8, 44, `T ${st.chamber.temperature.toFixed(2)} °C`, "#fdba74", 13)}</>;
+  else body = <>{T(8, 22, `P ${fmtPressureShown(st.chamber.pressure)}`, "#7dd3fc", 13)}{T(8, 44, `T ${st.chamber.temperature.toFixed(2)} °C`, "#fdba74", 13)}</>;
   return <g><rect width={W} height={H} fill="#02060a" /><g opacity=".9">{body}</g><rect width={W} height={H} fill="none" stroke="#1e3a52" /></g>;
 }
 
@@ -2675,7 +2681,7 @@ function twinParts(st) {
     { id: "inner", g: "inner", label: "Inner Faraday enclosure", k: "box", c: [0, 0, 950], s: [2200, 1700, 1800], col: shield ? "#fbbf24" : "#ef4444", wall: "cage", hole: shield ? -1 : 2, note: "Nested shield (conceptual)." },
     { id: "top", g: "table", label: "Optical table top", k: "box", c: [0, 0, 775], s: [1800, 1200, 50], col: "#64748b", a: 0.95, tbl: 1 },
     ...[[-800, -500], [800, -500], [-800, 500], [800, 500]].map(([x, y], i) => ({ id: "leg" + i, g: "table", label: "Isolation leg " + (i + 1), k: "cyl", ax: "z", c: [x, y, 375], r: 35, len: 750, col: st.chamber.isolation ? "#14b8a6" : "#ef4444", note: st.chamber.isolation ? "Active isolation ON" : "Isolation OFF: table coupled to floor, jitter shown." })),
-    { id: "shell", g: "chamber", sub: "Chamber body", label: "Chamber body", k: "box", c: [0, 0, 1100], s: [600, 600, 600], col: "#38bdf8", wall: "ch", tbl: 1, note: `P ${fmtPressure(c.pressure)}, T ${c.temperature.toFixed(2)} °C` },
+    { id: "shell", g: "chamber", sub: "Chamber body", label: "Chamber body", k: "box", c: [0, 0, 1100], s: [600, 600, 600], col: "#38bdf8", wall: "ch", tbl: 1, note: `P ${fmtPressureShown(c.pressure)}, T ${c.temperature.toFixed(2)} °C` },
     open ? { id: "door", g: "chamber", sub: "Door", label: "Chamber door (open)", k: "box", c: [-275, -530, 1100], s: [30, 440, 500], col: "#f87171", a: 0.6, tbl: 1 } : { id: "door", g: "chamber", sub: "Door", label: "Chamber door (closed)", k: "box", c: [0, -310, 1100], s: [440, 30, 500], col: "#94a3b8", a: 0.5, tbl: 1 },
     { id: "view", g: "chamber", sub: "Quartz viewport", label: "Quartz viewport", k: "cyl", ax: "z", c: [0, 0, 1405], r: 80, len: 20, col: "#bae6fd", a: 0.5, tbl: 1 },
     { id: "ftrf", g: "chamber", sub: "Feedthroughs", label: "RF feedthrough", k: "cyl", ax: "x", c: [330, 0, 1100], r: 25, len: 60, col: "#fbbf24", tbl: 1 },
@@ -2997,8 +3003,8 @@ function ChamberLifecyclePanel({state,cv,setCv}){
   const life=getChamberLifecycle(state),t=visualToken(life.visual),c=state.chamber;
   const issues=[c.doorOpen&&"Door open: vacuum disabled",c.turbo&&c.pressure>50&&"Turbo pressure interlock",!c.faraday&&"RF shielding disabled",!c.isolation&&"Isolation disabled",Math.abs(c.temperature-c.targetTemp)>=.03&&"Temperature drifting"].filter(Boolean);
   
-  return <div className={`rounded-lg border p-3 ${visualClass(life.visual)}`} data-chamber-lifecycle={life.id}><div className="flex flex-wrap items-center gap-3"><StatusLED status={life.visual}/><div className="min-w-[220px] flex-1"><div className="text-xs font-bold uppercase tracking-wider">{life.label}</div><div className="mt-1 text-[11px] text-zinc-400">{life.detail}</div></div><div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px]"><span>P {fmtPressure(c.pressure)}</span><span>T {c.temperature.toFixed(2)} °C</span><span>Shield {c.faraday?"ON":"OFF"}</span><span>Isolation {c.isolation?"ON":"OFF"}</span></div></div>{issues.length>0&&<div className="mt-2 flex flex-wrap gap-1">{issues.map(x=><span key={x} className="rounded border border-amber-500/40 bg-amber-950/30 px-2 py-1 text-[9px] text-amber-200">▲ {x}</span>)}</div>}</div>;}
-function PumpLifecyclePanel({state}){const p=getPumpLifecycle(state),t=visualToken(p.visual),c=state.chamber;const gauge=clamp((Math.log10(Math.max(c.pressure,1e-6))+6)/8.88,0,1);return <div className={`rounded-lg border p-3 ${visualClass(p.visual)}`} data-pump-phase={p.id}><div className="flex flex-wrap items-center gap-3"><div className="relative h-16 w-16 rounded-full border-4 border-zinc-700 bg-black"><div className="absolute left-1/2 top-1/2 h-6 w-0.5 origin-bottom bg-sky-300" style={{transform:`translate(-50%,-100%) rotate(${-130+gauge*260}deg)`}}/><div className="absolute inset-0 grid place-items-end pb-2 font-mono text-[8px] text-zinc-400">PRESS</div></div><div className="min-w-[190px] flex-1"><div className="flex items-center gap-2"><StatusLED status={p.visual}/><span className="text-xs font-bold uppercase">{p.label}</span></div><div className="mt-1 text-[11px] text-zinc-400">{p.detail}</div><div className="mt-2 font-mono text-[10px] text-sky-200">{fmtPressure(c.pressure)} · {c.pressureRate>0?"↑":"↓"} {Math.abs(c.pressureRate||0).toExponential(1)} Torr/s</div></div><div className="grid min-w-[180px] gap-2"><div><div className="flex justify-between text-[9px] text-zinc-400"><span>ROUGHING</span><span>{(c.roughingRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-slate-400 transition-[width]" style={{width:`${c.roughingRpm||0}%`}}/></div></div><div><div className="flex justify-between text-[9px] text-zinc-400"><span>TURBO</span><span>{(c.turboRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-cyan-400 transition-[width]" style={{width:`${c.turboRpm||0}%`}}/></div></div></div></div></div>}
+  return <div className={`rounded-lg border p-3 ${visualClass(life.visual)}`} data-chamber-lifecycle={life.id}><div className="flex flex-wrap items-center gap-3"><StatusLED status={life.visual}/><div className="min-w-[220px] flex-1"><div className="text-xs font-bold uppercase tracking-wider">{life.label}</div><div className="mt-1 text-[11px] text-zinc-400">{life.detail}</div></div><div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px]"><span>P {fmtPressureShown(c.pressure)}</span><span>T {c.temperature.toFixed(2)} °C</span><span>Shield {c.faraday?"ON":"OFF"}</span><span>Isolation {c.isolation?"ON":"OFF"}</span></div></div>{issues.length>0&&<div className="mt-2 flex flex-wrap gap-1">{issues.map(x=><span key={x} className="rounded border border-amber-500/40 bg-amber-950/30 px-2 py-1 text-[9px] text-amber-200">▲ {x}</span>)}</div>}</div>;}
+function PumpLifecyclePanel({state}){const p=getPumpLifecycle(state),t=visualToken(p.visual),c=state.chamber;const gauge=clamp((Math.log10(Math.max(c.pressure,1e-6))+6)/8.88,0,1);return <div className={`rounded-lg border p-3 ${visualClass(p.visual)}`} data-pump-phase={p.id}><div className="flex flex-wrap items-center gap-3"><div className="relative h-16 w-16 rounded-full border-4 border-zinc-700 bg-black"><div className="absolute left-1/2 top-1/2 h-6 w-0.5 origin-bottom bg-sky-300" style={{transform:`translate(-50%,-100%) rotate(${-130+gauge*260}deg)`}}/><div className="absolute inset-0 grid place-items-end pb-2 font-mono text-[8px] text-zinc-400">PRESS</div></div><div className="min-w-[190px] flex-1"><div className="flex items-center gap-2"><StatusLED status={p.visual}/><span className="text-xs font-bold uppercase">{p.label}</span></div><div className="mt-1 text-[11px] text-zinc-400">{p.detail}</div><div className="mt-2 font-mono text-[10px] text-sky-200">{fmtPressureShown(c.pressure)} · {c.pressureRate>0?"↑":"↓"} {Math.abs(c.pressureRate||0).toExponential(1)} Torr/s</div></div><div className="grid min-w-[180px] gap-2"><div><div className="flex justify-between text-[9px] text-zinc-400"><span>ROUGHING</span><span>{(c.roughingRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-slate-400 transition-[width]" style={{width:`${c.roughingRpm||0}%`}}/></div></div><div><div className="flex justify-between text-[9px] text-zinc-400"><span>TURBO</span><span>{(c.turboRpm||0).toFixed(0)}%</span></div><div className="h-2 rounded bg-zinc-900"><div className="h-full rounded bg-cyan-400 transition-[width]" style={{width:`${c.turboRpm||0}%`}}/></div></div></div></div></div>}
 function StageMotionPanel({state}){const sm=getStageMotionState(state),t=visualToken(sm),p=state.stage;const ax=p.actualX??p.x,ay=p.actualY??p.y,az=p.actualZ??p.z;return <div className={`rounded-lg border p-3 ${visualClass(sm)}`}><div className="flex items-center justify-between"><div><div className="text-xs font-bold uppercase">XYZ Motion State</div><div className="text-[11px] text-zinc-400">Commanded versus actual position and settling indication.</div></div><StatusLED status={sm}/></div><div className="mt-2 grid grid-cols-2 gap-3 font-mono text-xs"><div>CMD {p.x.toFixed(1)} / {p.y.toFixed(1)} / {p.z.toFixed(1)}</div><div>ACT {ax.toFixed(1)} / {ay.toFixed(1)} / {az.toFixed(1)}</div></div><div className="mt-2 h-2 rounded bg-zinc-900 overflow-hidden"><div className="h-full bg-cyan-400" style={{width:`${Math.min(100,100-(Math.abs(p.x-ax)+Math.abs(p.y-ay)+Math.abs(p.z-az))*10)}%`}}/></div></div>;}
 // True only after the dashboard has painted and the browser is idle, so the 2D UI mounts before any 3D/audio bytes are requested.
 function useAfterFirstPaint() {
@@ -3175,7 +3181,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
               <input type="number" step=".1" value={state.chamber.targetTemp} disabled={!state.chamber.thermostat} onChange={e => set("chamber", { targetTemp: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-orange-200 text-xs" />
             </label>
             <div className="text-xs">Current Temp: <span className="font-mono text-orange-300">{state.chamber.temperature.toFixed(3)} °C</span></div>
-            <div className="text-xs">Pressure: <span className="font-mono text-sky-300">{fmtPressure(state.chamber.pressure)}</span></div>
+            <div className="text-xs">Pressure: <span className="font-mono text-sky-300">{fmtPressureShown(state.chamber.pressure)}</span></div>
             <div className="grid grid-cols-3 gap-2 pt-2">
               <button onClick={handleVentClick} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">Vent</button>
               <div className="flex items-stretch gap-1"><button onClick={() => set("chamber", { vent: false, roughing: true })} disabled={state.chamber.doorOpen} className="flex-1 rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Rough Pump</button><HelpInfo termKey="roughing_pump" /></div>
