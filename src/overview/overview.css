@@ -61,7 +61,7 @@
 .ov-route.is-idle { opacity: .22; stroke-width: 1.5; stroke-dasharray: 3 7; }
 .ov-route.is-on { stroke-width: 2.8; stroke-dasharray: 9 9; animation: ov-flow 1s linear infinite; filter: drop-shadow(0 0 4px currentColor); }
 .ov-route.is-fault { stroke-width: 3; stroke-dasharray: 5 6; animation: ov-flow .5s linear infinite; filter: drop-shadow(0 0 5px #fb7185); }
-.ov-reduced .ov-route.is-on, .ov-reduced .ov-route.is-fault, .ov-reduced .ov-art *, .ov-reduced .ov-card, .ov-reduced .ov-hero::before, .ov-reduced .ov-hero::after, .ov-reduced .ov-floor::after { animation: none !important; }
+.ov-reduced .ov-route.is-on, .ov-reduced .ov-route.is-fault, .ov-reduced .ov-art *, .ov-reduced .ov-card, .ov-reduced .ov-hero::before, .ov-reduced .ov-hero::after, .ov-reduced .ov-floor::after {  }
 .ov-reduced .ov-packets { display: none; }
 @keyframes ov-flow { to { stroke-dashoffset: -36; } }
 .ov-badge { position: absolute; z-index: 3; width: 0; height: 0; }
@@ -75,8 +75,9 @@
 .ov-card-body { position: relative; display: flex; flex-direction: column; gap: calc(var(--u) * 5); width: 100%; height: 100%; padding: calc(var(--u) * 9) calc(var(--u) * 11) calc(var(--u) * 10); border: 1px solid color-mix(in srgb, var(--c) 55%, #1a2635); border-radius: calc(var(--u) * 10); background: linear-gradient(155deg, color-mix(in srgb, var(--c) 19%, #0e1823) 0%, #0a121b 48%, #070b11 100%); box-shadow: inset 0 1px 0 #ffffff1c, inset calc(var(--u) * 3) 0 0 var(--c), 1px 1px 0 color-mix(in srgb, var(--c) 30%, #05080d), 2px 2px 0 color-mix(in srgb, var(--c) 24%, #05080d), 3px 3px 0 color-mix(in srgb, var(--c) 18%, #05080d), 4px 4px 0 color-mix(in srgb, var(--c) 12%, #05080d), 5px 5px 0 #05080d, 6px 6px 0 #04070b; overflow: hidden; }
 .ov-card-body::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(180deg, #ffffff10, transparent 34%); }
 .ov-card.is-selected .ov-card-body { box-shadow: inset 0 1px 0 #ffffff26, inset calc(var(--u) * 3) 0 0 var(--c), 0 0 0 2px #7dd3fc, 1px 1px 0 #0c2a3c, 2px 2px 0 #0a2433, 3px 3px 0 #081c2a, 4px 4px 0 #061621, 5px 5px 0 #05080d, 0 0 26px #38bdf855; }
-.ov-card.st-active .ov-card-body, .ov-card.st-warning .ov-card-body, .ov-card.st-booting .ov-card-body { animation: ov-glow 2.6s ease-in-out infinite; }
-.ov-card.st-fault .ov-card-body { animation: ov-glow 1s ease-in-out infinite; }
+/* A permanent filter pulse on every active card forced the whole card, with its animated art, to be repainted constantly. The status badge already says the card is active. */
+.ov-card.st-active .ov-card-body, .ov-card.st-warning .ov-card-body, .ov-card.st-booting .ov-card-body { animation: none; }
+.ov-card.st-fault .ov-card-body { animation: ov-glow 1s ease-in-out 4; }
 .ov-reduced .ov-card .ov-card-body, .ov-reduced .ov-led { animation: none !important; }
 @keyframes ov-glow { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.22) drop-shadow(0 0 8px color-mix(in srgb, var(--c) 55%, transparent)); } }
 .ov-shadow { position: absolute; inset: calc(var(--u) * 6) calc(var(--u) * -4) calc(var(--u) * -12) calc(var(--u) * 4); border-radius: calc(var(--u) * 14); background: #000; opacity: .55; filter: blur(calc(var(--u) * 9)); z-index: -1; pointer-events: none; }
@@ -223,7 +224,7 @@
 /* ───── Illustrated cards ───── */
 .ov-head { position: relative; padding: 14px 16px; overflow: hidden; border: 1px solid #1d3347; border-radius: 14px; background: linear-gradient(110deg, #0e2236 0%, #09131f 55%, #0b1822 100%); }
 .ov-head::before { content: ""; position: absolute; inset: 0; background: radial-gradient(500px 160px at 12% -20%, #38bdf833, transparent 70%), radial-gradient(420px 140px at 92% 120%, #34d39922, transparent 70%); animation: ov-aurora 9s ease-in-out infinite alternate; pointer-events: none; }
-.ov-head::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, #ffffff05 0 1px, transparent 1px 36px), linear-gradient(100deg, transparent 40%, #7dd3fc14 50%, transparent 60%); background-size: auto, 200% 100%; animation: ov-scan 7s linear infinite; pointer-events: none; }
+.ov-head::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, #ffffff05 0 1px, transparent 1px 36px), linear-gradient(100deg, transparent 40%, #7dd3fc14 50%, transparent 60%); background-size: auto, 200% 100%;  pointer-events: none; }
 .ov-head > * { position: relative; z-index: 1; }
 .ov-clock { align-items: flex-end; padding: 4px 12px; border: 1px solid #243b52; border-radius: 9px; background: #0a141f99; }
 @keyframes ov-aurora { to { transform: translateX(40px) scale(1.08); opacity: .8; } }
@@ -238,9 +239,9 @@
 .ov-alertpill { display: inline-flex; margin-left: auto; pointer-events: auto; }
 .ov-chip .al { margin-left: 4px; vertical-align: middle; }
 .ov-card.oa-running .ov-card-body { border-color: color-mix(in srgb, #34d399 60%, #1a2635); }
-.ov-card.oa-stuck .ov-card-body { border-color: #fb923c; background-image: repeating-linear-gradient(135deg, #fb923c14 0 10px, transparent 10px 20px), linear-gradient(155deg, color-mix(in srgb, var(--c) 19%, #0e1823) 0%, #0a121b 48%, #070b11 100%); animation: ov-stuck 2s ease-in-out infinite; }
-.ov-card.oa-error .ov-card-body { border-color: #fb7185; animation: ov-errglow .9s ease-in-out infinite; }
-.ov-card.oa-attention .ov-card-body { border-color: #facc15; animation: ov-attn 2.2s ease-in-out infinite; }
+.ov-card.oa-stuck .ov-card-body { border-color: #fb923c; background-image: repeating-linear-gradient(135deg, #fb923c14 0 10px, transparent 10px 20px), linear-gradient(155deg, color-mix(in srgb, var(--c) 19%, #0e1823) 0%, #0a121b 48%, #070b11 100%); animation: ov-stuck 1.6s ease-in-out 4; }
+.ov-card.oa-error .ov-card-body { border-color: #fb7185; animation: ov-errglow .9s ease-in-out 4; box-shadow: 0 0 14px 2px #fb718566; }
+.ov-card.oa-attention .ov-card-body { border-color: #facc15; animation: ov-attn 2.2s ease-in-out 3; box-shadow: 0 0 12px 1px #facc1544; }
 .ov-card.oa-running::after { content: ""; position: absolute; left: calc(var(--u) * 10); right: calc(var(--u) * 10); bottom: calc(var(--u) * 5); height: 2px; border-radius: 2px; background: linear-gradient(90deg, transparent, #34d399, transparent); background-size: 50% 100%; background-repeat: no-repeat; animation: ov-run 1.6s linear infinite; z-index: 3; pointer-events: none; }
 @keyframes ov-run { from { background-position: -60% 0; } to { background-position: 160% 0; } }
 @keyframes ov-stuck { 0%, 100% { box-shadow: inset 0 1px 0 #ffffff1c, 0 0 0 0 #fb923c00; } 50% { box-shadow: inset 0 1px 0 #ffffff1c, 0 0 18px 1px #fb923c66; } }

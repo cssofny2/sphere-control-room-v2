@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { onLabTransition, useLab } from '../state/labStores';
 import { fitTrace } from '../simulation/measurement';
@@ -31,9 +31,17 @@ const PANELS: Panel[] = [
 ];
 
 /** Instrument readings, alarms, operator actions and measurements on one shared simulation clock, with a scrub-back cursor. */
-export function Timeline() {
+// memo: the page has no props, so without it the 20 Hz lab tick re-rendered four charts every 50 ms.
+export const Timeline = memo(function Timeline() {
   const [, bump] = useState(0);
-  useEffect(() => { const f = () => bump(n => n + 1); listeners.add(f); return () => { listeners.delete(f); }; }, []);
+  // Redraw at most once a second of real time: at 60x speed a sample arrives every few milliseconds, and four charts
+  // redrawn each time made the page crawl.
+  useEffect(() => {
+    let timer: number | null = null;
+    const f = () => { if (timer === null) timer = window.setTimeout(() => { timer = null; bump(n => n + 1); }, 1000); };
+    listeners.add(f);
+    return () => { listeners.delete(f); if (timer !== null) window.clearTimeout(timer); };
+  }, []);
   const events = useLab(s => s.events as never[]);
   const records = useLab(s => s.experiment.records as never[]);
   const [windowS, setWindowS] = useState(600);
@@ -95,7 +103,7 @@ export function Timeline() {
                       <XAxis type="number" dataKey="t" domain={[start, end]} stroke="#6b7c90" fontSize={10} tickFormatter={fmtT} />
                       <YAxis scale={p.log ? 'log' : 'auto'} domain={p.log ? [1e-6, 1000] : ['auto', 'auto']} allowDataOverflow={p.log} stroke="#6b7c90" fontSize={10} width={58} tickFormatter={v => (p.log ? Number(v).toExponential(0) : Number(v).toFixed(p.digits > 1 ? 1 : 0))} />
                       <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #24384c', fontSize: 11 }} labelFormatter={v => `t ${fmtT(Number(v))}`} formatter={(v: number) => (v === null ? '–' : p.log ? `${Number(v).toExponential(2)} ${p.unit}` : `${Number(v).toFixed(p.digits)} ${p.unit}`)} />
-                      {markers.filter(m => m.kind !== 'action').map((m, i) => <ReferenceLine key={i} x={m.t} stroke={COLORS[m.kind]} strokeOpacity={0.55} strokeDasharray={m.kind === 'alarm' ? undefined : '2 3'} />)}
+                      {markers.filter(m => m.kind !== 'action').slice(-40).map((m, i) => <ReferenceLine key={i} x={m.t} stroke={COLORS[m.kind]} strokeOpacity={0.55} strokeDasharray={m.kind === 'alarm' ? undefined : '2 3'} />)}
                       {cursor !== null && <ReferenceLine x={cursor} stroke="#ffffff" />}
                       <Line type="monotone" dataKey="v" stroke={p.color} dot={false} strokeWidth={1.6} connectNulls={false} isAnimationActive={false} />
                     </LineChart>
@@ -116,4 +124,4 @@ export function Timeline() {
       )}
     </div>
   );
-}
+});
