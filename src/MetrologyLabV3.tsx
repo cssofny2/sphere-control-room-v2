@@ -460,8 +460,9 @@ function reducer(state, action) {
     case "START_SCAN": {
       if (state.experiment.active || state.experiment.scanActive) return addAlarm(state, "A run already owns the instruments. Stop it before starting another scan.", "warning");
       const result = action.kind === "axis" ? buildAxisPlan(getAxisPlanInput(state)) : buildPointPlan({
-        kind: "serpentine", positions: action.plan ?? createSerpentineScanPlan(), repeats: 1,
-        seed: state.facility.seed, randomized: false,
+        // kind "points" runs a list of positions (e.g. the Spatial Field page's suggestions) with optional repeats and random order.
+        kind: "serpentine", positions: action.positions ?? action.plan ?? createSerpentineScanPlan(), repeats: action.repeats ?? 1,
+        seed: state.facility.seed, randomized: !!action.randomized,
       });
       if (result.ok === false) return addAlarm({ ...state, experiment: { ...state.experiment, planErrors: result.issues } }, `Scan plan rejected: ${result.issues.map(i => i.message).join(" ")}`, "warning");
       if (!state.facility.power || !state.vna.power || !state.vna.rf) return addAlarm(state, "Automated scan requires facility power, VNA power, and RF output.", "warning");

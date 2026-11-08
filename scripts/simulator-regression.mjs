@@ -105,6 +105,24 @@ console.log('PASS adaptive retries use real VNA settings and stop at limit');
   console.log('PASS quality gate uses fit convergence and computed uncertainty');
 }
 
+{
+  // "Run these points": a validated multi-position plan with repeats and seeded random order
+  const ready = () => { const t = fresh(); t.facility.power = true; t.vna.power = true; t.vna.rf = true; t.chamber.vent = false; return t; };
+  const pts = [{ x: 0, y: 0, z: 0 }, { x: 20, y: -20, z: 30 }, { x: -30, y: 10, z: -10 }];
+  const run = L.reducer(ready(), { type: 'START_SCAN', kind: 'points', positions: pts, repeats: 3, randomized: true });
+  assert.equal(run.experiment.scanActive, true); assert.equal(run.experiment.planErrors.length, 0);
+  assert.equal(run.experiment.contract.plan.orderedPoints.length, 3); assert.equal(run.experiment.scanPath.length, 9, '3 points x 3 repeats');
+  assert.equal(run.experiment.contract.plan.settings.randomized, true); assert.equal(run.experiment.contract.plan.settings.repeats, 3);
+  const again = L.reducer(ready(), { type: 'START_SCAN', kind: 'points', positions: pts, repeats: 3, randomized: true });
+  assert.deepEqual(run.experiment.scanPath.map(p => [p.x, p.y, p.z, p.repeatIndex]), again.experiment.scanPath.map(p => [p.x, p.y, p.z, p.repeatIndex]), 'the same seed gives the same order');
+  const ordered = L.reducer(ready(), { type: 'START_SCAN', kind: 'points', positions: pts, repeats: 1 });
+  assert.deepEqual(ordered.experiment.scanPath.map(p => p.x), [0, 20, -30], 'without randomizing, the given order is kept');
+  const far = L.reducer(ready(), { type: 'START_SCAN', kind: 'points', positions: [{ x: 50, y: 0, z: 0 }], repeats: 1 });
+  assert.equal(far.experiment.scanActive, false); assert.ok(far.experiment.planErrors.some(i => /35/.test(i.message)), 'positions beyond the travel limit are rejected');
+  const grid = L.reducer(ready(), { type: 'START_SCAN' }); assert.equal(grid.experiment.scanPath.length, 25, 'the default 5x5 scan is unchanged');
+  console.log('PASS Run these points: validated multi-position plan with repeats and seeded random order');
+}
+
 s.experiment.scanPaused = true;
 s.experiment.scanStep = 'fault';
 s = L.reducer(s, { type: 'RESUME_SCAN' });

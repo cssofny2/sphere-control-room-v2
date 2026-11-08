@@ -4,6 +4,8 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Spatial Field Explorer: "Run these N points" starts a validated run of the suggested next points with 1 to 5 repeats each, in seeded random order. The plan builder already accepted position lists; `START_SCAN` now takes `kind: "points"`, `repeats` and `randomized`. Removed a stale note about a 200-record ledger window.
+
 ## [2.1.0] - 2026-11-07
 
 - Learning Paths (`#/learn`): eight guided lessons in three levels (bring the lab up; calibrate and sweep; shield the measurement; diagnose a clock fault; beat the noise with averaging; find the thermal coefficient; map the location sensitivity; show your repeatability). Objectives are checked live against the lab and stay met once earned; numeric answers (Hz/°C, Hz/mm) are graded against the learner's own data and the model. Three levelled hints per lesson cost 10 points each (floor 40). A downloadable, tamper-evident classroom report (name, lessons, scores, SHA-256) is a self-contained printable page. Progress is saved in this browser.

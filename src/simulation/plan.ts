@@ -120,7 +120,6 @@ function assemble(settings: PlanSettings, coordinates: readonly Coordinates[], n
       });
     }
   }
-  if (acquisitions.length > 200) notes.push('This plan exceeds the current 200-record in-memory ledger window. Durable retention is not yet available.');
   return {
     id: createIdentifier('plan'), runId, schemaVersion: RUN_SCHEMA_VERSION, modelVersion: MODEL_VERSION,
     dataOrigin: 'simulation', units: { position: 'mm', frequency: 'Hz', time: 's' },
