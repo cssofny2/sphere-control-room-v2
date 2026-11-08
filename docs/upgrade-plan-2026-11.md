@@ -53,7 +53,9 @@ Impact = scientific credibility + what users lose today + reach (education, open
 
 **Tests.** Storage-interface tests with an in-memory implementation; a mounted jsdom test (pattern in `tests/mounted`) for save → remount → restore; quota-exceeded and blocked-storage paths.
 
-## 3. Guided curriculum with auto-graded scenarios — L
+## 3. Guided curriculum with auto-graded scenarios — L — DONE (branch `feat/curriculum`)
+
+> Tests use hand-built solved lab states per lesson, not scripted reducer play-throughs, so they guard the grading rules but not that every lesson stays reachable after future physics changes. The report is a downloadable page, not a PDF.
 
 **Why.** `CHALLENGES` (5 one-line checks, `:100`), `PROCEDURE_STEPS`, TrainingMode, FaultInjector and badges exist but are disconnected, have no objectives/hints/scoring, and nothing is reportable to a teacher.
 

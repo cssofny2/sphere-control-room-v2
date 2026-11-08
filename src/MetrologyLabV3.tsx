@@ -12,6 +12,7 @@ import { BundleImport } from './persistence/BundleUI';
 import { RunCompare } from './analysis/RunCompare';
 import { RunReviewCard } from './technician/RunReviewCard';
 import { Timeline, installTelemetry } from './features/Timeline';
+import { LearningPaths } from './curriculum/LearningPaths';
 import { hashForPage, isEmbed, pageFromHash, shareUrl } from './features/route';
 import { installModalA11y } from './features/modalA11y';
 import { Announcer } from './features/Announcer';
@@ -1068,6 +1069,7 @@ export default function MetrologyLab() {
     {
       group: "Learning",
       items: [
+        ["learn", "Learning Paths", BookOpen],
         ["training", "Training & Checklist", CheckSquare],
         ["challenges", "Challenge Mode", Award],
         ["faults", "Fault Injector", AlertTriangle],
@@ -1259,6 +1261,7 @@ export default function MetrologyLab() {
           {active === "training" && <TrainingMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "copilot" && <LabCopilot state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "timeline" && <Timeline />}
+          {active === "learn" && <LearningPaths dispatch={dispatch} learnerName={operatorFullName(state.operator)} />}
           {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "faults" && <FaultInjector state={state} dispatch={dispatch} />}
           {active === "challenges" && <ChallengeMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
