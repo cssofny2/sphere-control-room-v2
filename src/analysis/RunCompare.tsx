@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getKV } from '../persistence/store';
 import { parseArchive, UNRECORDED } from '../persistence/sessions';
@@ -9,7 +9,7 @@ const MAX_RUNS = 4;
 const short = (id: string) => (id === UNRECORDED ? 'Manual captures' : id.replace(/^run-/, '').slice(0, 8));
 
 /** Compare saved runs (and the current ledger): overlay of resonance by position, per-position differences, conditions. */
-export function RunCompare({ ledger, refreshKey }: { ledger: CompareRecord[]; refreshKey: number }) {
+export const RunCompare = memo(function RunCompare({ ledger, refreshKey }: { ledger: CompareRecord[]; refreshKey: number }) {
   const [saved, setSaved] = useState<Array<{ runId: string; records: CompareRecord[] }>>([]);
   const [picked, setPicked] = useState<string[]>([]);
   useEffect(() => {
@@ -101,4 +101,4 @@ export function RunCompare({ ledger, refreshKey }: { ledger: CompareRecord[]; re
       )}
     </div>
   );
-}
+});

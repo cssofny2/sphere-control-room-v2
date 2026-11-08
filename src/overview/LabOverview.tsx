@@ -96,7 +96,7 @@ const Bar = ({ value, color }: { value: number; color?: string }) => (
 );
 
 /* ───────── Component ───────── */
-export default function LabOverview({ state, dispatch, lab, quality, reduced }: Props) {
+function LabOverview({ state, dispatch, lab, quality, reduced }: Props) {
   const prefs = useMemo(loadPrefs, []);
   const [selected, setSelected] = useState<string>('chamber');
   const [layers, setLayers] = useState<Record<RouteKind, boolean>>({ ...ALL_LAYERS });
@@ -560,3 +560,11 @@ export default function LabOverview({ state, dispatch, lab, quality, reduced }: 
     </HelpCtx.Provider>
   );
 }
+
+/**
+ * The map redraws about four times a second. The simulator state changes every 50 ms (the clock alone), and redrawing
+ * dozens of animated illustrations that often dropped the page to about 20 frames a second. `lab` is a bag of module-level
+ * helpers that never change, so it is ignored when deciding whether to redraw.
+ */
+export default memo(LabOverview, (a, b) => a.dispatch === b.dispatch && a.reduced === b.reduced && a.quality === b.quality && a.state === b.state);
+

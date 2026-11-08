@@ -4,6 +4,9 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Performance: profiled every page and fixed the slow ones. Live Timeline 12 to 58 frames a second (the page had no props, so each 20 Hz lab tick rebuilt four charts; it is now memoized and redraws at most once a second). VNA 14 to 46 (the live trace is rebuilt about 5 times a second instead of 20, and the SVG glow filter on it is gone). Lab Overview 23 to 53 unpowered, 30 to 41 fully powered (memoized with a 4 Hz snapshot; the permanent filter pulse on every active card and two decorative background sweeps removed).
+- Fewer distracting animations: alarm and attention flashes and shakes now run a few cycles and settle into a steady glow instead of flashing forever (they repainted a box-shadow every frame); the always-on LED brightness pulse and the drifting dashboard particles are removed. Reduced-motion settings still apply.
+
 - Spatial Field Explorer: "Run these N points" starts a validated run of the suggested next points with 1 to 5 repeats each, in seeded random order. The plan builder already accepted position lists; `START_SCAN` now takes `kind: "points"`, `repeats` and `randomized`. Removed a stale note about a 200-record ledger window.
 
 ## [2.1.0] - 2026-11-07
