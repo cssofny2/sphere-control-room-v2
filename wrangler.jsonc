@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "sphere-control-room-v2",
+  "account_id": "f7c1221a54de84c98d6e75d59601ace8",
   "compatibility_date": "2026-10-07",
   "assets": {
     "directory": "./dist",

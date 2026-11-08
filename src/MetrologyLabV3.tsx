@@ -12,6 +12,8 @@ import { BundleImport } from './persistence/BundleUI';
 import { RunCompare } from './analysis/RunCompare';
 import { RunReviewCard } from './technician/RunReviewCard';
 import { Timeline, installTelemetry } from './features/Timeline';
+import { markerRadius, pointMarkers } from './features/pointMarkers';
+import { PageBoundary } from './features/PageBoundary';
 import { LearningPaths } from './curriculum/LearningPaths';
 import { hashForPage, isEmbed, pageFromHash, shareUrl } from './features/route';
 import { installModalA11y } from './features/modalA11y';
@@ -1269,6 +1271,7 @@ export default function MetrologyLab() {
         </aside>
 
         <section className="workspace-instrument min-w-0 bg-zinc-950 flex flex-col" aria-label="Active instrument workspace" tabIndex={-1}>
+          <PageBoundary pageKey={String(active)}>
           {active === "dashboard" && <><PageAlert k="facility" name="Facility" onGo={navigate} /><Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} onSaveOperator={saveProfile} /></>}
           {active === "overview" && <LabOverview state={overviewState} dispatch={dispatch} quality={recordQuality} reduced={FX.reduced || FX.hide} lab={{ getSubsystemVisualState, visualToken, fmtPressure, WARMUP_SECONDS, resolveHelp }} />}
           {active === "chamber" && <><PageAlert k={["chamber", "pumps", "stage"]} name="Chamber & stage" onGo={navigate} /><Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
@@ -1285,6 +1288,7 @@ export default function MetrologyLab() {
           {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "faults" && <FaultInjector state={state} dispatch={dispatch} />}
           {active === "challenges" && <ChallengeMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
+                  </PageBoundary>
         </section>
 
         {journalOpen && !focusMode && <aside id="operations-journal" className="workspace-journal" aria-label="Operations journal">
@@ -2745,6 +2749,10 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
     const p0 = P(1579, 240, zc + 55), p1 = P(1579, -240, zc + 55), p2 = P(1579, 240, zc - 55), W = 240, H = 55;
     items.push({ d: p0[2] - 1, s: <g key={"scr" + kk} transform={`matrix(${(p1[0] - p0[0]) / W} ${(p1[1] - p0[1]) / W} ${(p2[0] - p0[0]) / H} ${(p2[1] - p0[1]) / H} ${p0[0]} ${p0[1]})`} style={{ pointerEvents: "none" }}><ScreenFace k={kk} st={state} /></g> });
   });
+  // Recorded measurement points, drawn where the stage was when each was taken: green when valid, amber when suspect or failed.
+  const markers3d = pointMarkers(state.experiment?.records || [], tier === "low" ? 60 : 200);
+  const mr = markerRadius(dist);
+  markers3d.forEach(m => { const q = P(m.x, m.y, 1100 + m.z); items.push({ d: q[2] - 2, s: <circle key={"pt" + m.id} cx={q[0]} cy={q[1]} r={mr} fill={m.ok ? "#34d399" : "#fbbf24"} fillOpacity=".85" stroke="#06080d" strokeWidth=".8" style={{ pointerEvents: "none" }}><title>{m.label}</title></circle> }); });
   items.sort((a, b) => b.d - a.d);
   const line = (key, pts, col, w, dash, on, lab) => { if (!on) return null; const q = pts.map(v => P(...v)); return <polyline key={key} points={q.map(v => v[0].toFixed(1) + "," + v[1].toFixed(1)).join(" ")} fill="none" stroke={col} strokeWidth={w} strokeDasharray={dash} className={still ? "" : "sig-flow"} style={{ filter: `drop-shadow(0 0 3px ${col})` }}><title>{lab}</title></polyline>; };
   const sph = [g.x, g.y, 1100 + g.z];
@@ -2784,6 +2792,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
             {pump && !still && [0, 1, 2, 3, 4, 5].map(i => { const q = P(...along(vac, ((tm / 2600) + i / 6) % 1)); return <circle key={"pp" + i} cx={q[0]} cy={q[1]} r="2.6" fill="#bae6fd" />; })}
             {mode === "exploded" && Object.keys(EXPL).filter(k => !hid[k]).map(k => { const a = P(0, 0, 1100), b = P(EXPL[k][0], EXPL[k][1], 1100 + EXPL[k][2]); return <line key={"x" + k} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#64748b" strokeDasharray="3 4" opacity=".6" />; })}
             {dist < 3000 && <text x={env[0] + 8} y={env[1]} fontSize="10" fill="#fbbf24" fontFamily="monospace">±{LIMIT_MM} mm stage travel</text>}
+            {dist < 3000 && markers3d.length > 0 && <text x={env[0] + 8} y={env[1] + 13} fontSize="10" fill="#6ee7b7" fontFamily="monospace">● {markers3d.length} measured point{markers3d.length === 1 ? "" : "s"} (green valid, amber suspect)</text>}
             <g fontFamily="monospace" fontSize="10" fill="#cbd5e1"><line x1="20" y1="455" x2={20 + nice * k0} y2="455" stroke="#e2e8f0" strokeWidth="2" /><line x1="20" y1="450" x2="20" y2="460" stroke="#e2e8f0" /><line x1={20 + nice * k0} y1="450" x2={20 + nice * k0} y2="460" stroke="#e2e8f0" /><text x="20" y="444">{nice >= 1000 ? nice / 1000 + " m" : nice + " mm"} (scale at focus)</text><text x="780" y="470" textAnchor="end" fill="#64748b">view dist {(dist / 1000).toFixed(2)} m · LOD {tier} · {items.length} faces</text></g>
           </svg>
         </div>
@@ -2869,7 +2878,7 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Current Resonance <HelpInfo termKey="center_freq" /></div>
           <div className="mt-2 text-lg font-bold text-sky-300">{latestRecord ? `${latestRecord.resonance.toFixed(2)} Hz` : liveFit?.fit.ok ? `${liveFit.fit.f0Hz.toFixed(2)} Hz` : "No fit yet"}</div>
-          <div className="mt-1 text-[11px] text-zinc-500">{latestRecord ? (latestRecord.fit?.ok === false ? "Fit failed · lowest sample" : `± ${Number(latestRecord.uncertaintyHz).toFixed(3)} Hz · S11 min ${latestRecord.depth.toFixed(2)} dB`) : liveFit?.fit.ok ? `± ${liveFit.fit.sigmaF0Hz.toFixed(3)} Hz · live trace fit` : "Power the VNA and sweep to measure"}</div>
+          <div className="mt-1 text-[11px] text-zinc-500">{latestRecord ? (latestRecord.fit?.ok === false ? "Fit failed · lowest sample" : `${Number.isFinite(latestRecord.uncertaintyHz) ? `± ${latestRecord.uncertaintyHz.toFixed(3)} Hz` : "imported or unfitted"}${Number.isFinite(latestRecord.depth) ? ` · S11 min ${latestRecord.depth.toFixed(2)} dB` : ""}`) : liveFit?.fit.ok ? `± ${liveFit.fit.sigmaF0Hz.toFixed(3)} Hz · live trace fit` : "Power the VNA and sweep to measure"}</div>
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Measurement Quality <HelpInfo termKey="faraday_cage" /></div>
