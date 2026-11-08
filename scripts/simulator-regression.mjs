@@ -8,15 +8,17 @@ const runModule = await loadTypeScript(new URL('../src/domain/run.ts', import.me
 const operatorModule = await loadTypeScript(new URL('../src/features/operator.ts', import.meta.url));
 const scopeModule = await loadTypeScript(new URL('../src/features/scopeModel.ts', import.meta.url));
 const ldvModule = await loadTypeScript(new URL('../src/features/ldvModel.ts', import.meta.url));
+const modelModule = await loadTypeScript(new URL('../src/simulation/model.ts', import.meta.url));
+const measurementModule = await loadTypeScript(new URL('../src/simulation/measurement.ts', import.meta.url));
 
 // Exercise the actual simulator helpers, not a duplicated physics model.
 const source = fs.readFileSync(new URL('../src/MetrologyLabV3.tsx', import.meta.url), 'utf8');
 const ast = parseSync('simulator.tsx', source).program;
 const names = new Set([
-  'BASE_FREQUENCY', 'AMBIENT_C', 'LIMIT_MM', 'WARMUP_SECONDS', 'TUTORIAL_VIDEOS',
+  'AMBIENT_C', 'LIMIT_MM', 'WARMUP_SECONDS', 'TUTORIAL_VIDEOS',
   'initialState', 'clamp', 'uid', 'now', 'fmtPressure', 'FAULT_CATALOG',
   'addEvent', 'addAlarm', 'getMeasurementValidation', 'evaluateScanRecord',
-  'createSerpentineScanPlan', 'reducer', 'noise', 'trueFrequency', 'buildSweep',
+  'createSerpentineScanPlan', 'reducer',
   'buildScope', 'getPumpLifecycle', 'tick', 'buildQualitySummary',
   'getAxisPlanInput',
 ]);
@@ -26,7 +28,7 @@ const selected = ast.body.filter(node => {
   return false;
 }).map(node => source.slice(node.start, node.end)).join('\n');
 const js = transformSync('simulator.ts', selected).code;
-const sandbox = { ...planModule, ...runModule, ...operatorModule, ...scopeModule, ...ldvModule };
+const sandbox = { ...planModule, ...runModule, ...operatorModule, ...scopeModule, ...ldvModule, ...modelModule, ...measurementModule };
 vm.runInNewContext(`${js}\nglobalThis.logic={initialState,reducer,tick,getMeasurementValidation,evaluateScanRecord,buildSweep,trueFrequency,buildQualitySummary};`, sandbox);
 const L = sandbox.logic;
 const fresh = () => JSON.parse(JSON.stringify(L.initialState));
@@ -90,6 +92,17 @@ assert.equal(s.experiment.rescanCounts['0'], 2);
 assert.equal(s.experiment.failedPoints, 1);
 assert.equal(s.experiment.scanStep, 'quality_complete');
 console.log('PASS adaptive retries use real VNA settings and stop at limit');
+
+{
+  const good = { valid: true, clockLocked: true, vnaCalibrated: true, faradayEnabled: true, isolationEnabled: true, ldvSignal: 90, uncertaintyHz: 0.05, fit: { ok: true } };
+  assert.equal(L.evaluateScanRecord(good, s).status, 'accepted', 'a clean fitted record is accepted');
+  const noFit = L.evaluateScanRecord({ ...good, fit: { ok: false, reason: 'no_dip' }, uncertaintyHz: 12.5 }, s);
+  assert.equal(noFit.status, 'failed', 'a failed resonance fit is a critical quality failure');
+  assert.ok(noFit.failed.includes('fit') && noFit.failed.includes('uncertainty'));
+  const noisy = L.evaluateScanRecord({ ...good, uncertaintyHz: 1.4 }, s);
+  assert.equal(noisy.status, 'suspect', 'uncertainty above 1 Hz is suspect, not failed');
+  console.log('PASS quality gate uses fit convergence and computed uncertainty');
+}
 
 s.experiment.scanPaused = true;
 s.experiment.scanStep = 'fault';

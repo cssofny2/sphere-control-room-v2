@@ -30,6 +30,9 @@ The compiled production files are written to `dist/`.
 - `src/MetrologyLabV3.tsx`: active v3 simulator, including Lab Overview and the interactive laboratory digital twin
 - `src/MetrologyLab.tsx`: retained earlier simulator (not imported by the entry point)
 - `src/main.tsx`: React entry point importing the v3 simulator
+- `src/simulation/model.ts`: the teaching resonance model (`trueFrequency`) and the noisy S11 trace (`buildSweep`)
+- `src/simulation/measurement.ts`: Lorentzian fit of a trace; resonance, Q and their uncertainties
+- `src/simulation/stats.ts`: per-position repeatability statistics
 - `src/index.css`: Tailwind (v4) import and global styles
 - `vite.config.ts`: Vite configuration
 
@@ -57,6 +60,7 @@ The repository's `vercel.json` selects Vite, installs the committed lockfile wit
 - **Fault Injector:** individual equipment faults plus blind troubleshooting drills.
 - **Lab Notebook:** tagged notes with instrument snapshots and Markdown export. Notes survive breaker cycles but not a page reload.
 - **Pump and stage simulation:** roughing/turbo lifecycle and commanded-versus-actual stage motion.
+- **Measurement engine:** every sweep is fitted with a Lorentzian dip (`s = a + d / (1 + ((f − f₀)/γ)²)`), so f₀ and Q are measured from the trace instead of read off the lowest sample, and each carries a standard uncertainty from the fit covariance. The Experiment Runs page shows repeatability per position (mean, SD, SEM, standard uncertainty u and a 95 % expanded uncertainty U). Retries after a failed quality check count once, by their latest attempt. A fit that fails (no dip, resonance off the sweep, dip narrower than the point spacing) is recorded as failed, fails the quality gate and is excluded from the statistics. The uncertainty covers random noise only (Type A); clock, calibration and stage-position errors are not modelled. A 1001-point fit takes about 1–2 ms, so it runs on the UI thread.
 
 ## Regression tests
 
@@ -88,7 +92,7 @@ The tests execute the simulator's actual helper functions using Vite's bundled p
 - JSON session exports include the run and acquisition contracts. The run's initial settings are copied separately from each acquisition's actual capture settings.
 - A strict TypeScript build checks the domain modules and negative type fixtures without claiming that the whole legacy UI has been migrated to strict types.
 
-CR-101 does not deliver the dedicated CR-102 runner, its complete cancellation/fresh-state audit, autosave, archival retention, validated import, computed uncertainty, per-position statistical summaries, or complete deterministic execution replay. The in-memory ledger still retains only 200 records; larger accepted plans show a warning. Existing fixed uncertainty/repeat-summary placeholders remain for subsequent interpretation/analysis tickets, and the all-record spread is not a repeatability estimate.
+CR-101 does not deliver the dedicated CR-102 runner, its complete cancellation/fresh-state audit, autosave, archival retention, validated import, computed uncertainty, per-position statistical summaries, or complete deterministic execution replay. The in-memory ledger still retains only 200 records; larger accepted plans show a warning. The fixed uncertainty and repeat-summary placeholders were replaced by the measurement engine above; see "Measurement engine".
 
 ## Notes
 

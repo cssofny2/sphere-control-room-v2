@@ -69,6 +69,7 @@ function fixture(reduced) {
     MODEL_VERSION: 'test-model',
     validationResult: { overall: 'VALID' },
     buildSweep: () => [{ freq: 230500, s11: -20 }],
+    measureTrace: () => ({ resonance: 230500, resonanceShift: 0, depth: -20, q: 4500, uncertaintyHz: 0.05, fit: { ok: true }, problem: null }),
     captureSettings: () => ({}),
     createIdentifier: kind => `${kind}-${++identity}`,
     dispatch(action) {
