@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/domain/**/*.ts", "src/simulation/plan.ts", "src/simulation/model.ts", "src/simulation/measurement.ts", "src/simulation/stats.ts", "src/persistence/store.ts", "src/persistence/sessions.ts", "src/persistence/autosave.ts", "tests/domain-contracts.typecheck.ts"]
+  "include": ["src/domain/**/*.ts", "src/simulation/plan.ts", "src/simulation/model.ts", "src/simulation/measurement.ts", "src/simulation/stats.ts", "src/simulation/replay.ts", "src/persistence/store.ts", "src/persistence/sessions.ts", "src/persistence/autosave.ts", "tests/domain-contracts.typecheck.ts"]
 }

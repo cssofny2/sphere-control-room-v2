@@ -8,6 +8,9 @@ import HelpDialog from './overview/HelpDialog';
 import { useShallow } from 'zustand/react/shallow';
 import { dispatch, getLabState, initLabStores, onLabTransition, resetLabStores, useEnvironmentStore, useInstrumentStore, useLab } from './state/labStores';
 import { RunLibrary, SessionRestore } from './persistence/SessionUI';
+import { BundleImport } from './persistence/BundleUI';
+import { buildBundle } from './domain/bundle';
+import { COMMIT } from './siteInfo';
 import { createAutosave } from './persistence/autosave';
 import { MAX_RECORDS, mergeRecords } from './persistence/sessions';
 import type { KV } from './persistence/store';
@@ -975,13 +978,13 @@ export default function MetrologyLab() {
       ["run_id", "timestamp", "x_mm", "y_mm", "z_mm", "resonance_hz", "s11_db", "q", "valid", "temperature_c", "pressure_torr", "uncertainty_hz", "fit_ok"],
       ...state.experiment.records.map(r => [r.runId, r.timestamp, r.x, r.y, r.z, r.resonance, r.depth, r.q, r.valid, r.temp, r.pressure, r.uncertaintyHz, r.fit ? r.fit.ok : ""])
     ];
-    const blob = new Blob([rows.map(r => r.join(",")).join("\n")], { type: "text/csv" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${state.experiment.id || "sphere-run"}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    downloadBlob(new Blob([rows.map(r => r.map(csvEscape).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }), `${state.experiment.id || "sphere-run"}.csv`);
   };
 
-  const exportJson = () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${state.experiment.id || "sphere-session"}.json`; a.click(); URL.revokeObjectURL(a.href);
+  // A portable, checksummed bundle of the ledger and notebook (not a dump of the whole app state).
+  const exportJson = async () => {
+    const bundle = await buildBundle({ records: state.experiment.records, notebook: state.notebook, appVersion: APP_VERSION, commit: COMMIT });
+    downloadBlob(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }), `${state.experiment.id || "sphere-session"}.sphere.json`);
   };
   labHelpersRef.current = { performSweep, exportCsv, exportJson };
   // performSweep closes over fresh state each tick; panels get a stable trampoline so memo() can skip them.
@@ -3405,7 +3408,8 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
           <button onClick={launchPlan} disabled={state.experiment.active || validation.ok === false} className="rounded border border-emerald-600 bg-emerald-900 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 flex items-center gap-1 disabled:opacity-50"><Play size={14}/> Run Scan Plan</button>
           {state.experiment.active && <button onClick={() => dispatch({ type: "STOP_RUN" })} className="rounded border border-rose-600 bg-rose-900 px-3 py-2 text-xs font-semibold">Stop Run</button>}
           <button onClick={exportCsv} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-700 flex items-center gap-1"><Download size={14}/> CSV</button>
-          <button onClick={exportJson} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-700 flex items-center gap-1"><Archive size={14}/> JSON</button>
+          <button onClick={exportJson} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-700 flex items-center gap-1"><Archive size={14}/> Bundle</button>
+          <BundleImport dispatch={dispatch} />
           <button onClick={handleClearRecords} disabled={state.experiment.active} className="rounded border border-rose-600 bg-rose-900 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-800 disabled:opacity-50">Clear Data</button>
         </div>
       </div>

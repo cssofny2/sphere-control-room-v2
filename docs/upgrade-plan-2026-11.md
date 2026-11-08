@@ -65,7 +65,7 @@ Impact = scientific credibility + what users lose today + reach (education, open
 
 **Tests.** `scripts/curriculum.test.mjs`: every lesson has a scripted golden solution that passes headlessly through the reducer, and a no-op run that fails — guards against physics changes silently breaking lessons.
 
-## 4. Reproducibility bundles and validated import — M
+## 4. Reproducibility bundles and validated import — M — DONE (branch `feat/repro-bundles`, stacked on `feat/durable-sessions`)
 
 **Why.** `exportJson` dumps the entire app `state` (UI flags, modals and all, `:1014`); `exportCsv` skips CSV escaping and drops quality, uncertainty and repeat columns (`:1005`) although `csvEscape` already exists (`:290`). Zenodo/ORCID metadata shows open science is a project goal.
 
