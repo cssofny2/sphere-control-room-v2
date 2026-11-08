@@ -82,7 +82,9 @@ Impact = scientific credibility + what users lose today + reach (education, open
 **Scope.** `src/analysis/compare.ts` (pure) and a Compare tab on Runs. Pick 2–4 saved runs (#2). Overlay f0-vs-position lines with Recharts (already a dependency); match positions by rounded coordinates; per-position Δ table with Welch t-test using #1's σ; difference map by letting `SpatialMaps` take a second record set; conditions diff (temperature, pressure, clock lock, Faraday/isolation, model flags) with a rule-based "what changed" line (e.g. "+15 Hz offset ≈ ΔT 3 °C × 5 Hz/°C").
 **Tests.** Pure-function fixtures for matching, deltas, t-test, conditions diff.
 
-## 6. Adaptive sampling planner, field-model fit, 3D annotations — L
+## 6. Adaptive sampling planner, field-model fit, 3D annotations — L — PARTLY DONE (branch `feat/spatial-planner`)
+
+> Delivered: field fit, real coverage, maximin point suggestions with Go-to-stage. Not delivered: a multi-point `custom` plan kind for "Add to plan", and 3D point annotations.
 
 **Why.** Spatial Field Explorer shows measured points and IDW/RBF only. "Coverage" is `records/25` (`:3149`), a placeholder. `plan.ts` rejects multi-point manual plans (`:151`), so suggested points need a new plan kind.
 

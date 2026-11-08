@@ -10,6 +10,8 @@ import { dispatch, getLabState, initLabStores, onLabTransition, resetLabStores, 
 import { RunLibrary, SessionRestore } from './persistence/SessionUI';
 import { BundleImport } from './persistence/BundleUI';
 import { RunCompare } from './analysis/RunCompare';
+import { FieldAnalysis } from './spatial/FieldAnalysis';
+import { coverage as spatialCoverage } from './spatial/field';
 import { buildBundle } from './domain/bundle';
 import { COMMIT } from './siteInfo';
 import { createAutosave } from './persistence/autosave';
@@ -3107,6 +3109,7 @@ function SpatialField({ state, dispatch, HelpInfo }) {
         </div>
 
         <div className="space-y-4">
+          <FieldAnalysis records={records} blind={!!state.model.hiddenTruth} dispatch={dispatch} canMove={!!state.facility.power} />
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl space-y-3">
             <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center">
               <span>Interpolation & Layers</span> <HelpInfo termKey="interpolation" />
@@ -3130,7 +3133,7 @@ function SpatialField({ state, dispatch, HelpInfo }) {
             <div className="pt-2 border-t border-zinc-900 text-xs space-y-1">
               <div className="flex justify-between text-zinc-400"><span>Total Points:</span><span className="font-mono text-zinc-200">{records.length}</span></div>
               <div className="flex justify-between text-zinc-400"><span>Valid Points:</span><span className="font-mono text-emerald-400">{records.filter(r => r.valid).length}</span></div>
-              <div className="flex justify-between text-zinc-400"><span>Coverage:</span><span className="font-mono text-sky-300">{Math.min(100, (records.length / 25) * 100).toFixed(0)}%</span></div>
+              <div className="flex justify-between text-zinc-400"><span>Coverage:</span><span className="font-mono text-sky-300">{(spatialCoverage(records) * 100).toFixed(0)}%</span></div>
             </div>
           </div>
         </div>
