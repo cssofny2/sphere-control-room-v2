@@ -71,4 +71,5 @@ const near = (a, b, e = 1e-9) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`)
   const app = fs.readFileSync(new URL('../src/MetrologyLabV3.tsx', import.meta.url), 'utf8');
   for (const needle of ['["insights", "Insights"', '["settings", "Display & Units"', 'active === "insights" && <Insights', 'active === "settings" && <SettingsPage', '<TemplatePicker', 'installDisplaySettings()']) assert.ok(app.includes(needle), needle);
   const tl = fs.readFileSync(new URL('../src/features/Timeline.tsx', import.meta.url), 'utf8'); assert.ok(tl.includes('useUnits()') && tl.includes('telemetrySnapshot'));
+  assert.ok(app.includes('const fmtPressureShown') && app.includes('const fmtPressure = p =>') && app.includes('fmtTemp(state.chamber.temperature)') && app.includes('useUnits(); //'), 'header and status displays follow the chosen units');
   console.log('PASS the Insights and Display & Units pages, templates and units are wired into the app'); }

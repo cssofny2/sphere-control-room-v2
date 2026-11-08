@@ -82,3 +82,15 @@ const inboundReq = (body, secret = 'sekret-value', o = {}) => req(body, { origin
 { const ok = SV.cleanMessages([{ role: 'user', content: 'lunch?' }, { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'order_food', input: { restaurant: "McDonald's" } }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'Started.' }] }]); assert.equal(ok.ok, true);
   for (const name of ['look_it_up', 'order_part']) assert.equal(SV.cleanMessages([{ role: 'user', content: 'x' }, { role: 'assistant', content: [{ type: 'tool_use', id: 't', name, input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'r' }] }]).ok, true);
   console.log('PASS the AI endpoint knows the desk tools'); }
+
+// two sends for the same message at the same moment must produce one email
+{ const store = MS.memoryStore(); await store.save([{ id: 'r1', from: 'michael@example.com', subject: 'Race', text: 'hi', receivedAt: T0, delivered: true, replied: false }]);
+  let calls = 0; const slow = async () => { calls++; await new Promise(r => setTimeout(r, 20)); return new Response('{}', { status: 200 }); };
+  const h = MS.createMailHandler({ env: { ...baseEnv, RESEND_API_KEY: 'rk' }, store, fetchImpl: slow, now: () => T0 });
+  const go = ip => h(req({ action: 'send', id: 'r1', body: 'one reply' }, { ip }));
+  const codes = (await Promise.all([go('6.6.1.1'), go('6.6.1.2')])).map(r => r.status).sort();
+  assert.deepEqual(codes, [200, 409], 'one send wins, the other is refused'); assert.equal(calls, 1, 'Resend is called once');
+  assert.equal((await store.load())[0].replied, true);
+  const failing = MS.createMailHandler({ env: { ...baseEnv, RESEND_API_KEY: 'rk' }, store: (() => { const s = MS.memoryStore(); s.save([{ id: 'r2', from: 'michael@example.com', subject: 'x', text: 'y', receivedAt: T0, delivered: true, replied: false }]); return s; })(), fetchImpl: async () => new Response('no', { status: 500 }), now: () => T0 });
+  assert.equal((await failing(req({ action: 'send', id: 'r2', body: 'x' }, { ip: '6.6.2.1' }))).status, 502); assert.equal((await failing(req({ action: 'send', id: 'r2', body: 'x' }, { ip: '6.6.2.2' }))).status, 502, 'a failed send can be retried');
+  console.log('PASS concurrent sends of one reply produce a single email, and a failed send can be retried'); }
