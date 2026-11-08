@@ -15,6 +15,7 @@ import { buildSystem } from './persona';
 import { KNOWLEDGE } from './knowledge.generated';
 import { toolDefinitions } from './actions';
 import { runnerTools } from './taskRunner';
+import { capUsd } from './guards';
 
 const MAX_BODY = 64 * 1024, MAX_MESSAGES = 40, MAX_TEXT = 4000, MAX_TOOL_RESULTS_PER_TURN = 8, MAX_TOKENS = 350;
 const KB_TEXT = KNOWLEDGE.map(e => `## ${e.title}\n${e.text}`).join('\n\n');
@@ -97,7 +98,7 @@ export function createHandler(deps: Deps) {
     const perMin = Number(env.TECHNICIAN_RATE_PER_MIN) || 20;
     if (rateLimited(clientKey(req), nowMs(), perMin)) return json(429, { error: 'rate_limited' }, { 'retry-after': '30' });
     const day = new Date(nowMs()).toISOString().slice(0, 10); if (spend.day !== day) { spend.day = day; spend.usd = 0; }
-    const cap = Number(env.TECHNICIAN_DAILY_CAP_USD ?? 5); if (spend.usd >= cap) return json(503, { error: 'cap_reached' });
+    const cap = capUsd(env.TECHNICIAN_DAILY_CAP_USD, 5); if (spend.usd >= cap) return json(503, { error: 'cap_reached' });
 
     let body: any; try { const text = await req.text(); if (text.length > MAX_BODY) return json(413, { error: 'too_large' }); body = JSON.parse(text); } catch { return json(400, { error: 'bad_json' }); }
     const cleaned = cleanMessages(body?.messages); if (cleaned.ok === false) return json(400, { error: cleaned.error });

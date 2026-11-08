@@ -31,6 +31,12 @@ export function createLimiter() {
   };
 }
 
+/** Parses a daily spend cap from the environment. Unset, empty or invalid values fall back to the default, so a typo can never disable the cap (NaN comparisons are always false). */
+export function capUsd(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const n = Number(raw); return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 export function createSpend() {
   const s = { day: '', usd: 0 };
   return {
