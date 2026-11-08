@@ -4,6 +4,10 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- 3D Engineering model: measured points are now drawn where the stage was when each was taken (green valid, amber suspect or failed; newest 200, 60 when zoomed out), with a legend and per-point tooltips.
+- Fixed a crash that blanked the whole app: the Operator Console resonance tile threw when the latest record had no S11 depth or uncertainty (records from a CSV import or an older session). It now shows what it has. A page error boundary also keeps any future page crash from taking down the app: it shows a message with Try again and Reload.
+- `npm run deploy:cloudflare` builds and deploys the Worker; the Cloudflare account is now set in `wrangler.jsonc`, so the deploy is non-interactive.
+
 - Fixed the page alert banner ("Needs attention", "Take me there") being squeezed to a 22 px sliver with its text cut off: children of the scrolling page column no longer shrink.
 
 - Performance: profiled every page and fixed the slow ones. Live Timeline 12 to 58 frames a second (the page had no props, so each 20 Hz lab tick rebuilt four charts; it is now memoized and redraws at most once a second). VNA 14 to 46 (the live trace is rebuilt about 5 times a second instead of 20, and the SVG glow filter on it is gone). Lab Overview 23 to 53 unpowered, 30 to 41 fully powered (memoized with a 4 Hz snapshot; the permanent filter pulse on every active card and two decorative background sweeps removed).
