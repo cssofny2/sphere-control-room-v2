@@ -94,7 +94,9 @@ Impact = scientific credibility + what users lose today + reach (education, open
 - 3D annotations (roadmap #4): recorded points colored by metric in the Engineering view first (`twinParts` SVG painter), Realistic lab later.
 **Tests.** Planner picks the known gap on a synthetic layout; fit recovers the model's 45.2 / −12.5 / 80.1 Hz/mm; new plan kind validation negatives.
 
-## 7. Accessibility and mobile overhaul — M
+## 7. Accessibility and mobile overhaul — M — DONE (branch `feat/a11y-mobile`)
+
+> The searchable keyboard parts list already existed in the engineering schematic. Axe checks were run by hand against the dev server (axe-core from a CDN), not added to CI; the CI test guards the code-level fixes. i18n scaffolding was not attempted.
 
 **Why.** 65 aria/role attributes across 3.5k lines; only two color ramps (`RAMPS`, `:2287`); 3D parts are pointer-pick only; modals (`confirmModal`, VNA calibration, command palette) need audited focus handling.
 

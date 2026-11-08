@@ -230,14 +230,14 @@ export const Scope = memo(function Scope({ HelpInfo }: { HelpInfo: any }) {
           </div>
         </div>
 
-        <aside className="sx-side">
+        <div className="sx-side" role="region" aria-label="Scope guide">
           <div className="sx-card">
             <div className="sx-card-h">What this scope is for in the experiment</div>
             <p className="sx-p">The VNA finds the sphere’s resonance, but it cannot tell you <em>why</em> a reading is noisy. The oscilloscope shows the raw signals underneath: the RF tone being sent in, the vibrometer’s output, the shared clock, and the room around the chamber. If a measurement looks wrong, the scope usually shows the cause.</p>
             <ul className="sx-uses">{SCOPE_USES.map(u => <li key={u.title}><b>{u.title}</b><span>{u.body}</span></li>)}</ul>
           </div>
           <div className="sx-card"><div className="sx-card-h">Where each probe is connected</div><ProbeMap channels={channels} power={!!sc.power} /><p className="sx-hint">Change “Watches” on a channel and its wire moves to another piece of equipment.</p></div>
-        </aside>
+        </div>
       </div>
 
       <section className="sx-scn" aria-label="Scenarios">

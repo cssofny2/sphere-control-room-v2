@@ -11,6 +11,8 @@ import { RunLibrary, SessionRestore } from './persistence/SessionUI';
 import { BundleImport } from './persistence/BundleUI';
 import { RunCompare } from './analysis/RunCompare';
 import { hashForPage, isEmbed, pageFromHash, shareUrl } from './features/route';
+import { installModalA11y } from './features/modalA11y';
+import { Announcer } from './features/Announcer';
 import { FieldAnalysis } from './spatial/FieldAnalysis';
 import { coverage as spatialCoverage } from './spatial/field';
 import { buildBundle } from './domain/bundle';
@@ -829,6 +831,8 @@ export default function MetrologyLab() {
   const clearProfile = useCallback(() => { saveOperator({ ...EMPTY_OPERATOR }); dispatch({ type: "SET_OPERATOR", profile: { ...EMPTY_OPERATOR } }); }, []);
   // Every change in the lab (any button, slider, the palette, Dr. Wire) is explained in the live operation window.
   useEffect(() => installActivityTracker(cb => onLabTransition(cb)), []);
+  // Dialogs get a dialog role, focus handling, a Tab trap and Escape-to-close.
+  useEffect(() => installModalA11y(), []);
   // Deep links: the address bar follows the page (#/vna), and opening or editing a #/page link switches to it.
   const activePage = state.ui.active;
   useEffect(() => {
@@ -1080,6 +1084,7 @@ export default function MetrologyLab() {
   return (
     <div ref={labRootRef} className={`lab-root workspace-shell ${focusMode ? "workspace-focus" : ""} ${fx.reduced ? "fx-reduced" : ""} ${fx.hide ? "fx-hide" : ""} bg-[#06080d] font-sans text-zinc-100 selection:bg-sky-500/40`}>
       <style>{TW_FALLBACK}</style>
+      <Announcer />
       <WorkspaceHeader state={state} navOptions={navGroups.flatMap(group => group.items.map(([id, label]) => ({ id, label })))} focus={focusMode} fullscreen={fullscreen} journalOpen={journalOpen && !focusMode} alarms={unresolved}
         onNavigate={navigate} onNavigation={toggleNavigation} onJournal={toggleJournal} onFocus={() => { setFocusMode(v => !v); setNavDrawerOpen(false); }} onFullscreen={toggleFullscreen}
         onSearch={() => set("ui", { cmdPaletteOpen: true })} onTool={tool => tool === "share" ? copyPageLink() : set("ui", { [({ wizard: "wizardOpen", videos: "videoModal", procedure: "manualOpen", glossary: "glossaryOpen" })[tool]]: true })}
@@ -1089,7 +1094,7 @@ export default function MetrologyLab() {
           else dispatch({ type: "POWER", value: true });
         }}
       />
-      <div className="workspace-status" aria-label="Essential laboratory status">
+      <div className="workspace-status" role="region" aria-label="Essential laboratory status">
         <AlertStrip state={state} onOpen={() => navigate("overview")} />
         <SessionRestore dispatch={dispatch} onResolved={setSaveKv} />
         <span className="status-chip"><span>Clock</span><strong>{clockStatus}</strong></span>
@@ -2055,10 +2060,10 @@ function LabNotebook({ state, dispatch, validationResult, f0 }) {
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 space-y-2">
         <textarea value={text} onChange={e => setText(e.target.value)} rows={3} placeholder="Write an observation, hypothesis or note…" className="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-sm text-zinc-100" />
         <div className="flex flex-wrap items-center gap-2">
-          <select value={tag} onChange={e => setTag(e.target.value)} className="rounded border border-zinc-700 bg-zinc-900 p-1.5 text-xs">{tags.map(t => <option key={t}>{t}</option>)}</select>
+          <select aria-label="Entry tag" value={tag} onChange={e => setTag(e.target.value)} className="rounded border border-zinc-700 bg-zinc-900 p-1.5 text-xs">{tags.map(t => <option key={t}>{t}</option>)}</select>
           <button onClick={add} disabled={!text.trim()} className="rounded bg-sky-500 px-3 py-1.5 text-xs font-bold text-black disabled:opacity-40">Add entry</button>
           <div className="ml-auto flex items-center gap-2">
-            <select value={filter} onChange={e => setFilter(e.target.value)} className="rounded border border-zinc-700 bg-zinc-900 p-1.5 text-xs"><option value="all">all tags</option>{tags.map(t => <option key={t}>{t}</option>)}</select>
+            <select aria-label="Filter by tag" value={filter} onChange={e => setFilter(e.target.value)} className="rounded border border-zinc-700 bg-zinc-900 p-1.5 text-xs"><option value="all">all tags</option>{tags.map(t => <option key={t}>{t}</option>)}</select>
             <button onClick={exportMd} disabled={!state.notebook.length} className="flex items-center gap-1 rounded border border-zinc-600 px-3 py-1.5 text-xs font-bold disabled:opacity-40"><Download size={12} /> Export .md</button>
           </div>
         </div>
@@ -2284,7 +2289,7 @@ function ChamberSVG({ state, mini = false, cv = null }) {
   );
 }
 
-const RAMPS = { diverging: ["#2563eb", "#93c5fd", "#e5e7eb", "#fca5a5", "#dc2626"], sequential: ["#5b21b6", "#22d3ee", "#fde047"] };
+const RAMPS = { viridis: ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"], cividis: ["#00204d", "#414d6b", "#7c7b78", "#bcaf6f", "#ffea46"], diverging: ["#2563eb", "#93c5fd", "#e5e7eb", "#fca5a5", "#dc2626"], sequential: ["#5b21b6", "#22d3ee", "#fde047"] };
 const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 function ramp(stops, t) {
   const n = stops.length - 1;
@@ -2826,7 +2831,7 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
             </p>
           </div>
         </div>
-        <button onClick={() => set("ui", { wizardOpen: true })} className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold shrink-0">
+        <button onClick={() => set("ui", { wizardOpen: true })} className="px-3 py-1.5 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-bold shrink-0">
           Open Startup Wizard
         </button>
       </div>
@@ -3044,8 +3049,8 @@ function Chamber({ state, dispatch, HelpInfo }) {
                 {state.chamber.doorOpen ? "Close Door" : "Open Door"}
               </button>
             </div>
-            <label className="flex items-center gap-1.5 text-xs text-zinc-300">
-              <input type="checkbox" checked={state.stage.clampActive} onChange={e => set("stage", { clampActive: e.target.checked })} />
+            <label className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-300">
+              <input type="checkbox" aria-label="Stage clamp" checked={state.stage.clampActive} onChange={e => set("stage", { clampActive: e.target.checked })} />
               <span>Mechanical Clamp</span>
             </label>
           </div>
@@ -3062,7 +3067,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
                   <span className="uppercase text-zinc-400 font-bold">Axis {axis}</span>
                   <span className="font-mono text-sky-300">{state.stage[axis].toFixed(3)} mm</span>
                 </div>
-                <input type="range" min={-LIMIT_MM} max={LIMIT_MM} step="0.1" value={state.stage[axis]} disabled={!state.facility.power || state.chamber.doorOpen || state.stage.clampActive} onChange={e => move(axis, Number(e.target.value) - state.stage[axis])} className="w-full accent-sky-400" />
+                <input type="range" aria-label={`Stage ${String(axis).toUpperCase()} position in millimetres`} min={-LIMIT_MM} max={LIMIT_MM} step="0.1" value={state.stage[axis]} disabled={!state.facility.power || state.chamber.doorOpen || state.stage.clampActive} onChange={e => move(axis, Number(e.target.value) - state.stage[axis])} className="w-full accent-sky-400" />
                 <div className="flex gap-1 mt-1">
                   <button onClick={() => move(axis, -.5)} className="flex-1 bg-zinc-800 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-700">-0.5</button>
                   <button onClick={() => move(axis, .5)} className="flex-1 bg-zinc-800 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-700">+0.5</button>
@@ -3077,7 +3082,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
             </div>
             <div className="flex items-center justify-between text-xs">
               <span>Active Thermostat <HelpInfo termKey="thermostat" /></span>
-              <input type="checkbox" checked={state.chamber.thermostat} onChange={v => set("chamber", { thermostat: v.target.checked })} />
+              <input type="checkbox" aria-label="Thermostat" checked={state.chamber.thermostat} onChange={v => set("chamber", { thermostat: v.target.checked })} />
             </div>
             <label className="block text-xs text-zinc-400">Target Setpoint (°C)
               <input type="number" step=".1" value={state.chamber.targetTemp} disabled={!state.chamber.thermostat} onChange={e => set("chamber", { targetTemp: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-orange-200 text-xs" />
@@ -3086,8 +3091,8 @@ function Chamber({ state, dispatch, HelpInfo }) {
             <div className="text-xs">Pressure: <span className="font-mono text-sky-300">{fmtPressure(state.chamber.pressure)}</span></div>
             <div className="grid grid-cols-3 gap-2 pt-2">
               <button onClick={handleVentClick} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">Vent</button>
-              <button onClick={() => set("chamber", { vent: false, roughing: true })} disabled={state.chamber.doorOpen} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Rough Pump <HelpInfo termKey="roughing_pump" /></button>
-              <button onClick={handleTurboClick} disabled={state.chamber.pressure > 50 || state.chamber.doorOpen} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40" title={state.chamber.pressure > 50 ? "Interlock active: pressure must be below 50 Torr" : ""}>Turbo Pump <HelpInfo termKey="turbo_pump" /></button>
+              <div className="flex items-stretch gap-1"><button onClick={() => set("chamber", { vent: false, roughing: true })} disabled={state.chamber.doorOpen} className="flex-1 rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Rough Pump</button><HelpInfo termKey="roughing_pump" /></div>
+              <div className="flex items-stretch gap-1"><button onClick={handleTurboClick} disabled={state.chamber.pressure > 50 || state.chamber.doorOpen} className="flex-1 rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40" title={state.chamber.pressure > 50 ? "Interlock active: pressure must be below 50 Torr" : ""}>Turbo Pump</button><HelpInfo termKey="turbo_pump" /></div>
             </div>
           </div>
         </div>
@@ -3110,7 +3115,7 @@ function SpatialField({ state, dispatch, HelpInfo }) {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-400">Metric:</span>
-          <select value={view.metric} onChange={e => setView({ metric: e.target.value })} className="bg-zinc-900 border border-zinc-700 rounded p-1.5 text-xs text-sky-300">
+          <select aria-label="Metric" value={view.metric} onChange={e => setView({ metric: e.target.value })} className="bg-zinc-900 border border-zinc-700 rounded p-1.5 text-xs text-sky-300">
             <option value="frequencyShift">Resonance Shift (Δf)</option>
             <option value="resonance">Absolute Frequency (f₀)</option>
             <option value="q">Q Factor</option>
@@ -3147,6 +3152,8 @@ function SpatialField({ state, dispatch, HelpInfo }) {
               <select value={view.colorScale} onChange={e => setView({ colorScale: e.target.value })} className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-xs text-zinc-200">
                 <option value="diverging">Diverging (Blue - Neutral - Red)</option>
                 <option value="sequential">Sequential (Violet - Cyan - Yellow)</option>
+                <option value="viridis">Viridis (colour-vision safe)</option>
+                <option value="cividis">Cividis (colour-vision safe, blue-yellow)</option>
               </select>
             </label>
 
@@ -3267,8 +3274,8 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
             <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-2 flex items-center justify-between">
               <span>VNA Stimulus & Sweep Controls</span> <HelpInfo termKey="span" />
             </div>
-            <div className="flex items-center justify-between text-xs py-1"><span>VNA Power</span><input type="checkbox" checked={vna.power} disabled={!facilityPower} onChange={v => set("vna", { power: v.target.checked, rf: v.target.checked ? vna.rf : false })} /></div>
-            <div className="flex items-center justify-between text-xs py-1"><span>RF Output</span><input type="checkbox" checked={vna.rf} disabled={!vna.power} onChange={v => set("vna", { rf: v.target.checked })} /></div>
+            <div className="flex items-center justify-between text-xs py-1"><span>VNA Power</span><input type="checkbox" aria-label="VNA power" checked={vna.power} disabled={!facilityPower} onChange={v => set("vna", { power: v.target.checked, rf: v.target.checked ? vna.rf : false })} /></div>
+            <div className="flex items-center justify-between text-xs py-1"><span>RF Output</span><input type="checkbox" aria-label="RF output" checked={vna.rf} disabled={!vna.power} onChange={v => set("vna", { rf: v.target.checked })} /></div>
 
             <label className="block text-xs text-zinc-400">Sweep Mode
               <select value={vna.sweepMode} onChange={e => set("vna", { sweepMode: e.target.value })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 text-xs text-zinc-200">
@@ -3377,7 +3384,7 @@ function Clock({ state, dispatch, HelpInfo }) {
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center justify-between">
             <span>Reference Distribution</span> <HelpInfo termKey="clock" />
           </div>
-          <div className="flex items-center justify-between text-xs"><span>Clock Power</span><input type="checkbox" checked={state.clock.power} disabled={!state.facility.power} onChange={v => set("clock", { power: v.target.checked, warmup: v.target.checked ? state.clock.warmup : 0, locked: v.target.checked ? state.clock.locked : false })} /></div>
+          <div className="flex items-center justify-between text-xs"><span>Clock Power</span><input type="checkbox" aria-label="Clock power" checked={state.clock.power} disabled={!state.facility.power} onChange={v => set("clock", { power: v.target.checked, warmup: v.target.checked ? state.clock.warmup : 0, locked: v.target.checked ? state.clock.locked : false })} /></div>
           <FitRow label="VNA 10 MHz" value={state.clock.locked ? "Locked" : "Internal"} />
           <FitRow label="LDV Sync" value={state.clock.locked ? "Locked" : "Internal"} />
         </div>
@@ -3428,7 +3435,7 @@ function Runs({ state, dispatch, exportCsv, exportJson, sweep, HelpInfo }) {
           <h1 className="text-xl font-bold flex items-center">Experiment Run Manager <HelpInfo termKey="location_variable" /></h1>
           <p className="mt-1 text-sm text-zinc-400">Traceable measurements, randomized scan plans, reference logic, data-quality labels, and local exports.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button onClick={launchPlan} disabled={state.experiment.active || validation.ok === false} className="rounded border border-emerald-600 bg-emerald-900 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 flex items-center gap-1 disabled:opacity-50"><Play size={14}/> Run Scan Plan</button>
           {state.experiment.active && <button onClick={() => dispatch({ type: "STOP_RUN" })} className="rounded border border-rose-600 bg-rose-900 px-3 py-2 text-xs font-semibold">Stop Run</button>}
           <button onClick={exportCsv} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-700 flex items-center gap-1"><Download size={14}/> CSV</button>
