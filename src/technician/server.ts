@@ -109,7 +109,7 @@ export function createHandler(deps: Deps) {
     const enc = new TextEncoder();
     const body$ = new ReadableStream({
       async start(controller) {
-        const send = (o: unknown) => controller.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
+        const send = (o: unknown) => { try { controller.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`)); } catch { /* client already disconnected */ } };
         let stream: StreamLike | null = null;
         req.signal?.addEventListener('abort', () => { try { stream?.abort?.(); } catch { /* ignore */ } });
         try {
@@ -121,7 +121,7 @@ export function createHandler(deps: Deps) {
           send({ type: 'done', stop_reason: final.stop_reason || 'end_turn' });
         } catch (e) {
           const status = (e as any)?.status; send({ type: 'error', code: status === 429 ? 'rate_limited' : 'upstream', message: 'The AI service had a problem.' });
-        } finally { controller.close(); }
+        } finally { try { controller.close(); } catch { /* already closed */ } }
       },
     });
     return new Response(body$, { status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', 'x-accel-buffering': 'no' } });
