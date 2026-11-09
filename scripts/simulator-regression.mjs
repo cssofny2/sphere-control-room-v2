@@ -207,3 +207,56 @@ console.log('PASS run-bound identity/deduplication guard without claiming full r
   assert.equal(unrelated.alarms.length, 0);
   console.log('PASS VNA span change keeps the calibration-invalidated alarm');
 }
+
+{
+  const priorRecord = { id: 'previous-acquisition', runId: 'previous-run' };
+  const base = fresh();
+  base.experiment.records = [priorRecord];
+  base.experiment.captureCount = 1;
+  const blocked = L.reducer({ ...base, chamber: { ...base.chamber, doorOpen: true } }, { type: 'START_MACRO' });
+  assert.equal(blocked.macro.status, 'blocked');
+  assert.equal(blocked.facility.power, false, 'a blocked macro must not partially power the lab');
+
+  let macro = L.reducer(base, { type: 'START_MACRO' });
+  assert.equal(macro.macro.status, 'preparing');
+  assert.equal(macro.facility.power, true);
+  assert.equal(macro.clock.power, true);
+  assert.equal(macro.chamber.roughing, true);
+  assert.equal(macro.vna.calibrated, true);
+  assert.equal(macro.scope.power, true);
+  assert.equal(macro.ldv.shutter, true);
+  assert.equal(macro.experiment.records[0], priorRecord, 'preparation retains earlier records');
+
+  macro = {
+    ...macro,
+    clock: { ...macro.clock, locked: true },
+    chamber: { ...macro.chamber, pressure: 0.0005, temperature: 20 },
+    scope: { ...macro.scope, bootProgress: 1, booting: false }
+  };
+  macro = L.reducer(macro, { type: 'LDV_SCAN_START', scenario: 'modemap' });
+  const ldvScanId = macro.macro.ldvScanId;
+  assert.ok(ldvScanId);
+  macro = L.reducer(macro, { type: 'START_SCAN', kind: 'axis', macro: true, preserveRecords: true });
+  assert.equal(macro.macro.status, 'scanning');
+  assert.equal(macro.experiment.scanPath.length, 5, 'the macro runs the configured five-position acquisition');
+  assert.equal(macro.experiment.records[0], priorRecord, 'starting the macro scan retains earlier records');
+
+  const runId = macro.experiment.id;
+  const recordId = 'macro-acquisition';
+  macro = L.reducer(macro, {
+    type: 'RECORD',
+    record: { id: recordId, runId, valid: true, excluded: false, contract: { id: recordId, runId } }
+  });
+  macro = {
+    ...macro,
+    experiment: { ...macro.experiment, active: false, scanActive: false, contract: { ...macro.experiment.contract, status: 'completed' } },
+    ldv: { ...macro.ldv, scanActive: false, scanResult: { id: ldvScanId, verdict: 'good' } }
+  };
+  macro = L.reducer(macro, { type: 'COMPLETE_MACRO', validation: 'VALID' });
+  assert.equal(macro.macro.status, 'completed');
+  assert.equal(macro.macro.result.records, 1);
+  assert.equal(macro.macro.result.validRecords, 1);
+  assert.equal(macro.notebook[0].tag, 'result');
+  assert.match(macro.notebook[0].text, /One-click macro complete/);
+  console.log('PASS Copilot macro prepares safely, retains prior records and records completed results');
+}
