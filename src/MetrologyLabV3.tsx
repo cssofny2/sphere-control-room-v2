@@ -148,6 +148,7 @@ const PROCEDURE_STEPS = [
 const labHelpersRef: { current: { performSweep?: () => void; exportCsv?: () => void; exportJson?: () => void } | undefined } = { current: undefined };
 
 const initialState = {
+  macro: { status: "idle", message: "", startedAt: null as number | null, ldvScanId: null as string | null, result: null as any },
   facility: { power: false, speed: 1, simulationTime: 0, seededNoise: true, seed: 73421, mode: "training" },
   clock: { power: false, warmup: 0, locked: false, holdover: false, distributionAmplifier: true, cableFault: false, timeSinceLock: 0 },
   chamber: {
@@ -378,6 +379,80 @@ function getCopilotAdvice(state, validation) {
 
 function reducer(state, action) {
   switch (action.type) {
+    case "START_MACRO": {
+      if (state.macro.status === "preparing" || state.macro.status === "scanning") return state;
+      const blockingFaults = Object.keys(state.failures).filter(key => state.failures[key]);
+      const blocked = state.experiment.active || state.experiment.scanActive || state.ldv.scanActive ||
+        state.chamber.doorOpen || state.stage.clampActive || blockingFaults.length > 0;
+      if (blocked) {
+        const message = state.experiment.active || state.experiment.scanActive
+          ? "Stop the active experiment before starting a macro."
+          : state.ldv.scanActive
+            ? "Wait for the active LDV scan to finish before starting a macro."
+            : state.chamber.doorOpen || state.stage.clampActive
+              ? "Close the chamber door and release the stage clamp before starting a macro."
+              : `Clear active faults before starting a macro: ${blockingFaults.map(key => FAULT_CATALOG[key]?.title || key).join(", ")}.`;
+        return addEvent({ ...state, macro: { ...state.macro, status: "blocked", message } }, `Macro not started: ${message}`, "warning", "RESEARCH");
+      }
+      const macro = { status: "preparing", message: "Preparing instruments; waiting for stable, valid conditions.", startedAt: state.facility.simulationTime, ldvScanId: null, result: null };
+      return addEvent({
+        ...state,
+        macro,
+        facility: { ...state.facility, power: true },
+        clock: { ...state.clock, power: true },
+        chamber: { ...state.chamber, vent: false, roughing: true, turbo: true, thermostat: true, faraday: true, isolation: true },
+        vna: { ...state.vna, power: true, rf: true, calibrated: true, calibrationType: "SOLT 1-Port", calibrationTime: new Date().toLocaleTimeString(), calibrationAgeSeconds: 0 },
+        scope: { ...state.scope, power: true, running: true },
+        ldv: { ...state.ldv, power: true, shutter: true, grid: 16 },
+        experiment: { ...state.experiment, axis: "x", start: -20, stop: 20, step: 10, repeats: 1, randomized: true }
+      }, "One-click laboratory macro started: preparing the chamber, reference, instruments and acquisition plan.", "info", "RESEARCH");
+    }
+    case "CANCEL_MACRO": {
+      if (state.macro.status !== "preparing" && state.macro.status !== "scanning") return state;
+      const experiment = {
+        ...state.experiment,
+        contract: state.experiment.contract ? { ...state.experiment.contract, status: "cancelled" } : null,
+        active: false, scanActive: false, scanPaused: false, scanStep: "idle", scanMessage: "Macro cancelled"
+      };
+      const ldv = state.ldv.scanActive
+        ? { ...state.ldv, scanActive: false, scanProgress: 0, scanDone: 0, scanStalled: false, scanStalledReason: "" }
+        : state.ldv;
+      return addEvent({ ...state, experiment, ldv, macro: { ...state.macro, status: "cancelled", message: "Macro cancelled by operator." } }, "Laboratory macro cancelled by operator.", "warning", "RESEARCH");
+    }
+    case "COMPLETE_MACRO": {
+      if (state.macro.status !== "scanning" || state.experiment.contract?.status !== "completed" ||
+          state.ldv.scanActive || state.ldv.scanResult?.id !== state.macro.ldvScanId) return state;
+      const records = state.experiment.records.filter(record => record.runId === state.experiment.id);
+      const validRecords = records.filter(record => record.valid === true && !record.excluded).length;
+      const result = {
+        runId: state.experiment.id,
+        records: records.length,
+        validRecords,
+        validation: action.validation,
+        ldvVerdict: state.ldv.scanResult.verdict
+      };
+      const entry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        tag: "result",
+        time: new Date().toLocaleString(),
+        operator: operatorTag(state.operator),
+        simTime: Math.floor(state.facility.simulationTime),
+        text: `One-click macro complete. Run ${result.runId} recorded ${result.records} VNA measurement${result.records === 1 ? "" : "s"} (${result.validRecords} valid); LDV 3D scan verdict: ${result.ldvVerdict}. Final validation: ${result.validation}.`,
+        snapshot: {
+          f0Hz: Number(trueFrequency(state).toFixed(3)),
+          tempC: Number(state.chamber.temperature.toFixed(3)),
+          pressure: fmtPressure(state.chamber.pressure),
+          clockLocked: state.clock.locked,
+          validation: result.validation,
+          stage: [state.stage.actualX ?? state.stage.x, state.stage.actualY ?? state.stage.y, state.stage.actualZ ?? state.stage.z].map(value => Number(value.toFixed(2)))
+        }
+      };
+      return addEvent({
+        ...state,
+        macro: { ...state.macro, status: "completed", message: "All macro steps completed; results are saved in Runs and the Notebook.", result },
+        notebook: [entry, ...state.notebook].slice(0, 300)
+      }, `Laboratory macro completed: ${result.records} VNA records (${result.validRecords} valid) and LDV scan ${result.ldvVerdict}.`, "info", "RESEARCH");
+    }
     case "POWER": {
       if (!action.value) return addEvent({ ...initialState, notebook: state.notebook, operator: state.operator, faultDrill: initialState.faultDrill, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
       return addEvent({ ...state, facility: { ...state.facility, power: true } }, "MAIN BREAKER closed; facility AC online.", "info", "SYSTEM");
@@ -420,8 +495,10 @@ function reducer(state, action) {
       if (state.chamber.doorOpen) return addAlarm(state, "3D scan rejected: close the chamber door (laser interlock).", "critical");
       if (l.scanActive) return addAlarm(state, "A 3D scan is already running.", "warning");
       const total = scanPointTotal(scenario, l.grid), title = LDV_SCENARIO_BY_ID[scenario].title;
-      const ldv = { ...l, scanActive: true, scanProgress: 0, scanDone: 0, scanTotal: total, scanScenario: scenario, scanTitle: title, scanId: createIdentifier("scan"), scanStalled: false, scanStalledReason: "", scanNew: false };
-      return addEvent({ ...state, ldv }, `LDV 3D scan started: ${title} (${total} points).`, "info", "LDV");
+      const scanId = createIdentifier("scan");
+      const ldv = { ...l, scanActive: true, scanProgress: 0, scanDone: 0, scanTotal: total, scanScenario: scenario, scanTitle: title, scanId, scanStalled: false, scanStalledReason: "", scanNew: false };
+      const macro = state.macro.status === "preparing" ? { ...state.macro, ldvScanId: scanId } : state.macro;
+      return addEvent({ ...state, ldv, macro }, `LDV 3D scan started: ${title} (${total} points).`, "info", "LDV");
     }
     case "LDV_SCAN_CANCEL": {
       if (!state.ldv.scanActive) return state;
@@ -473,19 +550,25 @@ function reducer(state, action) {
     }
     case "CAPTURE_REFERENCE": return addEvent({ ...state, vna: { ...state.vna, reference: state.vna.trace } }, "Reference trace captured.", "info", "VNA");
     case "START_SCAN": {
-      if (state.experiment.active || state.experiment.scanActive) return addAlarm(state, "A run already owns the instruments. Stop it before starting another scan.", "warning");
+      if (state.experiment.active || state.experiment.scanActive) {
+        const blocked = action.macro ? { ...state, macro: { ...state.macro, status: "blocked", message: "Another run already owns the instruments." } } : state;
+        return addAlarm(blocked, "A run already owns the instruments. Stop it before starting another scan.", "warning");
+      }
       const result = action.kind === "axis" ? buildAxisPlan(getAxisPlanInput(state)) : buildPointPlan({
         // kind "points" runs a list of positions (e.g. the Spatial Field page's suggestions) with optional repeats and random order.
         kind: "serpentine", positions: action.positions ?? action.plan ?? createSerpentineScanPlan(), repeats: action.repeats ?? 1,
         seed: state.facility.seed, randomized: !!action.randomized,
       });
-      if (result.ok === false) return addAlarm({ ...state, experiment: { ...state.experiment, planErrors: result.issues } }, `Scan plan rejected: ${result.issues.map(i => i.message).join(" ")}`, "warning");
-      if (!state.facility.power || !state.vna.power || !state.vna.rf) return addAlarm(state, "Automated scan requires facility power, VNA power, and RF output.", "warning");
-      if (state.stage.clampActive || state.chamber.doorOpen || state.chamber.vent) return addAlarm(state, "Automated scan blocked by stage or chamber interlock.", "critical");
+      const macroBlocked = message => action.macro ? { ...state, macro: { ...state.macro, status: "blocked", message } } : state;
+      if (result.ok === false) return addAlarm({ ...macroBlocked("The macro scan plan was rejected."), experiment: { ...state.experiment, planErrors: result.issues } }, `Scan plan rejected: ${result.issues.map(i => i.message).join(" ")}`, "warning");
+      if (!state.facility.power || !state.vna.power || !state.vna.rf) return addAlarm(macroBlocked("The macro scan requires facility power, VNA power and RF output."), "Automated scan requires facility power, VNA power, and RF output.", "warning");
+      if (state.stage.clampActive || state.chamber.doorOpen || state.chamber.vent) return addAlarm(macroBlocked("The macro scan was blocked by a stage or chamber interlock."), "Automated scan blocked by stage or chamber interlock.", "critical");
       const plan = result.plan, runState = { ...state, facility: { ...state.facility, seed: plan.settings.seed } }, contract = createRunContract(plan, runState, state.facility.simulationTime);
       const path = plan.acquisitions.map(a => ({ ...a.position, pointId: a.pointId, repeatIndex: a.repeatIndex, plannedAcquisitionId: a.id }));
-      const experiment = { ...state.experiment, contract, planErrors: [], active:true, id:contract.id, records:[], captureCount:0, scanActive:true, scanPaused:false, scanPath:path, currentScanIndex:0, scanProgress:0, scanStep:"command", scanRecordBaseline:0, scanRecordIdBeforeAcquire:null, scanMessage:"Commanding acquisition 1", rescanCounts:{}, qualityResults:{}, acceptedPoints:0, suspectPoints:0, failedPoints:0, adaptiveMessage:"Awaiting first acquisition" };
-      return addEvent({ ...runState, experiment }, `Validated ${plan.settings.kind} scan started: ${plan.orderedPoints.length} positions, ${path.length} planned acquisitions, seed ${plan.settings.seed}.`, "info", "RESEARCH");
+      const keepRecords = !!action.preserveRecords;
+      const experiment = { ...state.experiment, contract, planErrors: [], active:true, id:contract.id, records:keepRecords ? state.experiment.records : [], captureCount:keepRecords ? state.experiment.captureCount : 0, scanActive:true, scanPaused:false, scanPath:path, currentScanIndex:0, scanProgress:0, scanStep:"command", scanRecordBaseline:keepRecords ? state.experiment.captureCount : 0, scanRecordIdBeforeAcquire:null, scanMessage:"Commanding acquisition 1", rescanCounts:{}, qualityResults:{}, acceptedPoints:0, suspectPoints:0, failedPoints:0, adaptiveMessage:"Awaiting first acquisition" };
+      const macro = action.macro ? { ...state.macro, status: "scanning", message: "Collecting VNA measurements and an LDV 3D scan." } : state.macro;
+      return addEvent({ ...runState, experiment, macro }, `Validated ${plan.settings.kind} scan started: ${plan.orderedPoints.length} positions, ${path.length} planned acquisitions, seed ${plan.settings.seed}.`, "info", "RESEARCH");
     }
     case "PAUSE_SCAN": return addEvent({ ...state, experiment:{...state.experiment,contract:state.experiment.contract?{...state.experiment.contract,status:"paused"}:null,scanPaused:true,scanMessage:"Paused by operator"} }, "Automated scan paused.", "warning", "RESEARCH");
     case "RESUME_SCAN": return addEvent({ ...state, experiment:{...state.experiment,contract:state.experiment.contract?{...state.experiment.contract,status:"running"}:null,scanPaused:false,scanStep:state.experiment.scanStep==="fault"?"command":state.experiment.scanStep,scanMessage:"Resuming sequence"} }, "Automated scan resumed.", "info", "RESEARCH");
@@ -955,6 +1038,23 @@ export default function MetrologyLab() {
   const f0 = useMemo(() => trueFrequency(state), [state]);
   const validationResult = useMemo(() => getMeasurementValidation(state), [state]);
   const valid = validationResult.overall === "VALID";
+  const macroLaunchRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (state.macro.status !== "preparing") {
+      macroLaunchRef.current = null;
+      return;
+    }
+    if (macroLaunchRef.current === state.macro.startedAt ||
+        validationResult.overall !== "VALID" || state.scope.bootProgress < 1) return;
+    macroLaunchRef.current = state.macro.startedAt;
+    dispatch({ type: "LDV_SCAN_START", scenario: "modemap" });
+    dispatch({ type: "START_SCAN", kind: "axis", macro: true, preserveRecords: true });
+  }, [state.macro.status, state.macro.startedAt, validationResult.overall, state.scope.bootProgress]);
+  useEffect(() => {
+    if (state.macro.status !== "scanning" || state.experiment.contract?.status !== "completed" ||
+        state.ldv.scanActive || state.ldv.scanResult?.id !== state.macro.ldvScanId) return;
+    dispatch({ type: "COMPLETE_MACRO", validation: validationResult.overall });
+  }, [state.macro.status, state.macro.ldvScanId, state.experiment.contract?.status, state.ldv.scanActive, state.ldv.scanResult?.id, validationResult.overall]);
   const unresolved = state.alarms.filter(a => !a.acknowledged).length;
   const active = state.ui.active;
   const [fx, setFx] = useState(() => ({ reduced: typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches, hide: false, compact: (() => { try { return localStorage.getItem("sphere.density") === "compact"; } catch { return false; } })() }));
@@ -2014,6 +2114,20 @@ function LabCopilot({ state, dispatch, validationResult, f0 }) {
   const passN = rules.filter(r => r.status === "Pass").length;
   const score = Math.round(passN * 100 / rules.length);
   const recs = state.experiment.records || [];
+  const macro = state.macro;
+  const macroRunning = macro.status === "preparing" || macro.status === "scanning";
+  const macroRecords = macro.status === "scanning"
+    ? recs.filter(r => r.runId === state.experiment.id).length
+    : macro.result?.records || 0;
+  const macroSteps = [
+    ["Facility power", !!state.facility.power],
+    ["Clock reference", !!state.clock.locked],
+    ["Chamber conditions", state.chamber.pressure < 1e-3 && Math.abs(state.chamber.temperature - state.chamber.targetTemp) < 0.03],
+    ["VNA calibration and RF", !!(state.vna.power && state.vna.rf && state.vna.calibrated)],
+    ["Oscilloscope capture", !!(state.scope.power && !state.scope.booting && state.scope.running)],
+    ["LDV 3D scan", !!(macro.ldvScanId && state.ldv.scanResult?.id === macro.ldvScanId && !state.ldv.scanActive)],
+    ["Stage scan and saved records", macro.status === "completed"]
+  ] as const;
   const [answer, setAnswer] = useState("");
   const ask = q => {
     if (q === "why") {
@@ -2057,6 +2171,62 @@ function LabCopilot({ state, dispatch, validationResult, f0 }) {
           <div className="mt-3 min-h-[44px] rounded bg-black/40 p-3 text-xs leading-relaxed text-sky-100" aria-live="polite">{answer || "Pick a question above."}</div>
         </div>
       </div>
+      <section className="rounded-lg border border-sky-500/30 bg-sky-950/10 p-4" aria-labelledby="copilot-macro-title">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-300"><FlaskConical size={18} /></div>
+          <div className="min-w-0 flex-1">
+            <h2 id="copilot-macro-title" className="text-sm font-bold text-zinc-100">Full laboratory macro</h2>
+            <p className="mt-1 text-xs leading-relaxed text-zinc-400">One click prepares the chamber, clock, VNA, oscilloscope and LDV, waits for valid conditions, runs a randomized five-position acquisition, and saves the results to Runs and the Notebook. Existing records are retained.</p>
+          </div>
+          {macroRunning ? (
+            <button onClick={() => dispatch({ type: "CANCEL_MACRO" })} className="flex items-center gap-1.5 rounded border border-rose-500/50 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/10">
+              <Square size={13} /> Stop macro
+            </button>
+          ) : (
+            <button
+              onClick={() => dispatch({ type: "START_MACRO" })}
+              disabled={state.experiment.active || state.ldv.scanActive}
+              className="flex items-center gap-1.5 rounded bg-sky-500 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Play size={13} /> Run full macro
+            </button>
+          )}
+        </div>
+        {macro.status !== "idle" && (
+          <div className="mt-4 rounded border border-zinc-800 bg-black/30 p-3" role="status" aria-live="polite">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className={`text-xs font-bold uppercase tracking-wide ${macro.status === "completed" ? "text-emerald-300" : macro.status === "blocked" || macro.status === "cancelled" ? "text-amber-300" : "text-sky-300"}`}>
+                {macro.status === "preparing" ? "Preparing" : macro.status === "scanning" ? "Running" : macro.status}
+              </div>
+              <div className="text-[11px] text-zinc-400">{macro.message}</div>
+            </div>
+            {macro.status === "scanning" && (
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <div>
+                  <div className="mb-1 flex justify-between text-[10px] text-zinc-400"><span>VNA acquisitions</span><span>{macroRecords}/{state.experiment.scanPath.length}</span></div>
+                  <div className="h-1.5 overflow-hidden rounded bg-zinc-800"><div className="h-full bg-sky-400 transition-all" style={{ width: `${Math.round((state.experiment.scanProgress || 0) * 100)}%` }} /></div>
+                </div>
+                <div>
+                  <div className="mb-1 flex justify-between text-[10px] text-zinc-400"><span>LDV 3D scan</span><span>{Math.round((state.ldv.scanProgress || 0) * 100)}%</span></div>
+                  <div className="h-1.5 overflow-hidden rounded bg-zinc-800"><div className="h-full bg-violet-400 transition-all" style={{ width: `${Math.round((state.ldv.scanProgress || 0) * 100)}%` }} /></div>
+                </div>
+              </div>
+            )}
+            {macro.status === "completed" && macro.result && (
+              <div className="mt-2 text-xs text-emerald-200">
+                Run {macro.result.runId}: {macro.result.records} measurement{macro.result.records === 1 ? "" : "s"}, {macro.result.validRecords} valid · LDV {macro.result.ldvVerdict} · {macro.result.validation}
+              </div>
+            )}
+            <div className="mt-3 grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+              {macroSteps.map(([label, done]) => (
+                <div key={label} className={`flex items-center gap-1.5 text-[10px] ${done ? "text-emerald-300" : "text-zinc-500"}`}>
+                  <CheckCircle2 size={12} /> {label}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
         <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Suggested next steps</div>
         {tips.length === 0 ? <div className="text-sm text-emerald-300">Nothing to fix. Carry on.</div> : (
