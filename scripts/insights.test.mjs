@@ -69,7 +69,16 @@ const near = (a, b, e = 1e-9) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`)
 { const fs = await import('node:fs'); const Route = await ld('features/route.ts');
   assert.equal(Route.pageFromHash('#/insights'), 'insights'); assert.equal(Route.pageFromHash('#/settings'), 'settings');
   const app = fs.readFileSync(new URL('../src/MetrologyLabV3.tsx', import.meta.url), 'utf8');
-  for (const needle of ['["insights", "Insights"', '["settings", "Display & Units"', 'active === "insights" && <Insights', 'active === "settings" && <SettingsPage', '<TemplatePicker', 'installDisplaySettings()']) assert.ok(app.includes(needle), needle);
+  for (const needle of ['["insights", "Insights"', '["settings", "Display & Units"', 'active === "insights" && <Suspense', '<Insights records=', 'active === "settings" && <Suspense', '<SettingsPage />', 'lazy(() => import(\'./insights/Insights\')', '<TemplatePicker', 'installDisplaySettings()']) assert.ok(app.includes(needle), needle);
   const tl = fs.readFileSync(new URL('../src/features/Timeline.tsx', import.meta.url), 'utf8'); assert.ok(tl.includes('useUnits()') && tl.includes('telemetrySnapshot'));
   assert.ok(app.includes('const fmtPressureShown') && app.includes('const fmtPressure = p =>') && app.includes('fmtTemp(state.chamber.temperature)') && app.includes('useUnits(); //'), 'header and status displays follow the chosen units');
   console.log('PASS the Insights and Display & Units pages, templates and units are wired into the app'); }
+// colour-vision-safe alert colours: distinct levels, no red/green pair, and used by the alert glyph and the live window
+{ const A = await ld('features/alerts.ts');
+  assert.equal(A.alertHex('error'), A.ALERT_HEX.error); assert.equal(A.alertHex('running', 'cvd'), '#56b4e9');
+  const cvd = Object.values(A.ALERT_HEX_CVD); assert.equal(new Set(cvd).size, cvd.length, 'every level has its own colour');
+  assert.ok(!cvd.includes('#34d399') && !cvd.includes('#fb7185'), 'the default green and red are replaced');
+  const fs2 = await import('node:fs'); const rd = f => fs2.readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
+  assert.ok(rd('features/AlertBadge.tsx').includes('alertHex(level, useDisplay().palette)')); assert.ok(!/ALERT_HEX\./.test(rd('features/LiveOperationWindow.tsx')));
+  assert.ok(rd('overview/LabOverview.tsx').includes('useUnits()') && rd('overview/LabOverview.tsx').includes('fmtTemperature(c.temperature, getUnits().temperature)'));
+  console.log('PASS alert colours follow the palette setting and the Overview follows the chosen units'); }

@@ -1,3 +1,5 @@
+import { fmtTemperature, getUnits } from '../features/units';
+import { useUnits } from '../features/useUnits';
 import React, { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, CheckCircle2, ChevronRight, Cpu, Power, Radio, ScanLine,
@@ -97,6 +99,7 @@ const Bar = ({ value, color }: { value: number; color?: string }) => (
 
 /* ───────── Component ───────── */
 function LabOverview({ state, dispatch, lab, quality, reduced }: Props) {
+  useUnits(); // re-render when the display units change
   const prefs = useMemo(loadPrefs, []);
   const [selected, setSelected] = useState<string>('chamber');
   const [layers, setLayers] = useState<Record<RouteKind, boolean>>({ ...ALL_LAYERS });
@@ -173,7 +176,7 @@ function LabOverview({ state, dispatch, lab, quality, reduced }: Props) {
       main: lab.fmtPressure(c.pressure),
       reads: [
         { l: 'Pressure', h: 'ov.pressure', v: `${pressureTrend} ${lab.fmtPressure(c.pressure)}`, tone: c.pressure < 1e-3 ? 'ok' : c.pressure > 700 ? '' : 'warn' },
-        { l: 'Temperature', h: 'ov.temperature', v: `${c.temperature.toFixed(2)} °C`, tone: tempSteady ? 'ok' : 'warn' },
+        { l: 'Temperature', h: 'ov.temperature', v: fmtTemperature(c.temperature, getUnits().temperature), tone: tempSteady ? 'ok' : 'warn' },
         { l: 'Door', h: 'ov.door', v: c.doorOpen ? 'OPEN' : 'CLOSED', tone: c.doorOpen ? 'warn' : '' },
       ],
       viz: <Bar value={pressureFrac} color="#7dd3fc" />,
@@ -267,7 +270,7 @@ function LabOverview({ state, dispatch, lab, quality, reduced }: Props) {
     { k: 'ov.kpi_alarms', label: 'Open alarms', icon: AlertTriangle, val: String(openAlarms.length), sub: `${criticalCount} critical`, hex: criticalCount ? TONE_HEX.bad : openAlarms.length ? TONE_HEX.warn : TONE_HEX.ok },
     { k: 'ov.kpi_clock', label: 'Reference clock', icon: TimerReset, val: clockText, sub: '10 MHz reference', subHelp: 'ov.ref10', hex: TONE_HEX[clockTone as 'ok' | 'warn' | 'bad' | 'off'] },
     { k: 'ov.kpi_vacuum', label: 'Vacuum', icon: Wind, val: lab.fmtPressure(c.pressure), sub: c.vent ? 'Venting ↑' : c.roughing || c.turbo ? 'Pumping down ↓' : 'Holding →', hex: c.pressure < 1e-3 ? TONE_HEX.ok : c.roughing || c.turbo ? TONE_HEX.info : TONE_HEX.off },
-    { k: 'ov.kpi_temp', label: 'Temperature', icon: Thermometer, val: `${c.temperature.toFixed(2)} °C`, sub: `${drift >= 0 ? '+' : ''}${drift.toFixed(2)} °C from setpoint`, subHelp: 'ov.setpoint', hex: tempSteady ? TONE_HEX.ok : TONE_HEX.warn },
+    { k: 'ov.kpi_temp', label: 'Temperature', icon: Thermometer, val: fmtTemperature(c.temperature, getUnits().temperature), sub: `${drift >= 0 ? '+' : ''}${drift.toFixed(2)} °C from setpoint`, subHelp: 'ov.setpoint', hex: tempSteady ? TONE_HEX.ok : TONE_HEX.warn },
     { k: 'ov.kpi_stage', label: 'Stage position', icon: Target, val: `${num(st.x)} · ${num(st.y)} · ${num(st.z)}`, sub: 'X · Y · Z in mm', subHelp: 'ov.mm', hex: st.moving || st.settling ? TONE_HEX.warn : st.homed ? TONE_HEX.ok : TONE_HEX.warn },
     { k: 'ov.kpi_quality', label: 'Data quality', icon: CheckCircle2, val: qualityText, sub: `${accepted} ok · ${suspect} suspect · ${failed} failed`, hex: !records.length ? TONE_HEX.off : /pass|valid|good/i.test(qualityText) ? TONE_HEX.ok : /fail/i.test(qualityText) ? TONE_HEX.bad : TONE_HEX.warn },
     { k: 'ov.kpi_sim', label: 'Simulation clock', icon: Activity, val: `${Math.floor(f.simulationTime)} s`, sub: `${f.speed}× speed`, subHelp: 'ov.sim_speed', hex: TONE_HEX.info },

@@ -3,8 +3,9 @@ import { ChevronDown, ChevronUp, MonitorPlay } from 'lucide-react';
 import './live.css';
 import { getActivities, subscribeActivity, type Activity } from './activity';
 import { getEquipmentUse, type EquipId } from './equipment';
-import { ALERT_HEX, getAlert, type AlertLevel } from './alerts';
+import { alertHex, getAlert, type AlertLevel } from './alerts';
 import { AlertGlyph } from './AlertBadge';
+import { getDisplay } from './displaySettings';
 import { ActionScene } from './ActionScene';
 import { LabClock, useWallClock } from './LabClock';
 import { getLabState } from '../state/labStores';
@@ -30,7 +31,7 @@ const NODES: NodeDef[] = [
   { id: 'daq', equip: 'daq', x: 120, y: 182, w: 120, h: 30, label: 'WORKSTATION', sub: 'records' },
 ];
 const CHAMBER_EQUIP = new Set<EquipId>(['door', 'vent', 'thermo', 'faraday', 'isolation', 'stage']);
-const levelStroke = (on: boolean, level: AlertLevel, active: boolean) => (level === 'error' ? ALERT_HEX.error : level === 'stuck' ? ALERT_HEX.stuck : level === 'attention' ? ALERT_HEX.attention : !on ? '#2a3646' : active ? '#34d399' : '#3d82b0');
+const levelStroke = (on: boolean, level: AlertLevel, active: boolean) => (level === 'error' || level === 'stuck' || level === 'attention' ? alertHex(level, getDisplay().palette) : !on ? '#2a3646' : active ? '#34d399' : '#3d82b0');
 
 function Diagram({ s, focus, anim }: { s: any; focus: EquipId | null; anim: string | null }) {
   const c = s.chamber, st = s.stage, v = s.vna, l = s.ldv, sc = s.scope, ck = s.clock;
@@ -92,7 +93,7 @@ function Diagram({ s, focus, anim }: { s: any; focus: EquipId | null; anim: stri
         return (
           <g key={n.id} className={`lw-node ${on ? 'on' : 'off'} ${active ? 'active' : ''} ${isHot ? 'hot' : ''}`} opacity={on || level !== 'idle' ? 1 : 0.55}>
             <rect x={n.x} y={n.y} width={n.w} height={n.h} rx="6" fill="#0c1621" stroke={stroke} strokeWidth={isHot ? 2.6 : 1.6} />
-            <circle cx={n.x + 9} cy={n.y + 10} r="3" className={`lw-led ${active ? 'blink' : ''}`} fill={on ? (level === 'error' ? ALERT_HEX.error : '#22c55e') : '#475569'} />
+            <circle cx={n.x + 9} cy={n.y + 10} r="3" className={`lw-led ${active ? 'blink' : ''}`} fill={on ? (level === 'error' ? alertHex('error', getDisplay().palette) : '#22c55e') : '#475569'} />
             <text x={n.x + 16} y={n.y + 13} fontSize="8.5" fontWeight="700" fill="#dbe8f6" fontFamily="ui-monospace,monospace">{n.label}</text>
             <text x={n.x + 8} y={n.y + n.h - 7} fontSize="7" fill="#8fa3b8" fontFamily="ui-monospace,monospace">{n.id === 'scope' ? `${Object.values(sc.channels || {}).filter((q: any) => q.enabled).length} ch · ${sc.triggerState || 'off'}` : n.id === 'ldv' ? (l.scanActive ? `scan ${Math.round((l.scanProgress || 0) * 100)}%` : l.shutter ? 'laser ON' : n.sub) : n.id === 'daq' ? `${(s.experiment.records || []).length} records` : n.sub}</text>
             {spin && <g transform={`translate(${n.x + n.w - 14} ${n.y + n.h / 2})`}><g className={n.id === 'turbo' ? 'lw-fan fast' : 'lw-fan'}>{[0, 60, 120].map(a => <rect key={a} x="-8" y="-1.2" width="16" height="2.4" rx="1" fill="#cbd5e1" transform={`rotate(${a})`} />)}</g></g>}
@@ -102,7 +103,7 @@ function Diagram({ s, focus, anim }: { s: any; focus: EquipId | null; anim: stri
         );
       })}
       {anim === 'power' && <rect x="0" y="0" width="360" height="218" fill="#fbbf24" className="lw-flash" />}
-      {pumpLevel === 'error' && <text x="316" y="172" textAnchor="middle" fontSize="8" fill={ALERT_HEX.error} fontFamily="ui-monospace,monospace" className="lw-blink">PUMP FAULT</text>}
+      {pumpLevel === 'error' && <text x="316" y="172" textAnchor="middle" fontSize="8" fill={alertHex('error', getDisplay().palette)} fontFamily="ui-monospace,monospace" className="lw-blink">PUMP FAULT</text>}
     </svg>
   );
 }

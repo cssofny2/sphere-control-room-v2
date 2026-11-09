@@ -4,6 +4,8 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- The colour-vision-safe palette now also recolours the alert glyphs and the live operation window (Okabe-Ito blue, orange, vermillion and yellow), the Lab Overview follows the chosen display units, and the Insights and Display & Units pages load on demand.
+
 - Display units now also apply to the header status bar, the chamber and calibration panels and the 3D chamber labels (the simulator's own messages and saved notes stay in Torr and °C). Added a regression test that concurrent sends of one mail reply produce a single email.
 
 - Ten additions. **Insights** page (Research): (1) Allan deviation with a noise-type reading, (2) drift trend and verdict, (3) robust outlier screen of repeats, (4) per-position uncertainty budget with pooled repeatability and a drift term, (5) conformity to a target ± tolerance using the whole expanded interval (pass, fail or indeterminate), (6) journal search and filtered CSV export (formula-safe), (7) a printable, fully escaped HTML lab report. **Display & Units** page: (8) pressure (Torr, Pa, mbar) and temperature (°C, K, °F) display units, applied to the Live Timeline and Insights; (9) high contrast, text size, reduced motion and a colour-vision-safe palette. (10) **Scan templates** on Experiment Runs fill the plan builder with reviewed starting points. Exports and the simulator stay in Torr, °C and Hz.
