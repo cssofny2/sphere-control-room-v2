@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { LOC1_FIELDS, LOC1_SCHEMA_ID, LOC1_SCHEMA_VERSION } from './loc1';
+import { simulatePositionRun, type PositionScenario, type PositionSimulationRun } from './positionSimulation';
 
 type Props = { state: any; dispatch: (action: any) => void; records: any[]; onExportJson: () => void; onExportManifest: () => void };
-type Tab = 'overview' | 'metrology' | 'controls' | 'custody' | 'roadmap';
+type Tab = 'overview' | 'position' | 'metrology' | 'controls' | 'custody' | 'roadmap';
+type PositionModuleMode = PositionScenario | 'historical_claim_reconstruction';
 
 const card = 'rounded-lg border border-zinc-800 bg-zinc-950 p-4';
 const label = 'block text-[10px] font-bold uppercase tracking-widest text-zinc-500';
@@ -46,6 +48,13 @@ export default function ProtocolWorkspace({ state, dispatch, records, onExportJs
   const [signoffs, setSignoffs] = useState<Record<string, boolean>>({});
   const [reviewerVotes, setReviewerVotes] = useState(0);
   const [strict, setStrict] = useState(!!state.protocol?.osfStrict);
+  const [positionMode, setPositionMode] = useState<PositionModuleMode>('null');
+  const [hypothesisShiftPpm, setHypothesisShiftPpm] = useState(1);
+  const [temperatureDifferenceK, setTemperatureDifferenceK] = useState(0.02);
+  const [positionSeed, setPositionSeed] = useState(104729);
+  const [positionReplicates, setPositionReplicates] = useState(5);
+  const [positionRun, setPositionRun] = useState<PositionSimulationRun | null>(null);
+  const [positionError, setPositionError] = useState('');
 
   const f0 = Number(state.vna.center) || 230500;
   const uc = Math.sqrt((23 * uThermal) ** 2 + (f0 * uClock / 1e9) ** 2 + uBaseline ** 2 + 2 * correlation * 23 * uThermal * uBaseline);
@@ -101,7 +110,62 @@ export default function ProtocolWorkspace({ state, dispatch, records, onExportJs
       setCustodyError(error instanceof Error ? error.message : 'Could not verify the custody key.');
     }
   };
-  const tabs: [Tab, string][] = [['overview', 'Overview'], ['metrology', 'Metrology'], ['controls', 'Controls'], ['custody', 'Integrity & custody'], ['roadmap', 'Governance & roadmap']];
+  const tabs: [Tab, string][] = [['overview', 'Overview'], ['position', 'A/B simulation'], ['metrology', 'Metrology'], ['controls', 'Controls'], ['custody', 'Integrity & custody'], ['roadmap', 'Governance & roadmap']];
+
+  const runPositionSimulation = () => {
+    if (positionMode === 'historical_claim_reconstruction') return;
+    setPositionError('');
+    try {
+      setPositionRun(simulatePositionRun({
+        mode: positionMode,
+        seed: positionSeed,
+        replicatesPerPosition: positionReplicates,
+        nominalTestFrequencyHz: 230500,
+        nominalReferenceFrequencyHz: 230500,
+        fitNoiseStdHz: 0.02,
+        sharedClockNoiseStdPpb: 10,
+        hypothesisShiftPpm,
+        temperatureDifferenceK: positionMode === 'artifact_challenge' ? temperatureDifferenceK : 0,
+        thermalCoefficientPpmPerK: -100,
+        maxTemperatureDifferenceK: 0.01,
+        clockLocked: Boolean(state.clock?.locked),
+      }));
+    } catch (error) {
+      setPositionRun(null);
+      setPositionError(error instanceof Error ? error.message : 'Could not generate the synthetic A/B run.');
+    }
+  };
+
+  const downloadPositionRun = () => {
+    if (!positionRun) return;
+    const payload = {
+      watermark: 'SYNTHETIC EDUCATIONAL DATA — NOT EXPERIMENTAL EVIDENCE',
+      protocolStatus: 'draft simulation profile; registration not verified',
+      geometry: {
+        coordinateFrame: 'chamber-local; coordinates identify sphere centers',
+        positionA_m: [-0.2, 0, 0.15],
+        positionB_m: [0.2, 0, 0.15],
+        separation_m: 0.4,
+        referencePosition_m: [0, 0.2, 0.15],
+        geometryStatus: 'proposed educational coordinates; not verified apparatus settings',
+      },
+      assumptions: {
+        nominalFrequencyHz: 230500,
+        fitNoiseStdHz: 0.02,
+        thermalCoefficientPpmPerK: -100,
+        thermalCoefficientStatus: 'illustrative only; not a calibrated copper property',
+        replicatesAreIndependentBlocks: false,
+      },
+      configuration: positionRun.configuration,
+      run: positionRun,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `sphere-position-ab-synthetic-seed-${positionRun.seed}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-4">
@@ -173,6 +237,99 @@ export default function ProtocolWorkspace({ state, dispatch, records, onExportJs
           <div className="mt-3 flex flex-wrap gap-1">{LOC1_FIELDS.map(field => <code key={field} className="rounded bg-zinc-900 px-1.5 py-1 text-[9px] text-sky-200">{field}</code>)}</div>
           <button onClick={onExportJson} className="mt-3 rounded border border-sky-500/50 px-3 py-2 text-xs font-bold text-sky-200">Download LOC-1 JSON records</button>
         </section>
+      </>}
+
+      {tab === 'position' && <>
+        <section className={card}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold">Position A/B resonance simulator</h2>
+              <p className="mt-1 max-w-4xl text-[11px] leading-relaxed text-zinc-400">This is an isolated, deterministic teaching model—not a physical test or an approved LOC-1 configuration. The default has no intrinsic location effect. Draft geometry and noise values are illustrative; only the 0.400 m separation is stated in the accessible proposal. Runs stay out of the main experiment ledger.</p>
+            </div>
+            <span className="rounded border border-amber-500/60 bg-amber-950 px-3 py-1.5 text-[10px] font-black tracking-widest text-amber-200">SYNTHETIC · DRAFT PROFILE</span>
+          </div>
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <section className="rounded border border-zinc-800 bg-black/20 p-3">
+              <h3 className="text-xs font-bold text-zinc-200">Proposed center coordinates</h3>
+              <p className="mt-1 text-[10px] text-zinc-500">Chamber-local XYZ in meters · same test artifact and moving carrier · reference remains fixed.</p>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-[11px]">
+                  <thead className="text-zinc-500"><tr>{['Point', 'X (m)', 'Y (m)', 'Z (m)', 'Role'].map(item => <th key={item} className="border-b border-zinc-800 p-2">{item}</th>)}</tr></thead>
+                  <tbody>
+                    <tr>{['A', '−0.200', '0.000', '0.150', 'test sphere'].map((item, index) => <td key={index} className="border-b border-zinc-900 p-2 font-mono text-zinc-300">{item}</td>)}</tr>
+                    <tr>{['B', '+0.200', '0.000', '0.150', 'same test sphere'].map((item, index) => <td key={index} className="border-b border-zinc-900 p-2 font-mono text-zinc-300">{item}</td>)}</tr>
+                    <tr>{['R', '0.000', '+0.200', '0.150', 'fixed reference*'].map((item, index) => <td key={index} className="p-2 font-mono text-zinc-300">{item}</td>)}</tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-[10px] text-zinc-500">A/B center-to-center separation: <strong className="text-sky-200">0.400 m</strong>. *Reference coordinates and all XYZ coordinates are draft choices, not registered settings.</p>
+            </section>
+            <section className="rounded border border-zinc-800 bg-black/20 p-3">
+              <h3 className="text-xs font-bold text-zinc-200">Scenario</h3>
+              <label className="mt-2 block text-[11px] text-zinc-400">Training mode
+                <select className={input} value={positionMode} onChange={event => {
+                  setPositionMode(event.target.value as PositionModuleMode);
+                  setPositionRun(null);
+                  setPositionError('');
+                }}>
+                  <option value="null">Null baseline · no injected location effect</option>
+                  <option value="artifact_challenge">Artifact challenge · thermal gradient</option>
+                  <option value="hypothetical_injection">Hypothetical location-effect injection</option>
+                  <option value="historical_claim_reconstruction">Historical replay claim · sequence only</option>
+                </select>
+              </label>
+              {positionMode === 'hypothetical_injection' && <Field title="Injected B shift (ppm; synthetic only)" value={hypothesisShiftPpm} min={-100} max={100} step="0.1" onChange={value => { if (!Number.isFinite(value)) return; setHypothesisShiftPpm(Math.max(-100, Math.min(100, value))); setPositionRun(null); }} />}
+              {positionMode === 'artifact_challenge' && <Field title="B minus A temperature (K; illustrative)" value={temperatureDifferenceK} min={-1} max={1} step="0.001" onChange={value => { if (!Number.isFinite(value)) return; setTemperatureDifferenceK(Math.max(-1, Math.min(1, value))); setPositionRun(null); }} />}
+              {positionMode !== 'historical_claim_reconstruction' && <div className="mt-2 grid grid-cols-2 gap-3">
+                <Field title="Seed" value={positionSeed} min={0} max={4294967295} step="1" onChange={value => { if (!Number.isFinite(value)) return; setPositionSeed(Math.floor(Math.max(0, Math.min(4294967295, value)))); setPositionRun(null); }} />
+                <Field title="Repeats per position" value={positionReplicates} min={1} max={20} step="1" onChange={value => { if (!Number.isFinite(value)) return; setPositionReplicates(Math.max(1, Math.min(20, Math.floor(value)))); setPositionRun(null); }} />
+              </div>}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Metric name="Nominal resonance" value="230,500" unit="Hz · synthetic" />
+                <Metric name="Fit noise" value="0.020" unit="Hz SD · illustrative" />
+                <Metric name="Thermal gate" value="0.010" unit="K · draft" />
+                <Metric name="Clock state" value={state.clock?.locked ? 'LOCKED' : 'UNLOCKED'} />
+              </div>
+              {positionMode === 'null' && <p className="mt-3 rounded border border-sky-900 bg-sky-950/30 p-2 text-[10px] text-sky-200">Intrinsic A/B shift is zero by default; random fit noise may still produce a nonzero observed contrast.</p>}
+              {positionMode === 'hypothetical_injection' && <p className="mt-3 rounded border border-amber-900 bg-amber-950/30 p-2 text-[10px] text-amber-200">A user-selected synthetic effect is not a prediction attributed to Bashar or an experimental finding.</p>}
+              {positionMode === 'artifact_challenge' && <p className="mt-3 rounded border border-amber-900 bg-amber-950/30 p-2 text-[10px] text-amber-200">Illustrative coefficient: −100 ppm/K. The configured B–A temperature difference is checked against the draft 0.010 K gate; flagged data are retained.</p>}
+                  {positionError && <p role="alert" className="mt-3 text-xs text-rose-300">{positionError}</p>}
+            </section>
+          </div>
+          {positionMode === 'historical_claim_reconstruction' ? <section className="mt-4 rounded border border-amber-900/70 bg-amber-950/20 p-3">
+            <h3 className="text-xs font-bold text-amber-200">Historical claim reconstruction · not a motion simulation</h3>
+            <p className="mt-1 text-[10px] text-zinc-400">The attributed account describes measuring at A, measuring at B, returning the sphere to A, then replaying the B vibration and claiming motion toward B. This module does not generate a replay signal or sphere motion; the claim is not verified experimental evidence.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-mono text-zinc-300">{['Measure A', 'Measure B', 'Return to A', 'Replay B (claim)', 'Reported motion (unverified)'].map((step, index) => <span key={step} className="rounded border border-zinc-700 px-2 py-1">{index > 0 && <span className="mr-2 text-zinc-600">→</span>}{step}</span>)}</div>
+          </section> : <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={runPositionSimulation} className="rounded border border-sky-500/60 bg-sky-950/50 px-3 py-2 text-xs font-bold text-sky-200">Generate synthetic A/B observations</button>
+            <button onClick={downloadPositionRun} disabled={!positionRun} className="rounded border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40">Download synthetic JSON</button>
+          </div>}
+        </section>
+        {positionRun && <section className={card}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><h2 className="text-sm font-bold">Synthetic run · seed {positionRun.seed}</h2><p className="mt-1 text-[10px] text-zinc-500">Per-visit repeats are not independent placement blocks. This summary is descriptive only; it is not an inferential test.</p></div>
+            <span className={`rounded border px-2 py-1 text-[10px] font-bold ${positionRun.qualityFlags.length ? 'border-amber-700 text-amber-200' : 'border-emerald-800 text-emerald-200'}`}>{positionRun.qualityFlags.length ? 'FLAGGED · RETAINED' : 'QUALITY GATES PASS · SIMULATED'}</span>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <Metric name="Mean normalized ratio at A" value={positionRun.meanRatioPpm.A.toFixed(4)} unit="ppm" />
+            <Metric name="Mean normalized ratio at B" value={positionRun.meanRatioPpm.B.toFixed(4)} unit="ppm" />
+            <Metric name="Observed Δ B−A" value={positionRun.contrastPpm.toFixed(4)} unit="ppm · synthetic" />
+          </div>
+          {positionRun.qualityFlags.length > 0 && <p role="alert" className="mt-3 rounded border border-amber-800 bg-amber-950/30 p-2 text-[10px] text-amber-200">Quality flags retained: {positionRun.qualityFlags.join(', ')}. A flagged contrast is not a valid location-effect result.</p>}
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-[10px]">
+              <thead className="text-zinc-500"><tr>{['Position', 'Repeat', 'Test frequency (Hz)', 'Reference frequency (Hz)', 'Normalized ratio (ppm)', 'Quality flags'].map(item => <th key={item} className="border-b border-zinc-800 p-2">{item}</th>)}</tr></thead>
+              <tbody>{positionRun.observations.map(item => <tr key={`${item.position}-${item.replicate}`}>
+                <td className="border-b border-zinc-900 p-2 font-mono">{item.position}</td>
+                <td className="border-b border-zinc-900 p-2 font-mono">{item.replicate}</td>
+                <td className="border-b border-zinc-900 p-2 font-mono">{item.testFrequencyHz.toFixed(5)}</td>
+                <td className="border-b border-zinc-900 p-2 font-mono">{item.referenceFrequencyHz.toFixed(5)}</td>
+                <td className="border-b border-zinc-900 p-2 font-mono">{item.normalizedRatioPpm.toFixed(5)}</td>
+                <td className="border-b border-zinc-900 p-2 text-amber-200">{item.qualityFlags.join(', ') || '—'}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </section>}
       </>}
 
       {tab === 'metrology' && <>
