@@ -33,6 +33,7 @@ The compiled production files are written to `dist/`.
 - `src/simulation/model.ts`: the teaching resonance model (`trueFrequency`) and the noisy S11 trace (`buildSweep`)
 - `src/simulation/measurement.ts`: Lorentzian fit of a trace; resonance, Q and their uncertainties
 - `src/simulation/stats.ts`: per-position repeatability statistics
+- `src/protocol/positionSimulation.ts`: seeded, synthetic A/B ratio scenarios for null, thermal-artifact and hypothetical-effect training
 - `src/index.css`: Tailwind (v4) import and global styles
 - `vite.config.ts`: Vite configuration
 
@@ -66,6 +67,7 @@ The repository's `vercel.json` selects Vite, installs the committed lockfile wit
 - **Bundles and import:** Experiment Runs exports a checksummed `.sphere.json` bundle and imports bundles or CSV files after validation and a preview. The re-check rebuilds each record's trace from its saved settings and compares the resonance; it verifies recorded numbers and is not a full replay of a run.
 - **Saved sessions and run library:** measurements and notebook entries are autosaved in this browser (IndexedDB) and can be resumed after a reload; each run is archived in the Run library on Experiment Runs. Data never leaves the browser. If the browser blocks storage the app still works but nothing is kept after the page closes.
 - **Measurement engine:** every sweep is fitted with a Lorentzian dip (`s = a + d / (1 + ((f − f₀)/γ)²)`), so f₀ and Q are measured from the trace instead of read off the lowest sample, and each carries a standard uncertainty from the fit covariance. The Experiment Runs page shows repeatability per position (mean, SD, SEM, standard uncertainty u and a 95 % expanded uncertainty U). Retries after a failed quality check count once, by their latest attempt. A fit that fails (no dip, resonance off the sweep, dip narrower than the point spacing) is recorded as failed, fails the quality gate and is excluded from the statistics. The uncertainty covers random noise only (Type A); clock, calibration and stage-position errors are not modelled. A 1001-point fit takes about 1–2 ms, so it runs on the UI thread.
+- **Protocol A/B training:** the LOC-1 workspace includes a reproducible synthetic null baseline, a flagged thermal-confound challenge, a user-sized hypothetical effect, and a transcript-derived replay sequence shown without simulating claimed motion. Proposed coordinates and noise coefficients are explicitly draft assumptions; generated runs stay separate from the experiment ledger and export with synthetic provenance.
 
 ## Regression tests
 

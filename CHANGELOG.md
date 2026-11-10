@@ -4,6 +4,8 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Added an isolated A/B resonance training module to the LOC-1 workspace: deterministic synthetic null, thermal-artifact and hypothetical-injection scenarios, draft center coordinates, quality flags, displayed observations and a synthetic JSON export. Historical replay is represented as a sourced claim sequence only; no sphere motion or physical effect is simulated.
+
 - Added a five-tier simulator launcher and saved difficulty preference, high-contrast dropdown styling, reduced decorative motion and a denser glass-style workspace. The engineering twin now has a Three.js renderer, a light background, a dedicated A/B-platform focus with raycast obstruction fading, plus the classic SVG fallback. A separate window can host the live twin. Insights can compare saved/current runs in a descriptive, local report. The hardware replay API is design-only; no physical output control is implemented.
 
 - The colour-vision-safe palette now also recolours the alert glyphs and the live operation window (Okabe-Ito blue, orange, vermillion and yellow), the Lab Overview follows the chosen display units, and the Insights and Display & Units pages load on demand.
