@@ -22,7 +22,7 @@ export const EQUIP_COLOR: Record<EquipGroup, string> = { power: '#fbbf24', refer
 const fmtP = (p: number) => (p >= 10 ? `${p.toFixed(1)} Torr` : `${p.toExponential(1)} Torr`);
 
 export function getEquipmentUse(s: any): EquipUse[] {
-  const c = s.chamber, v = s.vna, l = s.ldv, sc = s.scope, ck = s.clock, st = s.stage, ex = s.experiment || {}, f = s.facility;
+  const c = s.chamber, v = s.vna, l = s.ldv, sc = s.scope, ck = s.clock, ex = s.experiment || {}, f = s.facility;
   const dT = c.temperature - c.targetTemp;
   const clients = [v.power, sc.power, l.power].filter(Boolean).length;
   const chOn = Object.values(sc.channels || {}).filter((ch: any) => ch.enabled).length;
@@ -39,7 +39,7 @@ export function getEquipmentUse(s: any): EquipUse[] {
     { id: 'thermo', name: 'Thermostat', group: 'environment', page: 'chamber', on: !!c.thermostat, active: !!c.thermostat && Math.abs(dT) >= 0.03, doing: !c.thermostat ? 'Off: temperature drifts toward room temperature.' : Math.abs(dT) >= 0.03 ? `${dT > 0 ? 'Cooling' : 'Heating'} toward ${c.targetTemp.toFixed(1)} °C (${dT >= 0 ? '+' : ''}${dT.toFixed(2)} °C off).` : `Holding ${c.targetTemp.toFixed(1)} °C steady.`, why: 'Temperature shifts the resonance, so it must be steady.' },
     { id: 'faraday', name: 'Faraday cage', group: 'environment', page: 'chamber', on: !!c.faraday, active: !!c.faraday && !!f.power, doing: c.faraday ? 'Blocking outside radio noise from the measurement.' : 'Off: radio noise is reaching the instruments.', why: 'Keeps outside electrical noise out of the S11 trace.' },
     { id: 'isolation', name: 'Vibration isolation', group: 'environment', page: 'chamber', on: !!c.isolation, active: !!c.isolation && !!f.power, doing: c.isolation ? 'Floating the table so floor vibration cannot reach the sphere.' : 'Bypassed: floor vibration is reaching the sphere.', why: 'Keeps the laser and scope signals clean.' },
-    { id: 'stage', name: 'XYZ stage', group: 'motion', page: 'chamber', on: !!f.power, active: !!(st.moving || st.settling), doing: st.moving ? `Moving the sphere to X ${st.x.toFixed(1)}, Y ${st.y.toFixed(1)}, Z ${st.z.toFixed(1)} mm.` : st.settling ? 'Damping out the last vibration after a move.' : `Holding at X ${(st.actualX ?? st.x).toFixed(1)}, Y ${(st.actualY ?? st.y).toFixed(1)}, Z ${(st.actualZ ?? st.z).toFixed(1)} mm.`, why: 'Changing the sphere’s location is the experiment’s one deliberate variable.' },
+    { id: 'stage', name: 'Fixed A/B kinematic rail', group: 'motion', page: 'chamber', on: !!f.power, active: false, doing: 'Static positions A and B are modeled 0.400 m apart; legacy XYZ travel is not part of LOC-1.', why: 'The LOC-1 schematic compares fixed nodal positions A and B.' },
     { id: 'door', name: 'Chamber door', group: 'environment', page: 'chamber', on: !!c.doorOpen, active: !!c.doorOpen, doing: c.doorOpen ? 'Open: pumping, stage moves and scans are blocked.' : 'Closed and sealed.', why: 'Must be closed for vacuum and for any motion.' },
     { id: 'daq', name: 'Acquisition workstation', group: 'data', page: 'runs', on: !!f.power, active: !!(ex.active || ex.scanActive), doing: ex.scanActive ? `Running an automated scan (${Math.round((ex.scanProgress || 0) * 100)}%).` : ex.active ? `Recording run ${ex.id || ''}.` : `Idle. ${(ex.records || []).length} record(s) stored.`, why: 'Stores every measurement together with the conditions it was taken under.' },
   ];

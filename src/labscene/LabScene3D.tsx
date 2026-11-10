@@ -22,10 +22,11 @@ import { PART_BY_ID } from '../engineering/parts';
 import type { Focus, Mood } from './scientistBrain';
 import { getEquipmentUse, EQUIP_COLOR, type EquipUse } from '../features/equipment';
 import { AlertGlyph } from '../features/AlertBadge';
+import { toast } from '../features/toast';
 
 type Say = { text: string; focus: Focus; mood: Mood; kind: string };
 
-type Props = { stateRef: React.MutableRefObject<any>; reduced?: boolean; onHelp?: (key: string) => void; dispatch?: (action: any) => void; helpersRef?: React.MutableRefObject<Ctx['helpers'] | undefined>; command?: { cam?: string; mode?: string; n: number } };
+type Props = { stateRef: React.MutableRefObject<any>; origin?: 'SYNTHETIC' | 'IMPORTED' | 'LIVE QUALIFIED'; reduced?: boolean; onHelp?: (key: string) => void; dispatch?: (action: any) => void; helpersRef?: React.MutableRefObject<Ctx['helpers'] | undefined>; command?: { cam?: string; mode?: string; n: number } };
 type CamPreset = { pos: [number, number, number]; target: [number, number, number]; fov?: number };
 const PRESETS: Record<string, CamPreset> = {
   overview: { pos: [3.3, 3.1, 4.4], target: [-0.1, 0.95, -0.2] },
@@ -78,9 +79,9 @@ function loadSettings(): Settings {
 }
 const urlParam = (k: string) => { try { return new URLSearchParams(window.location.search).get(k); } catch { return null; } };
 
-const PIN_SHORT: Record<string, string> = { breaker: 'Power', clock: 'Clock', vna: 'VNA', rf: 'RF line', scope: 'Scope', ldv: 'Laser', rough: 'Roughing', turbo: 'Turbo', vent: 'Vent', thermo: 'Thermostat', faraday: 'Faraday', isolation: 'Isolation', stage: 'Stage', door: 'Door', daq: 'Workstation' };
+const PIN_SHORT: Record<string, string> = { breaker: 'Power', clock: 'Clock', vna: 'VNA', rf: 'RF line', scope: 'Scope', ldv: 'Laser', rough: 'Roughing', turbo: 'Turbo', vent: 'Vent', thermo: 'Thermostat', faraday: 'Faraday', isolation: 'Isolation', stage: 'A/B rail', door: 'Door', daq: 'Workstation' };
 
-function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef, command }: Props) {
+function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, dispatch, helpersRef, command }: Props) {
   const dispatchRef = useRef(dispatch); dispatchRef.current = dispatch;
   const helpersRefLocal = useRef<Ctx['helpers'] | undefined>(undefined); const helpers = helpersRef || helpersRefLocal;
   const wrap = useRef<HTMLDivElement>(null);
@@ -133,7 +134,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef, c
     renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap; renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true;   // shadows are refreshed every few frames (see the loop), not every frame
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.82; renderer.outputColorSpace = THREE.SRGBColorSpace;
     const canvas = renderer.domElement; canvas.setAttribute('role', 'img'); canvas.setAttribute('tabindex', '0');
-    canvas.setAttribute('aria-label', '3D laboratory: thermal-vacuum chamber with XYZ stage and sphere, instrument rack, wall phone and Dr. Wire the lab technician, who wears the S.P.H.E.R.E. logo on his coat. Drag to orbit, scroll to zoom. Click a part to look at it.');
+    canvas.setAttribute('aria-label', 'Conceptual 3D laboratory with a fixed A/B artifact rail, instrument rack, wall phone and Dr. Wire the lab technician. Drag to orbit, scroll to zoom. Click a part to look at it.');
     host.appendChild(canvas);
     let lab: Lab;
     try { lab = buildLab(renderer); } catch (e) { console.error(e); setFailed(true); host.removeChild(canvas); renderer.dispose(); return; }
@@ -220,7 +221,26 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef, c
     // photo: render once and save a PNG of exactly what is on screen
     api.current.snapshot = () => {
       if (eff === 'high' && composer) composer.render(); else renderer.render(lab.scene, activeCam);
-      canvas.toBlob(b => { if (!b) return; const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'sphere-lab.png'; a.click(); window.setTimeout(() => URL.revokeObjectURL(a.href), 4000); }, 'image/png');
+      const exportCanvas = document.createElement('canvas');
+      const footerHeight = Math.max(64, Math.round(canvas.width / 24));
+      exportCanvas.width = canvas.width;
+      exportCanvas.height = canvas.height + footerHeight;
+      const context = exportCanvas.getContext('2d');
+      if (!context) { toast('Could not export the lab image: canvas is unavailable.', 'warn'); return; }
+      context.drawImage(canvas, 0, 0);
+      context.fillStyle = '#090b0f';
+      context.fillRect(0, canvas.height, exportCanvas.width, footerHeight);
+      context.fillStyle = '#fde68a';
+      context.font = `${Math.min(16, Math.max(8, Math.round(canvas.width / 170)))}px system-ui, sans-serif`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText('Conceptual rendering of a proposed S.P.H.E.R.E. facility.', exportCanvas.width / 2, canvas.height + footerHeight * 0.23);
+      context.fillText('Not a photograph of existing equipment. Instrument appearance is approximate,', exportCanvas.width / 2, canvas.height + footerHeight * 0.5);
+      context.fillText('and equipment selections are provisional. Copper artifact not to scale.', exportCanvas.width / 2, canvas.height + footerHeight * 0.77);
+      exportCanvas.toBlob(b => {
+        if (!b) { toast('Could not encode the lab image.', 'warn'); return; }
+        const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'sphere-lab.png'; a.click(); window.setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      }, 'image/png');
     };
 
     let raf = 0, last = performance.now(), visible = true, brainAcc = 0;
@@ -305,7 +325,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef, c
     const onKey = (e: KeyboardEvent) => { if (e.altKey && e.code === 'KeyP' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); toggleCallRef.current(); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const views = useMemo(() => [['inside', 'Inside chamber'], ['overview', 'Overview'], ['chamber', 'Chamber'], ['stage', 'Stage close-up'], ['rack', 'Instrument rack'], ['bench', 'Workstation'], ['screens', 'Screens']], []);
+  const views = useMemo(() => [['inside', 'Inside chamber'], ['overview', 'Overview'], ['chamber', 'Chamber'], ['stage', 'A/B rail'], ['rack', 'Instrument rack'], ['bench', 'Workstation'], ['screens', 'Screens']], []);
   const activeRows = rows.filter(r => r.active);
 
   if (failed) return <div className="ls-root"><div className="ls-fallback">The realistic 3D lab needs WebGL, which isn't available in this browser. Use the Engineering model view instead.</div></div>;
@@ -333,6 +353,12 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef, c
         </div>
       )}
       <div className="ls-stage" ref={canvasHost} data-cctv-on={camView !== null ? '' : undefined}>
+        <span
+          data-origin-badge
+          aria-label={`Data source: ${origin}`}
+          className="absolute left-3 top-3 z-20 rounded border px-2 py-1 font-mono text-[10px] font-black tracking-widest shadow-lg"
+          style={{ pointerEvents: 'none', color: origin === 'IMPORTED' ? '#f5d0fe' : origin === 'LIVE QUALIFIED' ? '#bbf7d0' : '#fde68a', background: origin === 'IMPORTED' ? '#3b0764' : origin === 'LIVE QUALIFIED' ? '#064e3b' : '#451a03', borderColor: origin === 'IMPORTED' ? '#d946ef' : origin === 'LIVE QUALIFIED' ? '#34d399' : '#f59e0b' }}
+        >{origin}</span>
         <div ref={hoverEl} className="ls-hover" style={{ visibility: 'hidden' }} aria-hidden="true" />
         {bubble && showSci && (
           <div ref={bubbleEl} className={`ls-bubble${bubble.kind === 'alert' ? ' is-alert' : ''}${bubble.kind === 'joke' ? ' is-joke' : ''}`} data-lab-bubble data-kind={bubble.kind} data-text={bubble.text} style={{ visibility: 'hidden' }}>
@@ -366,7 +392,7 @@ function LabScene3D({ stateRef, reduced = false, onHelp, dispatch, helpersRef, c
             <button type="button" aria-label={`What is this? Help for ${part.label}`} onClick={() => onHelpRef.current?.(part.help)}>?</button>
             <button type="button" className="ls-x" aria-label="Close" onClick={() => setPart(null)}>×</button></div>
         )}
-        {!photo && camView === null && <div className="ls-note">Stage motion is exaggerated ×3 so you can see it. Drag to orbit · scroll to zoom · click a part to look at it.</div>}
+        {!photo && camView === null && <div className="ls-note">Fixed A/B kinematic mounts are 0.40 m apart; the schematic artifacts are not to scale. Drag to orbit · scroll to zoom · click a part to look at it.</div>}
         {!photo && <div className="ls-quality">{effQuality === 'high' ? 'High quality' : 'Low quality'}{qualitySel === 'auto' ? ' (auto)' : ''}</div>}
       </div>
       {!photo && <TechnicianPanel settings={settings} onSettings={changeSettings} log={api.current.tech?.log ?? []} onAsk={ask} />}

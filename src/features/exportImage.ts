@@ -1,6 +1,7 @@
 // Save a chart as a PNG. The pure helpers build the standalone SVG document; the DOM part draws it to a canvas.
 
 const XMLNS = 'http://www.w3.org/2000/svg';
+const EVIDENCE_CAPTION = 'Conceptual rendering of a proposed S.P.H.E.R.E. facility. Not a photograph of existing equipment. Instrument appearance is approximate, and equipment selections are provisional. Copper artifact not to scale.';
 
 export function safeFilename(title: string, ext = 'png'): string {
   const base = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'chart';
@@ -13,7 +14,9 @@ export interface SvgPiece { readonly markup: string; readonly width: number; rea
 export function svgDocument(pieces: readonly SvgPiece[], background = '#0b121b', gap = 12, title = ''): { svg: string; width: number; height: number } {
   const head = title ? 28 : 0;
   const width = pieces.reduce((s, p) => s + p.width, 0) + gap * Math.max(0, pieces.length - 1) + 24;
-  const height = Math.max(0, ...pieces.map(p => p.height)) + 24 + head;
+  const contentHeight = Math.max(0, ...pieces.map(p => p.height)) + 24 + head;
+  const footerHeight = 50;
+  const height = contentHeight + footerHeight;
   let x = 12;
   const body = pieces.map(p => {
     const inner = p.markup.replace(/^<svg\b[^>]*>/i, '').replace(/<\/svg>\s*$/i, '');
@@ -23,7 +26,13 @@ export function svgDocument(pieces: readonly SvgPiece[], background = '#0b121b',
   }).join('');
   const esc = (t: string) => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
   const text = title ? `<text x="12" y="20" fill="#cbd5e1" font-family="system-ui,sans-serif" font-size="14" font-weight="700">${esc(title)}</text>` : '';
-  return { width, height, svg: `<svg xmlns="${XMLNS}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${background}"/>${text}${body}</svg>` };
+  const captionLines = [
+    'Conceptual rendering of a proposed S.P.H.E.R.E. facility.',
+    'Not a photograph of existing equipment. Instrument appearance is approximate,',
+    'and equipment selections are provisional. Copper artifact not to scale.'
+  ];
+  const caption = `<g aria-label="${esc(EVIDENCE_CAPTION)}"><rect x="0" y="${contentHeight}" width="${width}" height="${footerHeight}" fill="#090b0f"/>${captionLines.map((line, i) => `<text x="${width / 2}" y="${contentHeight + 13 + i * 14}" text-anchor="middle" fill="#fde68a" font-family="system-ui,sans-serif" font-size="8" font-weight="600">${esc(line)}</text>`).join('')}</g>`;
+  return { width, height, svg: `<svg xmlns="${XMLNS}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${background}"/>${text}${body}${caption}</svg>` };
 }
 
 /** Size an element's SVG will draw at: its viewBox if it has one, else its rendered box. */

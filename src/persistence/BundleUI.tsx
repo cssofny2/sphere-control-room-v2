@@ -30,8 +30,8 @@ export function BundleImport({ dispatch }: { dispatch: Dispatch }) {
 
   const csv = p?.kind === 'csv' ? csvToRecords(p.rows, p.map, `IMPORTED-${new Date().toISOString().slice(0, 16)}`, `import-${Date.now().toString(36)}`) : null;
   const confirm = () => {
-    if (p?.kind === 'bundle') dispatch({ type: 'RESTORE_SESSION', records: p.records, notebook: p.notebook });
-    else if (csv) dispatch({ type: 'RESTORE_SESSION', records: csv.records, notebook: [] });
+    if (p?.kind === 'bundle') dispatch({ type: 'RESTORE_SESSION', records: p.records, notebook: p.notebook, origin: 'IMPORTED' });
+    else if (csv) dispatch({ type: 'RESTORE_SESSION', records: csv.records, notebook: [], origin: 'IMPORTED' });
     close();
   };
   const count = p?.kind === 'bundle' ? p.records.length : csv?.records.length ?? 0;

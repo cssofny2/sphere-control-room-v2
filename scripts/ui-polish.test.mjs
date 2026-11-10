@@ -22,7 +22,7 @@ const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
   assert.equal(X.safeFilename('S11 trace (VNA)'), 'sphere-s11-trace-vna.png'); assert.equal(X.safeFilename('   '), 'sphere-chart.png'); assert.equal(X.safeFilename('../../x'), 'sphere-x.png');
   assert.ok(X.safeFilename('a'.repeat(200)).length <= 'sphere-.png'.length + 60);
   const d = X.svgDocument([{ markup: '<svg viewBox="0 0 10 10" class="a"><circle r="1"/></svg>', width: 100, height: 50 }, { markup: '<svg><rect/></svg>', width: 60, height: 80 }], '#000', 10, 'A & B <t>');
-  assert.equal(d.width, 100 + 60 + 10 + 24); assert.equal(d.height, 80 + 24 + 28);
+  assert.equal(d.width, 100 + 60 + 10 + 24); assert.equal(d.height, 80 + 24 + 28 + 50);
   assert.ok(d.svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && d.svg.includes('<circle r="1"/>') && d.svg.includes('<rect/>'));
   assert.equal((d.svg.match(/<svg\b/g) || []).length, 1, 'inner svg tags are unwrapped into groups');
   assert.ok(d.svg.includes('A &amp; B &lt;t&gt;') && !d.svg.includes('<t>'), 'the title is escaped');

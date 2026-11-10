@@ -4,10 +4,10 @@ import { blobShadowTex, canvasTex, glowTex, type CanvasTex, type Quality } from 
 
 // Extra realism layered on top of the base lab: contact shadows, floor tape, wall panels, posters,
 // a live wall clock, chamber hardware (gaskets, clamps, baffles, cabling, frost), gas-flow particles,
-// stage rails and encoder strips, rack indicators, lab props, a wall phone and light fixtures.
+// static rail labels, rack indicators, lab props, a wall phone and light fixtures.
 
 export type DetailCtx = {
-  scene: THREE.Scene; room: THREE.Group; bench: THREE.Group; ch: THREE.Group; rack: THREE.Group; stageRoot: THREE.Group; yCar: THREE.Group; xCar: THREE.Group;
+  scene: THREE.Scene; room: THREE.Group; bench: THREE.Group; ch: THREE.Group; rack: THREE.Group; stageRoot: THREE.Group;
   M: Record<string, THREE.Material>; track: <T extends { dispose: () => void }>(o: T) => T;
   add: (geo: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Object3D, x?: number, y?: number, z?: number, shadow?: boolean) => THREE.Mesh;
   box: (w: number, h: number, d: number) => THREE.BoxGeometry; cuttable: THREE.Material[];
@@ -31,7 +31,7 @@ export type Detail = {
 let areaInit = false;
 
 export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.Mesh }[]): Detail {
-  const { scene, room, bench, ch, rack, stageRoot, yCar, xCar, M, track, add, box, R, L, CH_Y } = ctx;
+  const { scene, room, bench, ch, rack, stageRoot, M, track, add, box, R, L, CH_Y } = ctx;
   const texs: { dispose: () => void }[] = [];
   const keepTex = <T extends { dispose: () => void }>(t: T) => { texs.push(t); return t; };
   const basic = (o: THREE.MeshBasicMaterialParameters) => track(new THREE.MeshBasicMaterial(o));
@@ -72,7 +72,7 @@ export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.
   };
   poster(-1.9, 2.15, 0.5, 0.7, (c, W, H) => { c.fillStyle = '#fff'; c.fillRect(0, 0, W, H); c.fillStyle = '#d62d2d'; c.fillRect(0, 0, W, 60); c.fillStyle = '#fff'; c.font = '800 34px system-ui'; c.textAlign = 'center'; c.fillText('LASER SAFETY', W / 2, 42); c.fillStyle = '#111'; c.font = '600 22px system-ui'; c.textAlign = 'left'; ['Goggles on before shutter opens', 'Never look into the beam', 'Keep reflective items away', 'Shutter closed = safe to open door', 'Report any stray beam'].forEach((l, i) => c.fillText('• ' + l, 16, 110 + i * 44)); });
   poster(-1.3, 2.15, 0.5, 0.7, (c, W, H) => { c.fillStyle = '#fff'; c.fillRect(0, 0, W, H); c.fillStyle = '#1f6feb'; c.fillRect(0, 0, W, 60); c.fillStyle = '#fff'; c.font = '800 30px system-ui'; c.textAlign = 'center'; c.fillText('STARTUP ORDER', W / 2, 42); c.fillStyle = '#1f3a5f'; c.textAlign = 'left'; c.font = '600 22px system-ui'; ['1 Main breaker', '2 Power instruments', '3 Rb clock lock', '4 Rough, then turbo', '5 Settle temperature', '6 Calibrate VNA', '7 Open shutter, scan'].forEach((l, i) => c.fillText(l, 18, 100 + i * 38)); });
-  poster(1.9, 2.2, 0.72, 0.5, (c, W, H) => { c.fillStyle = '#f7fafc'; c.fillRect(0, 0, W, H); c.strokeStyle = '#1f6feb'; c.lineWidth = 3; c.beginPath(); c.arc(W * 0.28, H * 0.5, 62, 0, 7); c.stroke(); c.fillStyle = '#f2b134'; c.beginPath(); c.arc(W * 0.28, H * 0.5, 14, 0, 7); c.fill(); c.strokeStyle = '#51647a'; c.lineWidth = 2; c.beginPath(); c.moveTo(W * 0.28, 20); c.lineTo(W * 0.28, H * 0.5 - 14); c.stroke(); c.fillStyle = '#1f3a5f'; c.font = '700 24px system-ui'; c.fillText('S.P.H.E.R.E. housing', W * 0.5, H * 0.35); c.font = '500 20px system-ui'; c.fillStyle = '#51647a'; c.fillText('gold sphere on ceramic post', W * 0.5, H * 0.5); c.fillText('XYZ stage moves the sphere', W * 0.5, H * 0.62); c.fillText('LDV beam from above', W * 0.5, H * 0.74); });
+  poster(1.9, 2.2, 0.72, 0.5, (c, W, H) => { c.fillStyle = '#f7fafc'; c.fillRect(0, 0, W, H); c.strokeStyle = '#1f6feb'; c.lineWidth = 3; c.beginPath(); c.arc(W * 0.28, H * 0.5, 62, 0, 7); c.stroke(); c.fillStyle = '#d98567'; c.beginPath(); c.arc(W * 0.28, H * 0.5, 14, 0, 7); c.fill(); c.strokeStyle = '#51647a'; c.lineWidth = 2; c.beginPath(); c.moveTo(W * 0.28, 20); c.lineTo(W * 0.28, H * 0.5 - 14); c.stroke(); c.fillStyle = '#1f3a5f'; c.font = '700 24px system-ui'; c.fillText('S.P.H.E.R.E. housing', W * 0.5, H * 0.35); c.font = '500 20px system-ui'; c.fillStyle = '#51647a'; c.fillText('copper artifacts on kinematic mounts', W * 0.5, H * 0.5); c.fillText('fixed A/B rail · 0.40 m', W * 0.5, H * 0.62); c.fillText('LDV beam from above', W * 0.5, H * 0.74); });
   // cork board with notes on the left wall
   { const g = new THREE.Group(); g.position.set(-4.38, 1.65, 1.6); g.rotation.y = Math.PI / 2; room.add(g);
     add(box(1.1, 0.7, 0.025), std({ color: 0xc89a62, roughness: 0.95 }), g, 0, 0, 0, false);
@@ -143,18 +143,9 @@ export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.
     frostMat.color.set(cold > 0 ? 0xf2f8ff : 0xff8a3d); frostMat.opacity = cold > 0 ? cold : hot;
   });
 
-  // ── stage hardware: leadscrews, encoder strips, flexure ──
-  const screwMat = std({ color: 0xb7bec6, metalness: 1, roughness: 0.25 });
-  add(new THREE.CylinderGeometry(0.008, 0.008, 0.78, 12), screwMat, stageRoot, 0, -0.438, 0, false).rotation.x = Math.PI / 2;
-  add(new THREE.CylinderGeometry(0.008, 0.008, 0.38, 12), screwMat, yCar, 0, -0.02, 0, false).rotation.z = Math.PI / 2;
-  const enc = canvasTex(256, 16, (c, W, H) => { c.fillStyle = '#f2f4f6'; c.fillRect(0, 0, W, H); c.fillStyle = '#14181c'; for (let x = 0; x < W; x += 4) c.fillRect(x, 0, 2, H); }); keepTex(enc.tex); enc.tex.wrapS = THREE.RepeatWrapping; enc.tex.repeat.set(6, 1);
-  const encMat = basic({ map: enc.tex });
-  for (const x of [-0.22, 0.22]) { const m = new THREE.Mesh(track(new THREE.PlaneGeometry(0.78, 0.012)), encMat); m.rotation.set(-Math.PI / 2, 0, Math.PI / 2); m.position.set(x, -0.411, 0); stageRoot.add(m); }
-  { const flex = add(new THREE.CylinderGeometry(0.052, 0.052, 0.008, 28), M.steel, xCar, 0, 0.103, 0, false); void flex; for (let k = 0; k < 3; k++) add(box(0.05, 0.01, 0.004), M.dark, xCar, Math.cos(k * 2.09) * 0.035, 0.105, Math.sin(k * 2.09) * 0.035, false).rotation.y = -k * 2.09; }
-
   // ── rack hardware: indicator rows, vents, labels, fan unit ──
   const rackLeds: { m: THREE.MeshBasicMaterial; panel: string; k: number }[] = [];
-  const panelNames: Record<string, string> = { clock: 'SRS FS725', vna: 'KEYSIGHT E5080B', scope: 'TEK MSO5', ldv: 'POLYTEC PSV-500', daq: 'DAQ / TIMING' };
+  const panelNames: Record<string, string> = { clock: 'SRS FS725', vna: 'EXPLORATORY VNA', scope: 'TEK MSO5', ldv: 'POLYTEC PSV-500', daq: 'DAQ / TIMING' };
   for (const p of ctx.panels) {
     const lb = label(panelNames[p.name] || p.name, 0.16, 0.026); lb.mesh.position.set(-0.18, p.y - p.h / 2 + 0.018, 0.275); rack.add(lb.mesh);
     for (let k = 0; k < 4; k++) { const m = basic({ color: 0x334155 }); const l = new THREE.Mesh(track(new THREE.SphereGeometry(0.006, 8, 6)), m); l.position.set(0.1 + k * 0.032, p.y - p.h / 2 + 0.018, 0.275); rack.add(l); rackLeds.push({ m, panel: p.name, k }); }
@@ -253,8 +244,8 @@ export function buildDetail(ctx: DetailCtx, knobs: { panel: string; mesh: THREE.
   updaters.push(() => { const ms = Date.now(); const e = easternNow(ms); const sec = e.s + (ms % 1000) / 1000, min = e.m + sec / 60, hr = (e.h % 12) + min / 60; hSec.rotation.z = -sec / 60 * Math.PI * 2; hMin.rotation.z = -min / 60 * Math.PI * 2; hHour.rotation.z = -hr / 12 * Math.PI * 2;
     const k = `${e.y}-${e.mo}-${e.d}`; if (k !== calKey) { calKey = k; calTex.redraw((c, W, H) => drawCalendar(c, W, H, e)); } });
   const pickables: Pickable[] = [
-    { name: 'chamber', label: 'Thermal-vacuum chamber', help: 'ov.chamber', root: ctx.parts.chamber, view: 'chamber' },
-    { name: 'stage', label: 'XYZ stage and sphere', help: 'ov.stage', root: ctx.parts.stage, view: 'stage' },
+    { name: 'chamber', label: 'Conceptual atmospheric thermal enclosure', help: 'ov.chamber', root: ctx.parts.chamber, view: 'chamber' },
+    { name: 'stage', label: 'Fixed A/B kinematic rail', help: 'ov.stage', root: ctx.parts.stage, view: 'chamber' },
     { name: 'ldv', label: 'Laser vibrometer (LDV)', help: 'ov.ldv', root: ctx.parts.ldv, view: 'chamber' },
     { name: 'pumps', label: 'Vacuum pumps', help: 'ov.pumps', root: ctx.parts.pumps, view: 'chamber' },
     { name: 'rack', label: 'Instrument rack', help: 'ov.equipment', root: rack, view: 'rack' },

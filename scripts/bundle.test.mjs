@@ -6,6 +6,8 @@ const B = await loadTypeScript(new URL('../src/domain/bundle.ts', import.meta.ur
 const R = await loadTypeScript(new URL('../src/simulation/replay.ts', import.meta.url));
 const M = await loadTypeScript(new URL('../src/simulation/model.ts', import.meta.url));
 const F = await loadTypeScript(new URL('../src/simulation/measurement.ts', import.meta.url));
+const L = await loadTypeScript(new URL('../src/protocol/loc1.ts', import.meta.url));
+const I = await loadTypeScript(new URL('../src/features/exportImage.ts', import.meta.url));
 
 /** Builds a record the way performSweep does: capture settings plus a fitted trace. */
 function makeRecord(i) {
@@ -34,12 +36,29 @@ const bundle = await B.buildBundle(input);
 assert.equal(bundle.format, 'sphere-repro-bundle');
 assert.match(bundle.checksum.value, /^[0-9a-f]{64}$/);
 assert.deepEqual(bundle.runs, [{ runId: 'run-1', records: 5 }]);
+assert.equal(bundle.loc1Schema.fields.length, 25);
+assert.deepEqual(Object.keys(bundle.loc1Records[0]), [...L.LOC1_FIELDS]);
+assert.equal(bundle.loc1Records[0].monotonic_time_s, 3.7);
+assert.equal(bundle.loc1Records[0].baseline_ratio, null, 'unavailable physical quantities are not fabricated');
 const ok = await B.validateBundle(clone(bundle), 1000);
 assert.equal(ok.ok, true, JSON.stringify(ok.issues));
 assert.equal(ok.bundle.records.length, 5);
 assert.equal(ok.warnings.length, 0);
 assert.equal((await B.buildBundle(input)).checksum.value, bundle.checksum.value, 'same data gives the same checksum');
 console.log('PASS bundle round-trips with a stable SHA-256');
+
+{
+  const row = L.toLoc1Record({ id: 'import-1', resonance: 230501, resonanceShift: 1, dataOrigin: 'imported' }, 0, 'abc');
+  const csvRows = B.parseCsv(L.toLoc1Csv([row]));
+  assert.deepEqual(csvRows[0], [...L.LOC1_FIELDS]);
+  assert.equal(csvRows[1].length, 25);
+  assert.equal(row.data_origin, 'IMPORTED');
+  assert.equal(row.configuration_hash, 'abc');
+  const image = I.svgDocument([], '#000', 12, 'Test');
+  assert.match(image.svg, /Not a photograph of existing equipment/);
+  assert.match(image.svg, /Copper artifact not to scale\./);
+  console.log('PASS LOC-1 exports contain exactly 25 fields and chart renders carry the evidentiary caption');
+}
 
 {
   const t = clone(bundle); t.records[0].resonance += 0.001;
@@ -100,6 +119,6 @@ console.log('PASS bundle round-trips with a stable SHA-256');
   const app = fs.readFileSync(new URL('../src/MetrologyLabV3.tsx', import.meta.url), 'utf8');
   assert.ok(/buildBundle\(/.test(app) && /BundleImport/.test(app));
   assert.ok(!/JSON\.stringify\(state, null, 2\)/.test(app), 'export no longer dumps the whole app state');
-  assert.ok(/csvEscape/.test(app.slice(app.indexOf('const exportCsv'), app.indexOf('const exportJson'))), 'CSV export escapes fields');
+  assert.ok(/toLoc1Csv/.test(app.slice(app.indexOf('const exportCsv'), app.indexOf('const exportJson'))), 'CSV export uses the standardized LOC-1 schema');
   console.log('PASS exports use bundles and escaped CSV');
 }
