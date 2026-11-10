@@ -8,7 +8,7 @@ The core hypothesis is that a test object's spatial coordinates inside a defined
 
 ## What equipment is in the lab
 Keywords: equipment, instruments, rack, what do we have, list, hardware
-The lab has: a Rubidium atomic clock (SRS FS725) giving a 10 MHz reference; a Keysight E5080B vector network analyzer (VNA); a Polytec PSV-500 scanning laser Doppler vibrometer (LDV); a Tektronix 5 Series mixed-signal oscilloscope; a thermal-vacuum chamber with a Faraday cage and active vibration isolation; a precision XYZ stage inside the chamber; a roughing pump and a turbomolecular pump; an active thermostat; and the control computer (workstation) that runs scans.
+The legacy teaching simulator includes a Rubidium clock, VNA, LDV, oscilloscope, vacuum-training fixtures, thermostat, and workstation. Its XYZ travel and vacuum pumpdown are legacy training behaviors, not LOC-1 requirements. The separate LOC-1 Protocol Workspace is explicitly synthetic and provisional: it models an atmospheric thermal enclosure, fixed A/B positions 0.40 m apart, copper artifacts no larger than 1 cm, and an exploratory-only electromagnetic diagnostic. The whitepaper, preregistration, and authoritative LOC-1 export schema are not bundled with this repository, so the protocol fields and educational values must not be described as verified compliance or experimental evidence.
 
 ## Main screens of the app
 Keywords: screens, navigation, tabs, panels, where is, find, dashboard, overview

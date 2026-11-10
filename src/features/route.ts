@@ -1,7 +1,7 @@
 // Deep links: each workspace page has a hash address (#/vna), and ?embed=1 asks for a compact view for iframes.
 
 /** The page ids the app can show. Anything else in a link is ignored rather than trusted. */
-export const PAGE_IDS = ['overview', 'dashboard', 'chamber', 'copilot', 'timeline', 'spatial', 'vna', 'ldv', 'scope', 'clock', 'runs', 'insights', 'notebook', 'training', 'challenges', 'faults', 'learn', 'settings'] as const;
+export const PAGE_IDS = ['overview', 'dashboard', 'chamber', 'copilot', 'protocol', 'timeline', 'spatial', 'vna', 'ldv', 'scope', 'clock', 'runs', 'insights', 'notebook', 'training', 'challenges', 'faults', 'learn', 'settings'] as const;
 export type PageId = typeof PAGE_IDS[number];
 
 export const isPageId = (v: unknown): v is PageId => typeof v === 'string' && (PAGE_IDS as readonly string[]).includes(v);

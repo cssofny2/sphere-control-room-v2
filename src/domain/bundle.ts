@@ -1,6 +1,7 @@
 // Reproducibility bundle: one portable, versioned, checksummed file holding a session's measurements and notes, with the
 // model and app versions needed to interpret (and re-check) them. Import validates everything before it touches the app.
 import { MODEL_VERSION } from './run';
+import { LOC1_FIELDS, LOC1_SCHEMA_ID, LOC1_SCHEMA_VERSION, toLoc1Record, type Loc1Record } from '../protocol/loc1';
 
 export const BUNDLE_FORMAT = 'sphere-repro-bundle';
 export const BUNDLE_SCHEMA_VERSION = 1 as const;
@@ -20,6 +21,8 @@ export interface BundlePayload {
   readonly citation: { readonly title: string; readonly author: string; readonly orcid: string; readonly url: string; readonly note: string };
   readonly runs: ReadonlyArray<{ readonly runId: string; readonly records: number }>;
   readonly records: readonly BundleRecord[];
+  readonly loc1Schema?: { readonly id: string; readonly version: string; readonly fields: readonly string[] };
+  readonly loc1Records?: readonly Loc1Record[];
   readonly notebook: ReadonlyArray<Record<string, unknown>>;
 }
 export interface Bundle extends BundlePayload { readonly checksum: { readonly algorithm: 'SHA-256'; readonly value: string } }
@@ -47,13 +50,25 @@ export interface BuildInput { records: readonly BundleRecord[]; notebook: Readon
 export async function buildBundle(input: BuildInput): Promise<Bundle> {
   const counts = new Map<string, number>();
   for (const r of input.records) counts.set(r.runId, (counts.get(r.runId) ?? 0) + 1);
+  const configHashes = new Map<string, string>();
+  const loc1Records = await Promise.all(input.records.map(async (record, index) => {
+    const contract = isObj(record.contract) ? record.contract : {};
+    const settings = isObj(contract.settings) ? contract.settings : {};
+    const config = canonicalJson(settings);
+    let hash = configHashes.get(config);
+    if (!hash) { hash = await sha256Hex(config); configHashes.set(config, hash); }
+    return toLoc1Record(record, index, hash);
+  }));
   const payload: BundlePayload = {
     format: BUNDLE_FORMAT, schemaVersion: BUNDLE_SCHEMA_VERSION, modelVersion: MODEL_VERSION,
     app: { version: input.appVersion, commit: input.commit }, createdAt: (input.now ?? new Date()).toISOString(), dataOrigin: 'simulation',
     citation: { title: 'S.P.H.E.R.E. Metrology Lab', author: 'Michael P. Goodman', orcid: 'https://orcid.org/0009-0008-3796-5857', url: 'https://lab.spheredesci.org',
       note: 'Simulated teaching data. Not experimental evidence.' },
     runs: [...counts].map(([runId, records]) => ({ runId, records })),
-    records: input.records, notebook: input.notebook,
+    records: input.records,
+    loc1Schema: { id: LOC1_SCHEMA_ID, version: LOC1_SCHEMA_VERSION, fields: LOC1_FIELDS },
+    loc1Records,
+    notebook: input.notebook,
   };
   return { ...payload, checksum: { algorithm: 'SHA-256', value: await sha256Hex(canonicalJson(payload)) } };
 }
@@ -84,6 +99,30 @@ export async function validateBundle(raw: unknown, sizeBytes = 0): Promise<Bundl
   if (typeof raw.modelVersion !== 'string') issues.push({ path: 'modelVersion', message: 'Missing model version.' });
   if (!Array.isArray(raw.records)) issues.push({ path: 'records', message: 'records must be an array.' });
   else if (raw.records.length > MAX_BUNDLE_RECORDS) issues.push({ path: 'records', message: `At most ${MAX_BUNDLE_RECORDS} records.` });
+  if (raw.loc1Schema !== undefined || raw.loc1Records !== undefined) {
+    if (!isObj(raw.loc1Schema) || raw.loc1Schema.id !== LOC1_SCHEMA_ID || raw.loc1Schema.version !== LOC1_SCHEMA_VERSION ||
+        !Array.isArray(raw.loc1Schema.fields) || canonicalJson(raw.loc1Schema.fields) !== canonicalJson(LOC1_FIELDS)) {
+      issues.push({ path: 'loc1Schema', message: 'Unsupported or malformed provisional LOC-1 schema.' });
+    }
+    if (!Array.isArray(raw.loc1Records) || !Array.isArray(raw.records) || raw.loc1Records.length !== raw.records.length) {
+      issues.push({ path: 'loc1Records', message: 'LOC-1 records must align one-to-one with the source record ledger.' });
+    } else {
+      raw.loc1Records.forEach((value, index) => {
+        if (!isObj(value)) { issues.push({ path: `loc1Records[${index}]`, message: 'Not an object.' }); return; }
+        const keys = Object.keys(value);
+        if (keys.length !== LOC1_FIELDS.length || LOC1_FIELDS.some(field => !Object.prototype.hasOwnProperty.call(value, field))) {
+          issues.push({ path: `loc1Records[${index}]`, message: 'Record must contain exactly the 25 declared schema fields.' });
+        }
+        for (const field of LOC1_FIELDS) {
+          const entry = value[field];
+          if (entry !== null && typeof entry !== 'string' && typeof entry !== 'number' && typeof entry !== 'boolean') {
+            issues.push({ path: `loc1Records[${index}].${field}`, message: 'Must be a string, finite number, boolean, or null.' });
+          }
+          if (typeof entry === 'number' && !Number.isFinite(entry)) issues.push({ path: `loc1Records[${index}].${field}`, message: 'Must be finite.' });
+        }
+      });
+    }
+  }
   if (!Array.isArray(raw.notebook)) issues.push({ path: 'notebook', message: 'notebook must be an array.' });
   else if (raw.notebook.length > MAX_BUNDLE_NOTES) issues.push({ path: 'notebook', message: `At most ${MAX_BUNDLE_NOTES} notebook entries.` });
   if (!isObj(raw.checksum) || raw.checksum.algorithm !== 'SHA-256' || typeof raw.checksum.value !== 'string') issues.push({ path: 'checksum', message: 'Missing SHA-256 checksum.' });

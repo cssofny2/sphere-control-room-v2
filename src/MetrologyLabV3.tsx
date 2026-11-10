@@ -9,6 +9,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { dispatch, getLabState, initLabStores, onLabTransition, resetLabStores, useEnvironmentStore, useInstrumentStore, useLab } from './state/labStores';
 import { RunLibrary, SessionRestore } from './persistence/SessionUI';
 import { BundleImport } from './persistence/BundleUI';
+import ProtocolWorkspace from './protocol/ProtocolWorkspace';
+import { LOC1_FIELDS, toLoc1Csv, toLoc1Record } from './protocol/loc1';
 import { RunCompare } from './analysis/RunCompare';
 import { RunReviewCard } from './technician/RunReviewCard';
 import { Timeline, installTelemetry, useTelemetrySamples } from './features/Timeline';
@@ -28,7 +30,7 @@ import { installModalA11y } from './features/modalA11y';
 import { Announcer } from './features/Announcer';
 import { FieldAnalysis } from './spatial/FieldAnalysis';
 import { coverage as spatialCoverage } from './spatial/field';
-import { buildBundle } from './domain/bundle';
+import { buildBundle, canonicalJson, sha256Hex } from './domain/bundle';
 import { COMMIT } from './siteInfo';
 import { createAutosave } from './persistence/autosave';
 import { MAX_RECORDS, mergeRecords } from './persistence/sessions';
@@ -83,13 +85,13 @@ const WARMUP_SECONDS = 15;
 const GLOSSARY = {
   sphere: { title: "S.P.H.E.R.E.", desc: "Standardized Precision Housing for Experimental Resonance Evaluation. A rigorously controlled environment designed to isolate variables affecting resonant measurements." },
   location_variable: { title: "Location Variable", desc: "The core hypothesis being tested: that a test object's specific spatial coordinates (X, Y, Z) within a defined environment systematically alters its measured physical properties, such as resonance." },
-  vna: { title: "Keysight E5080B VNA", desc: "Vector Network Analyzer. An instrument used to measure network parameters. Here, it measures the S11 reflection coefficient to identify precise resonant frequencies via an RF coupling fixture." },
+  vna: { title: "Exploratory Electromagnetic Diagnostic", desc: "The simulator's VNA model is an exploratory diagnostic only, not a secondary confirmatory channel. It measures modeled S11 responses and does not provide physical experimental evidence." },
   s11: { title: "S11 (Reflection Coefficient)", desc: "Represents how much power is reflected from the antenna/probe. A sharp 'dip' indicates power is being absorbed and resonating within the test sphere." },
   span: { title: "Frequency Span", desc: "The width of the frequency range being swept by the VNA. A narrower span provides higher resolution around a specific resonance point." },
   ldv: { title: "Polytec PSV-500 LDV", desc: "3D Scanning Laser Doppler Vibrometer. Uses interferometry of a reflected laser beam to measure mechanical displacement (vibration) of the sphere surface at sub-picometer resolutions." },
   clock: { title: "SRS FS725 Rubidium Clock", desc: "A highly stable atomic frequency standard providing a precise 10 MHz reference signal to all instruments, ensuring internal clocks do not drift." },
   scope: { title: "Tektronix 5 Series MSO", desc: "Mixed Signal Oscilloscope. Used here to monitor raw time-domain waveforms, trigger signals, and characterize ambient environmental noise." },
-  chamber: { title: "Thermal-Vacuum Chamber", desc: "A custom enclosure isolating the experiment from air mass loading, thermal fluctuations, and acoustic noise." },
+  chamber: { title: "Controlled Thermal Enclosure", desc: "The LOC-1 concept uses an atmospheric-pressure, optical-window-compatible thermal enclosure. Vacuum pumping belongs only to a separate legacy training simulation." },
   faraday_cage: { title: "Faraday Cage", desc: "A grounded metallic shield surrounding the experiment. It blocks external electromagnetic interference (EMI) and radio frequency (RF) noise." },
   vibration_platform: { title: "Active Vibration Isolation", desc: "Pneumatic or piezoelectric dampeners that decouple the optical table from floor vibrations (seismic, footsteps, HVAC)." },
   center_freq: { title: "Center Frequency", desc: "The median frequency of the VNA frequency sweep range. Set near 230.5 kHz for primary sphere resonance." },
@@ -148,6 +150,7 @@ const PROCEDURE_STEPS = [
 const labHelpersRef: { current: { performSweep?: () => void; exportCsv?: () => void; exportJson?: () => void } | undefined } = { current: undefined };
 
 const initialState = {
+  protocol: { dataOrigin: "SYNTHETIC", osfStrict: false, alpha: 0.01, separationM: 0.4 },
   macro: { status: "idle", message: "", startedAt: null as number | null, ldvScanId: null as string | null, result: null as any },
   facility: { power: false, speed: 1, simulationTime: 0, seededNoise: true, seed: 73421, mode: "training" },
   clock: { power: false, warmup: 0, locked: false, holdover: false, distributionAmplifier: true, cableFault: false, timeSinceLock: 0 },
@@ -157,6 +160,7 @@ const initialState = {
   },
   stage: { x: 0.0, y: 0.0, z: 0.0, actualX: 0.0, actualY: 0.0, actualZ: 0.0, vx: 0, vy: 0, vz: 0, homed: true, moving: false, settling: false, settleTime: 0, clampActive: false, motionId: 0, lastCompletedMotionId: 0 },
   vna: {
+    role: "Exploratory Electromagnetic Diagnostic",
     power: false, rf: false, continuous: true, sweepMode: "continuous", triggerMode: "internal",
     center: BASE_FREQUENCY, span: 5000, startFrequency: 228000, stopFrequency: 233000,
     points: 401, ifbw: 100, sourcePowerDbm: -10, averagingEnabled: false, averagingCount: 4, averageProgress: 0,
@@ -454,7 +458,7 @@ function reducer(state, action) {
       }, `Laboratory macro completed: ${result.records} VNA records (${result.validRecords} valid) and LDV scan ${result.ldvVerdict}.`, "info", "RESEARCH");
     }
     case "POWER": {
-      if (!action.value) return addEvent({ ...initialState, notebook: state.notebook, operator: state.operator, faultDrill: initialState.faultDrill, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
+      if (!action.value) return addEvent({ ...initialState, notebook: state.notebook, operator: state.operator, protocol: state.protocol, faultDrill: initialState.faultDrill, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
       return addEvent({ ...state, facility: { ...state.facility, power: true } }, "MAIN BREAKER closed; facility AC online.", "info", "SYSTEM");
     }
     case "SET_MODE": {
@@ -472,6 +476,11 @@ function reducer(state, action) {
       return next;
     }
     case "SET_UI": return { ...state, ui: { ...state.ui, ...action.patch } };
+    case "SET_DATA_ORIGIN": {
+      if (!["SYNTHETIC", "IMPORTED", "LIVE QUALIFIED"].includes(action.origin)) return state;
+      if (action.origin === "LIVE QUALIFIED") return addEvent({ ...state, protocol: { ...state.protocol, dataOrigin: "SYNTHETIC" } }, "Live-qualified origin is unavailable in this simulator; retaining SYNTHETIC designation.", "warning", "SYSTEM");
+      return { ...state, protocol: { ...state.protocol, dataOrigin: action.origin } };
+    }
     case "SET_OPERATOR": {
       const operator = sanitizeProfile(action.profile);
       if (action.silent) return { ...state, operator };
@@ -632,10 +641,14 @@ function reducer(state, action) {
     case "REVEAL_FAULT_DRILL": return { ...state, faultDrill: { ...state.faultDrill, revealed: true } };
     case "NOTEBOOK_ADD": return addEvent({ ...state, notebook: [action.entry, ...state.notebook].slice(0, 300) }, `Notebook entry added (${action.entry.tag}).`, "info", "NOTEBOOK");
     case "RESTORE_SESSION": {
-      const records = Array.isArray(action.records) ? mergeRecords(state.experiment.records, action.records) : state.experiment.records;
+      const restored = Array.isArray(action.records)
+        ? action.origin === "IMPORTED" ? action.records.map(record => ({ ...record, dataOrigin: "imported" })) : action.records
+        : [];
+      const records = Array.isArray(action.records) ? mergeRecords(state.experiment.records, restored) : state.experiment.records;
       const have = new Set(state.notebook.map(n => n.id));
       const notebook = Array.isArray(action.notebook) ? [...state.notebook, ...action.notebook.filter(n => n && !have.has(n.id))].slice(0, 300) : state.notebook;
-      return addEvent({ ...state, notebook, experiment: { ...state.experiment, records } }, `Restored ${records.length - state.experiment.records.length} saved measurement(s) from this browser.`, "info", "RESEARCH");
+      const protocol = action.origin === "IMPORTED" ? { ...state.protocol, dataOrigin: "IMPORTED" } : state.protocol;
+      return addEvent({ ...state, notebook, protocol, experiment: { ...state.experiment, records } }, `Restored ${records.length - state.experiment.records.length} saved measurement(s) from this browser.`, "info", "RESEARCH");
     }
     case "NOTEBOOK_DELETE": return { ...state, notebook: state.notebook.filter(n => n.id !== action.id) };
     case "TICK": return tick(state, action.dt);
@@ -1166,17 +1179,78 @@ export default function MetrologyLab() {
   };
 
   const exportCsv = () => {
-    const rows = [
-      ["run_id", "timestamp", "x_mm", "y_mm", "z_mm", "resonance_hz", "s11_db", "q", "valid", "temperature_c", "pressure_torr", "uncertainty_hz", "fit_ok"],
-      ...state.experiment.records.map(r => [r.runId, r.timestamp, r.x, r.y, r.z, r.resonance, r.depth, r.q, r.valid, r.temp, r.pressure, r.uncertaintyHz, r.fit ? r.fit.ok : ""])
-    ];
-    downloadBlob(new Blob([rows.map(r => r.map(csvEscape).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }), `${state.experiment.id || "sphere-run"}.csv`);
+    void (async () => {
+      try {
+        const hashes = new Map<string, string>();
+        const rows = await Promise.all(state.experiment.records.map(async (record, index) => {
+          const settings = canonicalJson(record.contract?.settings || {});
+          let hash = hashes.get(settings);
+          if (!hash) { hash = await sha256Hex(settings); hashes.set(settings, hash); }
+          return toLoc1Record(record, index, hash);
+        }));
+        downloadBlob(new Blob([toLoc1Csv(rows)], { type: "text/csv;charset=utf-8" }), `${state.experiment.id || "sphere-run"}-loc1.csv`);
+      } catch (error) {
+        toast(`CSV export failed: ${error instanceof Error ? error.message : "unknown error"}`, "warn");
+      }
+    })();
   };
 
   // A portable, checksummed bundle of the ledger and notebook (not a dump of the whole app state).
   const exportJson = async () => {
-    const bundle = await buildBundle({ records: state.experiment.records, notebook: state.notebook, appVersion: APP_VERSION, commit: COMMIT });
-    downloadBlob(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }), `${state.experiment.id || "sphere-session"}.sphere.json`);
+    try {
+      const bundle = await buildBundle({ records: state.experiment.records, notebook: state.notebook, appVersion: APP_VERSION, commit: COMMIT });
+      downloadBlob(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }), `${state.experiment.id || "sphere-session"}.sphere.json`);
+    } catch (error) {
+      toast(`JSON export failed: ${error instanceof Error ? error.message : "unknown error"}`, "warn");
+    }
+  };
+  const exportProtocolManifest = () => {
+    void (async () => {
+      try {
+        const hashes = new Map<string, string>();
+        const rows = await Promise.all(state.experiment.records.map(async (record, index) => {
+          const settings = canonicalJson(record.contract?.settings || {});
+          let hash = hashes.get(settings);
+          if (!hash) { hash = await sha256Hex(settings); hashes.set(settings, hash); }
+          return toLoc1Record(record, index, hash);
+        }));
+        const rawCsv = toLoc1Csv(rows);
+        const runId = state.experiment.id || "unassigned";
+        const rawPath = `SPHERE-LOC1/raw/${runId}/measurements.csv`;
+        const manifest = {
+          format: "SPHERE-LOC1-synthetic-provenance",
+          schema: { id: "SPHERE-LOC1-provisional", version: "0.1", fields: LOC1_FIELDS },
+          dataOrigin: state.protocol.dataOrigin,
+          files: [{ path: rawPath, bytes: new TextEncoder().encode(rawCsv).length, algorithm: "SHA-256", sha256: await sha256Hex(rawCsv) }],
+          rawFiles: [{ path: rawPath, content: rawCsv }],
+          notice: "Synthetic educational data. Provisional schema; not an approved LOC-1 release."
+        };
+        downloadBlob(new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" }), `${runId}-provenance-manifest.json`);
+      } catch (error) {
+        toast(`Manifest export failed: ${error instanceof Error ? error.message : "unknown error"}`, "warn");
+      }
+    })();
+  };
+  const exportProtocolJson = () => {
+    void (async () => {
+      try {
+        const hashes = new Map<string, string>();
+        const rows = await Promise.all(state.experiment.records.map(async (record, index) => {
+          const settings = canonicalJson(record.contract?.settings || {});
+          let hash = hashes.get(settings);
+          if (!hash) { hash = await sha256Hex(settings); hashes.set(settings, hash); }
+          return toLoc1Record(record, index, hash);
+        }));
+        const payload = {
+          schema: { id: "SPHERE-LOC1-provisional", version: "0.1", fields: LOC1_FIELDS },
+          records: rows,
+          notice: "Synthetic educational data. Provisional schema; reconcile with SPHERE-WP-001 before external use."
+        };
+        downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), `${state.experiment.id || "sphere-run"}-loc1.json`);
+      } catch (error) {
+        toast(`LOC-1 JSON export failed: ${error instanceof Error ? error.message : "unknown error"}`, "warn");
+      }
+    })();
   };
   labHelpersRef.current = { performSweep, exportCsv, exportJson };
   // performSweep closes over fresh state each tick; panels get a stable trampoline so memo() can skip them.
@@ -1204,8 +1278,9 @@ export default function MetrologyLab() {
       items: [
         ["overview", "Lab Overview", Layers],
         ["dashboard", "Operator Console", Radio],
-        ["chamber", "3D Chamber & Stage", Wind],
+        ["chamber", "Thermal Enclosure & A/B Rail", Wind],
         ["copilot", "AI Copilot", BrainCircuit],
+        ["protocol", "LOC-1 Protocol", FileSpreadsheet],
         ["timeline", "Live Timeline", Activity],
       ]
     },
@@ -1260,6 +1335,14 @@ export default function MetrologyLab() {
       <style>{TW_FALLBACK}</style>
       <Announcer />
       <ToastHost />
+      <aside
+        aria-label="Mandatory simulator evidence notice"
+        data-evidence-caption
+        className="fixed inset-x-0 bottom-0 z-[70] border-t border-amber-500/60 bg-black/95 px-3 py-2 text-center text-[10px] font-semibold leading-relaxed text-amber-100 shadow-[0_-4px_18px_rgba(0,0,0,.65)] sm:text-xs"
+        style={{ pointerEvents: "none" }}
+      >
+        Conceptual rendering of a proposed S.P.H.E.R.E. facility. Not a photograph of existing equipment. Instrument appearance is approximate, and equipment selections are provisional. Copper artifact not to scale.
+      </aside>
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       <WorkspaceHeader state={state} navOptions={navGroups.flatMap(group => group.items.map(([id, label]) => ({ id, label })))} focus={focusMode} fullscreen={fullscreen} journalOpen={journalOpen && !focusMode} alarms={unresolved}
         onNavigate={navigate} onNavigation={toggleNavigation} onJournal={toggleJournal} onFocus={() => { setFocusMode(v => !v); setNavDrawerOpen(false); }} onFullscreen={toggleFullscreen}
@@ -1273,6 +1356,12 @@ export default function MetrologyLab() {
       <div className="workspace-status" role="region" aria-label="Essential laboratory status">
         <AlertStrip state={state} onOpen={() => navigate("overview")} />
         <SessionRestore dispatch={dispatch} onResolved={setSaveKv} />
+        <span
+          data-origin-badge
+          className={`status-chip font-black tracking-wider ${state.protocol?.dataOrigin === "IMPORTED" ? "border-violet-500 bg-violet-950 text-violet-100" : state.protocol?.dataOrigin === "LIVE QUALIFIED" ? "border-emerald-500 bg-emerald-950 text-emerald-100" : "border-amber-500 bg-amber-950 text-amber-100"}`}
+          aria-label={`Data source: ${state.protocol?.dataOrigin || "SYNTHETIC"}`}
+          title={state.protocol?.dataOrigin === "LIVE QUALIFIED" ? "Connected and validated live metrology data" : "This simulator does not produce physical or live-qualified data"}
+        >{state.protocol?.dataOrigin || "SYNTHETIC"}</span>
         <span className="status-chip"><span>Clock</span><strong>{clockStatus}</strong></span>
         <span className="status-chip"><span>Pressure</span><strong>{fmtPressureShown(state.chamber.pressure)}</strong></span>
         <span className={`status-chip ${tempStable ? "" : "status-warning"}`}><span>Temp</span><strong>{fmtTemp(state.chamber.temperature)}</strong></span>
@@ -1430,6 +1519,7 @@ export default function MetrologyLab() {
           {active === "runs" && <><PageAlert k="experiment" name="Experiment run" onGo={navigate} /><Runs state={state} dispatch={dispatch} exportCsv={exportCsv} exportJson={exportJson} sweep={performSweep} HelpInfo={HelpInfo} /></>}
           {active === "training" && <TrainingMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
           {active === "copilot" && <LabCopilot state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
+          {active === "protocol" && <ProtocolWorkspace state={state} dispatch={dispatch} records={state.experiment.records} onExportJson={exportProtocolJson} onExportManifest={exportProtocolManifest} />}
           {active === "timeline" && <Timeline />}
           {active === "insights" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading insights…</div>}><Insights records={state.experiment.records} events={state.events} operator={operatorFullName(state.operator)} /></Suspense>}
           {active === "settings" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading settings…</div>}><SettingsPage /></Suspense>}
@@ -2449,11 +2539,8 @@ function SpectrumPlot({ data }) {
 }
 
 function ChamberSVG({ state, mini = false, cv = null }) {
-  const { stage, chamber, ldv, vna } = state;
-  const actual = { x: stage.actualX ?? stage.x, y: stage.actualY ?? stage.y, z: stage.actualZ ?? stage.z };
-  const px = 300 + actual.x * 4, py = 190 - actual.z * 3;
-  const r = 24 + actual.y * 0.12;
-  const ghostX = 300 + stage.x * 4, ghostY = 190 - stage.z * 3;
+  const { chamber, ldv, vna } = state;
+  const px = 220, py = 190, referenceX = 380, r = 5;
   const haze = clamp(Math.log10(Math.max(chamber.pressure, 0.01)) / 2.88, 0, 1);
   const dT = chamber.temperature - 20;
   const tint = dT > 0 ? "255,120,40" : "60,140,255";
@@ -2465,10 +2552,10 @@ function ChamberSVG({ state, mini = false, cv = null }) {
   const mono = { fontFamily: "ui-monospace, monospace" };
   return (
     <div className={mini ? "h-full w-full overflow-hidden rounded border border-zinc-800 bg-black" : "h-[380px] w-full overflow-hidden rounded-lg border-2 border-zinc-700 bg-black"}>
-      <svg viewBox="0 0 600 380" className="h-full w-full" role="img" aria-label="Thermal-vacuum chamber showing sphere position">
+      <svg viewBox="0 0 600 380" className="h-full w-full" role="img" aria-label="Conceptual chamber showing fixed A and B artifact mounts, 0.40 metres apart">
         <defs>
           <linearGradient id="ch-steel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#4b5563" /><stop offset=".5" stopColor="#1f2937" /><stop offset="1" stopColor="#374151" /></linearGradient>
-          <radialGradient id="ch-sphere" cx=".35" cy=".3" r=".8"><stop offset="0" stopColor="#fff3c4" /><stop offset=".35" stopColor="#f2b134" /><stop offset="1" stopColor="#5a2e07" /></radialGradient>
+          <radialGradient id="ch-sphere" cx=".35" cy=".3" r=".8"><stop offset="0" stopColor="#ffe1d1" /><stop offset=".35" stopColor="#c97859" /><stop offset="1" stopColor="#54251b" /></radialGradient>
           <radialGradient id="ch-bg" cx=".5" cy=".5" r=".7"><stop offset="0" stopColor="#0f1b2b" /><stop offset="1" stopColor="#05080d" /></radialGradient>
           <linearGradient id="ch-glare" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#fff" stopOpacity=".09" /><stop offset="1" stopColor="#fff" stopOpacity="0" /></linearGradient><pattern id="ch-mesh" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M8 0H0V8" fill="none" stroke="#fbbf24" strokeWidth=".5" /></pattern><radialGradient id="ch-lamp" cx=".5" cy="0" r=".9"><stop offset="0" stopColor="#e0f2fe" stopOpacity=".22" /><stop offset="1" stopColor="#e0f2fe" stopOpacity="0" /></radialGradient><filter id="ch-blur"><feGaussianBlur stdDeviation="7" /></filter>
           <pattern id="ch-gas" width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="3" cy="4" r="1" fill="#9fc4e8" /><circle cx="10" cy="11" r="1" fill="#9fc4e8" /></pattern>
@@ -2490,29 +2577,23 @@ function ChamberSVG({ state, mini = false, cv = null }) {
           {pumping && <path className="flow-line" d={`M${px} ${py} C 220 ${py} 150 190 62 190`} stroke="#7dd3fc" strokeWidth="1.6" strokeDasharray="3 9" fill="none" opacity=".6" />}
           {[100, 180, 260, 340, 420, 500].map(x => <line key={x} x1={x} y1="50" x2={x} y2="330" stroke="#122033" />)}
           {[90, 140, 190, 240, 290].map(y => <line key={y} x1="60" y1={y} x2="540" y2={y} stroke="#122033" />)}
-          <line x1="60" y1={py} x2="540" y2={py} stroke="#334155" strokeDasharray="4 5" />
-          <line x1={px} y1="50" x2={px} y2="330" stroke="#334155" strokeDasharray="4 5" />
+          <line x1="140" y1="270" x2="460" y2="270" stroke="#94a3b8" strokeWidth="5" />
           {rf && <path d={`M540 190 L${px + r} ${py}`} stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="6 4" fill="none" />}
           {Array.from({ length: 16 }).map((_, i) => (
             <circle key={`g${i}`} className="gas-p" cx={80 + ((i * 97) % 440)} cy={70 + ((i * 53) % 230)} r="1.6" fill="#9fc4e8" opacity={haze * 0.75} style={{ animationDelay: `${-i * 0.7}s`, animationDuration: `${5 + (i % 5)}s` }} />
           ))}
-          <rect x="60" y="318" width="480" height="12" fill="#111827" />
-          {Array.from({ length: 25 }).map((_, i) => <line key={`t${i}`} x1={60 + i * 20} y1="318" x2={60 + i * 20} y2={i % 5 === 0 ? 326 : 322} stroke="#475569" />)}
-          <g style={{ transform: `translate(${px - 20}px, 0)`, transition: FX.reduced ? "none" : "transform .6s ease" }}><rect x="18" y="52" width="4" height="258" fill="#334155" /><rect y="310" width="40" height="14" rx="3" fill="#475569" stroke="#94a3b8" /></g>
+          <g fill="#c97859" stroke="#ffe1d1" strokeWidth="1.5"><circle cx={px} cy="264" r={r}/><circle cx={referenceX} cy="264" r={r}/></g>
+          <text x={px} y="246" textAnchor="middle" fill="#e2e8f0" fontSize="10" style={mono}>A · T</text>
+          <text x={referenceX} y="246" textAnchor="middle" fill="#e2e8f0" fontSize="10" style={mono}>B · R</text>
+          <line x1={px} y1="282" x2={referenceX} y2="282" stroke="#7dd3fc" />
+          <path d={`M${px} 278v8M${referenceX} 278v8`} stroke="#7dd3fc" />
+          <text x={(px + referenceX) / 2} y="297" textAnchor="middle" fill="#7dd3fc" fontSize="10" style={mono}>0.40 m · static rail</text>
           {laser && (
             <g>
-              <line x1="300" y1="50" x2={px} y2={py - r} stroke="#ff3b5c" strokeWidth="6" opacity=".25" />
-              <line x1="300" y1="50" x2={px} y2={py - r} stroke="#ff7a90" strokeWidth="1.4" />
+              <line x1={px} y1="50" x2={px} y2="258" stroke="#ff3b5c" strokeWidth="6" opacity=".25" />
+              <line x1={px} y1="50" x2={px} y2="258" stroke="#ff7a90" strokeWidth="1.4" />
             </g>
           )}
-          <g style={{ transform: `translate(${px}px, ${py}px)`, transition: FX.reduced ? "none" : "transform .6s ease" }}>
-            <ellipse rx={r + 4} ry={(r + 4) * 0.3} cy={r} fill="none" stroke="#94a3b8" strokeWidth="2" />
-            <rect x="-2.5" y={r} width="5" height={Math.max(0, 330 - py - r)} fill="#475569" />
-            <circle r={r + 12} fill="#f59e0b" opacity=".35" filter="url(#ch-blur)" />
-            <circle r={r} fill="url(#ch-sphere)" stroke="#fcd34d" strokeWidth="1" />
-            <ellipse rx={r} ry={r * 0.28} fill="none" stroke="#fff" strokeOpacity=".25" />
-            <ellipse cx={-r * 0.3} cy={-r * 0.38} rx={r * 0.22} ry={r * 0.13} fill="#fff" opacity=".45" />
-          </g>
         </g>
         <rect x="60" y="50" width="480" height="280" rx="12" fill="none" stroke={shield} strokeWidth="2.5" />
         <path d="M60 50 H300 L225 330 H60 Z" fill="url(#ch-glare)" pointerEvents="none" />
@@ -2523,14 +2604,13 @@ function ChamberSVG({ state, mini = false, cv = null }) {
         {!mini && (
           <g style={mono} fontSize="10">
             <text x="300" y="54" textAnchor="middle" fill="#7dd3fc">QUARTZ VIEWPORT</text>
-            <text x="72" y="158" fill="#94a3b8">VAC</text>
+            <text x="72" y="158" fill="#94a3b8">LEGACY VAC TRAINING</text>
             <text x="508" y="158" fill="#94a3b8">RF</text>
             <text x="72" y="320" fill="#9fb3c8" fontSize="11">P {fmtPressureShown(chamber.pressure)}  ·  T {fmtTemp(chamber.temperature)}</text>
             <text x="72" y="304" fill={Math.abs(drift) < 0.03 ? "#86efac" : "#fdba74"} fontSize="11">{Math.abs(drift) < 0.03 ? "● stable" : drift > 0 ? "▲ +" + drift.toFixed(3) : "▼ " + drift.toFixed(3)} °C vs setpoint</text>
-            <text x="528" y="320" textAnchor="end" fill="#9fb3c8" fontSize="11">X {actual.x.toFixed(1)}  Y {actual.y.toFixed(1)}  Z {actual.z.toFixed(1)} mm</text>
+            <text x="528" y="320" textAnchor="end" fill="#9fb3c8" fontSize="11">T/R artifact OD ≤ 1 cm (schematic)</text>
           </g>
         )}
-        {(stage.moving || stage.settling) && <g opacity=".75" aria-label="Commanded target position"><circle cx={ghostX} cy={ghostY} r={24 + stage.y * .12} fill="none" stroke="#fff" strokeWidth="1.5" strokeDasharray="5 4"/><line x1={px} y1={py} x2={ghostX} y2={ghostY} stroke="#7dd3fc" strokeDasharray="3 3"/><text x={ghostX+28} y={ghostY-8} fill="#e2e8f0" fontSize="9" style={mono}>TARGET</text></g>}
         {chamber.doorOpen && (
           <g>
             <rect x="60" y="50" width="480" height="280" rx="12" fill="#e11d48" opacity=".18" />
@@ -2553,6 +2633,33 @@ function ramp(stops, t) {
   return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * f)).join(",")})`;
 }
 
+function convexHull(points) {
+  const sorted = [...new Map(points.map(point => [`${point[0]}:${point[1]}`, point])).values()]
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (sorted.length < 3) return [];
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const point of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) lower.pop();
+    lower.push(point);
+  }
+  const upper = [];
+  for (const point of [...sorted].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) upper.pop();
+    upper.push(point);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+
+function isInsidePolygon(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i], [xj, yj] = polygon[j];
+    if ((yi > point[1]) !== (yj > point[1]) && point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 function SpatialMaps({ records, view, state }) {
   const [o, setO] = useState({ order: true, planned: true, quality: true, labels: false, unc: true });
   const [hover, setHover] = useState<any>(null);
@@ -2572,14 +2679,21 @@ function SpatialMaps({ records, view, state }) {
   const sy = v => O + S - ((v + 35) / 70) * S;
   const panels = [{ t: "X–Z · front", a: "x", b: "z" }, { t: "X–Y · top", a: "x", b: "y" }, { t: "Y–Z · side", a: "y", b: "z" }];
   const interp = view.interpolation !== "none" && records.length >= 3;
+  const masks = useMemo(() => Object.fromEntries(panels.map(p => [
+    p.a + p.b,
+    convexHull(records.map(record => [record[p.a], record[p.b]]))
+  ])), [records]);
 
   const cells = useMemo(() => {
     if (!interp) return {};
     const N = 18, out = {};
     panels.forEach(p => {
+      const mask = masks[p.a + p.b] || [];
+      if (mask.length < 3) { out[p.a + p.b] = []; return; }
       const arr = [];
       for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
         const ca = -35 + ((i + 0.5) / N) * 70, cb = -35 + ((j + 0.5) / N) * 70;
+        if (!isInsidePolygon([ca, cb], mask)) continue;
         let wsum = 0, vsum = 0;
         records.forEach(r => {
           const d2 = (r[p.a] - ca) ** 2 + (r[p.b] - cb) ** 2;
@@ -2591,7 +2705,7 @@ function SpatialMaps({ records, view, state }) {
       out[p.a + p.b] = arr;
     });
     return out;
-  }, [records, view.interpolation, metric, interp]);
+  }, [records, view.interpolation, metric, interp, masks]);
 
   if (!records.length) {
     return (
@@ -2611,6 +2725,7 @@ function SpatialMaps({ records, view, state }) {
             {interp && (cells[p.a + p.b] || []).map(c => (
               <rect key={`${c.i}-${c.j}`} x={O + (c.i * S) / 18} y={O + S - ((c.j + 1) * S) / 18} width={S / 18 + 0.5} height={S / 18 + 0.5} fill={ramp(stops, norm(c.v))} opacity=".55" />
             ))}
+            {interp && masks[p.a + p.b]?.length >= 3 && <path d={`${masks[p.a + p.b].map(([a, b], index) => `${index ? 'L' : 'M'}${sx(a)},${sy(b)}`).join(' ')} Z`} fill="none" stroke="#fbbf24" strokeWidth="1.25" strokeDasharray="4 3" aria-label="Measured convex-hull mask boundary; no extrapolation outside" />}
             {[-35, -17.5, 0, 17.5, 35].map(t => (
               <g key={t}>
                 <line x1={sx(t)} y1={O} x2={sx(t)} y2={O + S} stroke="#142030" />
@@ -2640,6 +2755,7 @@ function SpatialMaps({ records, view, state }) {
       <div className="mt-1 text-[10px] text-zinc-500">
         Solid = valid · dashed amber ring = suspect · ✕ = invalid · square = planned · diamond = stage · yellow ring = next target · larger and brighter = nearer in depth.{view.interpolation !== "none" && records.length < 3 ? " Interpolation needs at least 3 points." : ""}
       </div>
+      <div className="mt-1 text-[10px] text-amber-200">Dashed amber polygon = un-extrapolated measured-data mask. ∇·F labeling is disabled; no validated spatial differentiation grid is active.</div>
     </div>
   );
 }
@@ -2788,17 +2904,17 @@ function LivingTelemetryBar({state,validationResult,unresolved}){
     ["SIM",`${Math.floor(state.facility.simulationTime)} s`,"facility"], ["POWER",state.facility.power?"ON":"OFF","facility"],
     ["CLOCK",state.clock.locked?"LOCKED":state.clock.power?`WARM ${Math.min(100,state.clock.warmup/WARMUP_SECONDS*100).toFixed(0)}%`:"OFF","clock"],
     ["PRESS",`${pressureTrend} ${fmtPressureShown(state.chamber.pressure)}`,"chamber"], ["TEMP",`${state.chamber.temperature.toFixed(2)} °C (${drift>=0?"+":""}${drift.toFixed(2)})`,"chamber"],
-    ["XYZ",`${state.stage.x.toFixed(1)} / ${state.stage.y.toFixed(1)} / ${state.stage.z.toFixed(1)}`,"stage"], ["RUN",state.experiment.active?state.experiment.id||"ACTIVE":"IDLE","experiment"],
+    ["A/B RAIL","0.400 m · static","chamber"], ["RUN",state.experiment.active?state.experiment.id||"ACTIVE":"IDLE","experiment"],
     ["VNA RF",state.vna.rf?"ON":"OFF","vna"], ["LDV",state.ldv.shutter?"OPEN":"CLOSED","ldv"], ["QUALITY",validationResult.overall,"spatial"], ["ALARMS",String(unresolved),"facility"]
   ];
   return <div className="shrink-0 overflow-x-auto border-b border-zinc-800 bg-[#070a0f] px-3 py-1.5" aria-label="Persistent live laboratory telemetry"><div className="flex min-w-max items-stretch gap-1.5">{cells.map(([label,value,sub])=>{const vs=getSubsystemVisualState(state,sub),t=visualToken(vs);return <div key={label} data-visual-state={vs} className={`min-w-[92px] rounded border px-2 py-1 ${t.border} ${t.surface}`}><div className="text-[8px] font-bold uppercase tracking-[.14em] text-zinc-500">{label}</div><div className={`mt-.5 flex items-center gap-1 font-mono text-[10px] ${t.text}`}><span className={`h-1.5 w-1.5 rounded-full ${t.led}`} aria-hidden="true"/>{value}</div></div>})}</div></div>;
 }
-const GRP = { outer: "Outer Faraday enclosure", inner: "Inner Faraday enclosure", table: "Optical table", chamber: "Thermal-vacuum chamber", sphere: "Test sphere", ldv: "LDV optical heads", rf: "RF coupling fixture", pumps: "Vacuum pumps", rack: "Instrument rack", probes: "Environmental probes", room: "Laboratory room (context)" };
+const GRP = { outer: "Outer Faraday enclosure", inner: "Inner Faraday enclosure", table: "Optical table", chamber: "Atmospheric thermal enclosure", sphere: "Copper artifacts (≤1 cm)", ldv: "LDV optical heads", rf: "RF coupling fixture", pumps: "Legacy vacuum fixtures", rack: "Instrument rack", probes: "Environmental probes", room: "Laboratory room (context)" };
 const EXPL = { outer: [0, 0, 1100], inner: [0, 0, 550], table: [0, 0, -250], chamber: [0, 0, 350], sphere: [0, 0, 800], ldv: [0, 0, 900], rf: [450, 0, 550], pumps: [-500, 0, 0], rack: [600, 0, 0], probes: [0, 350, 500], room: [0, 0, 0] };
 const CAM = { iso: { yaw: 0.6, pit: 0.5, dist: 6200, t: [200, 0, 1000] }, front: { yaw: 0, pit: 0.05, dist: 6500, t: [200, 0, 1000] }, top: { yaw: 0, pit: 1.5, dist: 6500, t: [200, 0, 1000] }, interior: { yaw: -0.5, pit: 0.35, dist: 1100, t: [0, 0, 1100] }, optical: { yaw: 1.57, pit: 0.05, dist: 1500, t: [0, 0, 1450] }, rf: { yaw: -1.0, pit: 0.3, dist: 1300, t: [200, 0, 1100] }, vacuum: { yaw: 0.7, pit: 0.3, dist: 1700, t: [-550, 0, 1000] }, rack: { yaw: 1.2, pit: 0.15, dist: 2600, t: [1800, 0, 1000] } };
 const BOXF = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [0, 3, 7, 4], [1, 2, 6, 5]], SHADE = [0.5, 1, 0.8, 0.6, 0.7, 0.9];
-const MT = { steel: { c: "#9aa6b2", sp: 0.55, sh: 22, tx: "brush" }, anod: { sp: 0.3, sh: 10 }, black: { c: "#14181f", sp: 0.18, sh: 8 }, copper: { c: "#c8743a", sp: 0.7, sh: 30 }, silica: { c: "#cfe9f7", sp: 0.9, sh: 40, gl: 1 }, glass: { c: "#9fd0e8", sp: 0.9, sh: 40, gl: 1 }, mesh: { sp: 0, sh: 1, tx: "mesh" }, rubber: { c: "#1d1f23", sp: 0.02, sh: 2 }, emit: { emit: 1 } };
-const MATID = { outer: "mesh", inner: "mesh", top: "steel", shell: "steel", door: "steel", view: "silica", ftrf: "anod", ftse: "anod", m1: "steel", m2: "steel", rx: "anod", ry: "anod", car: "anod", pst: "anod", sph: "copper", ldvA: "anod", ldvB: "anod", fix: "anod", rough: "anod", turbo: "steel", rack: "black", uclk: "black", uvna: "black", uscp: "black", tprobe: "steel", pgauge: "steel", accel: "anod" };
+const MT = { steel: { c: "#9aa6b2", sp: 0.55, sh: 22, tx: "brush" }, anod: { c: "#cbd5e1", sp: 0.3, sh: 10 }, black: { c: "#14181f", sp: 0.18, sh: 8 }, copper: { c: "#c97859", sp: 0.7, sh: 30 }, silica: { c: "#cfe9f7", sp: 0.9, sh: 40, gl: 1 }, glass: { c: "#9fd0e8", sp: 0.9, sh: 40, gl: 1 }, mesh: { sp: 0, sh: 1, tx: "mesh" }, rubber: { c: "#1d1f23", sp: 0.02, sh: 2 }, emit: { emit: 1 } };
+const MATID = { outer: "mesh", inner: "mesh", top: "steel", shell: "steel", door: "steel", view: "silica", ftrf: "anod", ftse: "anod", m1: "steel", m2: "steel", test: "copper", ref: "copper", spare: "copper", dummy: "copper", ldvA: "anod", ldvB: "anod", fix: "anod", rough: "anod", turbo: "steel", rack: "black", uclk: "black", uvna: "black", uscp: "black", tprobe: "steel", pgauge: "steel", accel: "anod" };
 const LV = [0.406, -0.609, 0.711];
 const shadeHex = (h, f) => `rgb(${[1, 3, 5].map(i => { const v = parseInt(h.slice(i, i + 2), 16); return Math.round(Math.max(0, Math.min(255, f < 1 ? v * f : v + (255 - v) * (f - 1)))); }).join(",")})`;
 const nrm = (a, b, c) => { const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(n[0], n[1], n[2]) || 1; return [n[0] / l, n[1] / l, n[2] / l]; };
@@ -2811,11 +2927,11 @@ function TwDefs() {
       <linearGradient id="tw-wall" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stopColor="#1a2532" /><stop offset="1" stopColor="#0a1018" /></linearGradient>
       <pattern id="tw-brush" width="4" height="2" patternUnits="userSpaceOnUse"><line x1="0" y1="1" x2="4" y2="1" stroke="#fff" strokeOpacity=".2" /></pattern>
       <pattern id="tw-mesh" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M6 0H0V6" fill="none" stroke="#fbbf24" strokeOpacity=".55" /></pattern>
-      <radialGradient id="tw-cu" cx=".35" cy=".3" r=".8"><stop offset="0" stopColor="#ffe3c4" /><stop offset=".4" stopColor="#d9803f" /><stop offset="1" stopColor="#4a2410" /></radialGradient>
+      <radialGradient id="tw-cu" cx=".35" cy=".3" r=".8"><stop offset="0" stopColor="#ffe1d1" /><stop offset=".4" stopColor="#c97859" /><stop offset="1" stopColor="#54251b" /></radialGradient>
     </defs>
   );
 }
-function twinExtra(st, g, sz) {
+function twinExtra(st) {
   const sc = k => ST[instStatus(st, k)][2], tn = k => ST[instStatus(st, k)][0], o = [];
   [["uldv", 850, "ldv", "LDV controller unit"], ["uenv", 600, "chamber", "Vacuum / thermal controller unit"]].forEach(([id, z, k, l]) => o.push({ id, g: "rack", label: l, k: "box", c: [1590, 0, z], s: [20, 560, 140], col: "#14181f", mt: "black", inst: k, note: tn(k) }));
   const rackLeds: [string, number, string][] = [["uclk", 1600, "clock"], ["uvna", 1350, "vna"], ["uscp", 1100, "scope"], ["uldv", 850, "ldv"], ["uenv", 600, "chamber"]];
@@ -2823,7 +2939,8 @@ function twinExtra(st, g, sz) {
   [[-800, -500], [800, -500], [-800, 500], [800, 500]].forEach(([x, y], i) => { o.push({ id: "pad" + i, g: "table", label: "Rubber isolation pad", k: "box", c: [x, y, 12], s: [110, 110, 24], col: "#1d1f23", mt: "rubber" }); o.push({ id: "pis" + i, g: "table", label: "Isolator piston (detail)", k: "cyl", ax: "z", c: [x, y, 700], r: 20, len: 100, col: "#cbd5e1", mt: "steel", hi: 1 }); });
   o.push({ id: "lensA", g: "ldv", label: "LDV objective lens (optical glass)", k: "cyl", ax: "z", c: [0, 0, 1550], r: 55, len: 30, col: "#9fd0e8", mt: "glass", a: 0.55 });
   o.push({ id: "lensB", g: "ldv", label: "LDV B objective lens", k: "cyl", ax: "z", c: [650, -650, 1410], r: 45, len: 20, col: "#9fd0e8", mt: "glass", a: 0.55, conceptual: 1 });
-  o.push({ id: "cup", g: "sphere", label: "Sphere cradle (copper-plated)", k: "cyl", ax: "z", c: [g.x, g.y, sz - 28], r: 14, len: 8, col: "#c8743a", mt: "copper", tbl: 1 });
+  o.push({ id: "cupA", g: "sphere", label: "A kinematic nodal mount", k: "cyl", ax: "z", c: [-200, 0, 838], r: 12, len: 14, col: "#cbd5e1", mt: "anod", tbl: 1 });
+  o.push({ id: "cupB", g: "sphere", label: "B kinematic nodal mount", k: "cyl", ax: "z", c: [200, 0, 838], r: 12, len: 14, col: "#cbd5e1", mt: "anod", tbl: 1 });
   o.push({ id: "vring", g: "chamber", sub: "Quartz viewport", label: "Viewport retaining ring (detail)", k: "cyl", ax: "z", c: [0, 0, 1414], r: 96, len: 8, col: "#9aa6b2", mt: "steel", hi: 1, tbl: 1 });
   o.push({ id: "tfl", g: "pumps", label: "Turbo flange (detail)", k: "cyl", ax: "x", c: [-300, 0, 1100], r: 92, len: 14, col: "#9aa6b2", mt: "steel", hi: 1, tbl: 1 });
   if (!st.chamber.doorOpen) o.push({ id: "hnd", g: "chamber", sub: "Door", label: "Door handle (detail)", k: "box", c: [150, -335, 1100], s: [16, 16, 140], col: "#cbd5e1", mt: "steel", hi: 1, tbl: 1 });
@@ -2843,27 +2960,27 @@ function ScreenFace({ k, st }) {
 }
 
 function twinParts(st) {
-  const { stage: g, chamber: c } = st, L = LIMIT_MM, sz = 1100 + g.z, sc = k => ST[instStatus(st, k)][2];
+  const { chamber: c } = st, sc = k => ST[instStatus(st, k)][2];
   const open = c.doorOpen, pump = c.roughing || c.turbo, shield = c.faraday;
-  const post = sz - 905 - 25;
   return [
     { id: "outer", g: "outer", label: "Outer Faraday enclosure", k: "box", c: [0, 0, 1200], s: [3200, 2600, 2400], col: shield ? "#f59e0b" : "#ef4444", wall: "cage", hole: shield ? -1 : 2, note: shield ? "Shielding ON (conceptual shell)." : "Shielding OFF: front panel shown open." },
     { id: "inner", g: "inner", label: "Inner Faraday enclosure", k: "box", c: [0, 0, 950], s: [2200, 1700, 1800], col: shield ? "#fbbf24" : "#ef4444", wall: "cage", hole: shield ? -1 : 2, note: "Nested shield (conceptual)." },
     { id: "top", g: "table", label: "Optical table top", k: "box", c: [0, 0, 775], s: [1800, 1200, 50], col: "#64748b", a: 0.95, tbl: 1 },
     ...[[-800, -500], [800, -500], [-800, 500], [800, 500]].map(([x, y], i) => ({ id: "leg" + i, g: "table", label: "Isolation leg " + (i + 1), k: "cyl", ax: "z", c: [x, y, 375], r: 35, len: 750, col: st.chamber.isolation ? "#14b8a6" : "#ef4444", note: st.chamber.isolation ? "Active isolation ON" : "Isolation OFF: table coupled to floor, jitter shown." })),
-    { id: "shell", g: "chamber", sub: "Chamber body", label: "Chamber body", k: "box", c: [0, 0, 1100], s: [600, 600, 600], col: "#38bdf8", wall: "ch", tbl: 1, note: `P ${fmtPressureShown(c.pressure)}, T ${c.temperature.toFixed(2)} °C` },
+    { id: "shell", g: "chamber", sub: "Chamber body", label: "Atmospheric thermal enclosure (conceptual)", k: "box", c: [0, 0, 1100], s: [600, 600, 600], col: "#38bdf8", wall: "ch", tbl: 1, note: "LOC-1 baseline assumption: 101.325 kPa atmospheric pressure with optical access." },
     open ? { id: "door", g: "chamber", sub: "Door", label: "Chamber door (open)", k: "box", c: [-275, -530, 1100], s: [30, 440, 500], col: "#f87171", a: 0.6, tbl: 1 } : { id: "door", g: "chamber", sub: "Door", label: "Chamber door (closed)", k: "box", c: [0, -310, 1100], s: [440, 30, 500], col: "#94a3b8", a: 0.5, tbl: 1 },
     { id: "view", g: "chamber", sub: "Quartz viewport", label: "Quartz viewport", k: "cyl", ax: "z", c: [0, 0, 1405], r: 80, len: 20, col: "#bae6fd", a: 0.5, tbl: 1 },
     { id: "ftrf", g: "chamber", sub: "Feedthroughs", label: "RF feedthrough", k: "cyl", ax: "x", c: [330, 0, 1100], r: 25, len: 60, col: "#fbbf24", tbl: 1 },
     { id: "ftse", g: "chamber", sub: "Feedthroughs", label: "Sensor feedthrough", k: "cyl", ax: "x", c: [330, -130, 1100], r: 20, len: 60, col: "#a3e635", tbl: 1 },
     { id: "m1", g: "chamber", sub: "Vacuum manifold", label: "Vacuum manifold (horizontal)", k: "cyl", ax: "x", c: [-680, 0, 1100], r: 35, len: 440, col: pump ? "#7dd3fc" : "#64748b", tbl: 1, conceptual: 1 },
     { id: "m2", g: "chamber", sub: "Vacuum manifold", label: "Vacuum manifold (drop)", k: "cyl", ax: "z", c: [-900, 0, 650], r: 35, len: 900, col: pump ? "#7dd3fc" : "#64748b", conceptual: 1 },
-    { id: "rx", g: "chamber", sub: "Internal XYZ stage", label: "Stage X rail", k: "box", c: [0, 0, 870], s: [160, 24, 16], col: "#94a3b8", tbl: 1 },
-    { id: "ry", g: "chamber", sub: "Internal XYZ stage", label: "Stage Y rail", k: "box", c: [0, 0, 890], s: [24, 160, 16], col: "#94a3b8", tbl: 1 },
-    { id: "car", g: "chamber", sub: "Internal XYZ stage", label: "Stage carriage", k: "box", c: [g.x, g.y, 905], s: [50, 50, 12], col: "#cbd5e1", tbl: 1, note: `X ${g.x.toFixed(1)} Y ${g.y.toFixed(1)} Z ${g.z.toFixed(1)} mm` },
-    { id: "pst", g: "chamber", sub: "Internal XYZ stage", label: "Z post", k: "cyl", ax: "z", c: [g.x, g.y, 911 + post / 2], r: 4, len: post, col: "#cbd5e1", tbl: 1 },
-    { id: "env", g: "chamber", sub: "Internal XYZ stage", label: `Travel envelope ±${L} mm`, k: "box", c: [0, 0, 1100], s: [2 * L, 2 * L, 2 * L], col: "#f59e0b", a: 0.12, tbl: 1 },
-    { id: "sph", g: "sphere", label: "Test sphere (Ø50 mm, simplified)", k: "sph", c: [g.x, g.y, sz], r: 25, col: "#fbbf24", tbl: 1, note: "Position follows simulator stage state." },
+    { id: "rail", g: "chamber", sub: "Static A/B rail", label: "Fixed A/B positioning rail · 0.400 m", k: "box", c: [0, 0, 826], s: [460, 24, 16], col: "#64748b", tbl: 1 },
+    { id: "nodeA", g: "chamber", sub: "Static A/B rail", label: "Position A nodal mount", k: "cyl", ax: "z", c: [-200, 0, 842], r: 12, len: 16, col: "#cbd5e1", tbl: 1 },
+    { id: "nodeB", g: "chamber", sub: "Static A/B rail", label: "Position B nodal mount", k: "cyl", ax: "z", c: [200, 0, 842], r: 12, len: 16, col: "#cbd5e1", tbl: 1 },
+    { id: "test", g: "sphere", sub: "Copper artifacts", label: "Test artifact T · Ø9.2 mm (schematic)", k: "sph", c: [-200, 0, 854.6], r: 4.6, col: "#c97859", tbl: 1, note: "Polished copper; physical appearance and dimensions are approximate." },
+    { id: "ref", g: "sphere", sub: "Copper artifacts", label: "Reference artifact R · Ø9.2 mm (schematic)", k: "sph", c: [200, 0, 854.6], r: 4.6, col: "#c97859", tbl: 1, note: "Polished copper; physical appearance and dimensions are approximate." },
+    { id: "spare", g: "sphere", sub: "Copper artifacts", label: "Spare artifact S · Ø9.2 mm (schematic)", k: "sph", c: [-40, 260, 854.6], r: 4.6, col: "#c97859", tbl: 1 },
+    { id: "dummy", g: "sphere", sub: "Copper artifacts", label: "Dummy artifact D · Ø9.2 mm (schematic)", k: "sph", c: [40, 260, 854.6], r: 4.6, col: "#c97859", tbl: 1 },
     { id: "ldvA", g: "ldv", label: "LDV head A (top, conceptual)", k: "box", c: [0, 0, 1720], s: [220, 220, 320], col: "#a855f7", note: st.ldv.shutter ? "Shutter open" : "Shutter closed" },
     { id: "ldvB", g: "ldv", label: "LDV head B (secondary, not beam-routed)", k: "box", c: [650, -650, 1550], s: [180, 180, 260], col: "#7e22ce", conceptual: 1 },
     { id: "fix", g: "rf", label: "RF coupling fixture (conceptual)", k: "box", c: [70, 40, 1100], s: [40, 22, 22], col: "#e879f9", tbl: 1, conceptual: 1 },
@@ -2876,21 +2993,19 @@ function twinParts(st) {
     { id: "tprobe", g: "probes", label: "Temperature probe", k: "sph", c: [-220, 220, 1000], r: 10, col: "#fb923c", tbl: 1 },
     { id: "pgauge", g: "probes", label: "Pressure gauge", k: "cyl", ax: "y", c: [-500, 100, 1100], r: 25, len: 80, col: "#a3e635", tbl: 1 },
     { id: "accel", g: "probes", label: "Accelerometer", k: "box", c: [500, 300, 812], s: [40, 40, 24], col: "#f472b6", tbl: 1 },
-    ...twinExtra(st, g, sz)
+    ...twinExtra(st)
   ];
 }
 
 function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, onReset = null }: { state: any; dispatch: any; command?: { cam?: string; mode?: string; n: number } | null; hideToolbars?: boolean; onReset?: (() => void) | null }) {
-  const commandedStage = state.stage;
-  const actualStage = { ...commandedStage, x: commandedStage.actualX ?? commandedStage.x, y: commandedStage.actualY ?? commandedStage.y, z: commandedStage.actualZ ?? commandedStage.z };
-  const renderState = { ...state, stage: actualStage };
+  const renderState = state;
   const [cam, setCam] = useState(CAM.iso);
   const camRef = useRef(cam); camRef.current = cam;
   const raf = useRef(0), drag = useRef(null), svgRef = useRef(null);
   const [mode, setMode] = useState("lab");
   const [qual, setQual] = useState("bal");
   const [hid, setHid] = useState({}), [solo, setSolo] = useState(null), [ghost, setGhost] = useState({}), [sel, setSel] = useState(null), [tm, setTm] = useState(0);
-  const { stage: g, chamber: c } = renderState;
+  const { chamber: c } = renderState;
   const parts = twinParts(renderState).map(p => ({ ...p, mt: p.mt || MATID[p.id] || (p.id.startsWith("leg") ? "anod" : null) }));
   const pump = (c.roughingRpm||0)>1 || (c.turboRpm||0)>1 || c.vent, still = FX.reduced || FX.hide;
   useEffect(() => { if (still || (!pump && c.isolation)) return; const i = setInterval(() => setTm(Date.now()), 80); return () => clearInterval(i); }, [still, pump, c.isolation]);
@@ -2901,7 +3016,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
     el.addEventListener("wheel", w, { passive: false }); return () => el.removeEventListener("wheel", w);
   }, []);
   const goTo = n => {
-    const c2 = n === "stage" ? { yaw: -0.5, pit: 0.4, dist: 260, t: [g.x, g.y, 1100 + g.z] } : CAM[n];
+    const c2 = n === "stage" ? { yaw: -0.5, pit: 0.4, dist: 260, t: [-200, 0, 854.6] } : CAM[n];
     cancelAnimationFrame(raf.current);
     if (FX.reduced) { setCam(c2); return; }
     const a = camRef.current, t0 = performance.now();
@@ -2977,25 +3092,26 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
   markers3d.forEach(m => { const q = P(m.x, m.y, 1100 + m.z); items.push({ d: q[2] - 2, s: <circle key={"pt" + m.id} cx={q[0]} cy={q[1]} r={mr} fill={m.ok ? "#34d399" : "#fbbf24"} fillOpacity=".85" stroke="#06080d" strokeWidth=".8" style={{ pointerEvents: "none" }}><title>{m.label}</title></circle> }); });
   items.sort((a, b) => b.d - a.d);
   const line = (key, pts, col, w, dash, on, lab) => { if (!on) return null; const q = pts.map(v => P(...v)); return <polyline key={key} points={q.map(v => v[0].toFixed(1) + "," + v[1].toFixed(1)).join(" ")} fill="none" stroke={col} strokeWidth={w} strokeDasharray={dash} className={still ? "" : "sig-flow"} style={{ filter: `drop-shadow(0 0 3px ${col})` }}><title>{lab}</title></polyline>; };
-  const sph = [g.x, g.y, 1100 + g.z];
+  const sph = [-200, 0, 854.6];
+  const labelA = P(-200, 0, 885), labelB = P(200, 0, 885);
   const vac = [[-300, 0, 1100], [-900, 0, 1100], [-900, 0, 250]];
   const along = (pts, u) => { const L = pts.slice(1).map((q, i) => Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1], q[2] - pts[i][2])), T = L.reduce((a, b) => a + b, 0); let d = u * T, i = 0; while (i < L.length - 1 && d > L[i]) { d -= L[i]; i++; } const f = d / L[i]; return pts[i].map((v, k) => v + (pts[i + 1][k] - v) * f); };
-  const k0 = 700 / dist, nice = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000].find(v => v * k0 >= 90) || 5000, env = P(35, -35, 1100 + 35);
+  const k0 = 700 / dist, nice = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000].find(v => v * k0 >= 90) || 5000, env = P(0, -350, 1100);
   const act = { clk: c && state.clock.locked, vna: state.vna.power, rf: state.vna.power && state.vna.rf, las: state.ldv.power && state.ldv.shutter, ldv: state.ldv.power };
   const sp0 = parts.find(q => q.id === sel);
   const key = e2 => { const q = camRef.current; if (e2.key === "ArrowLeft") setCam({ ...q, yaw: q.yaw - 0.1 }); else if (e2.key === "ArrowRight") setCam({ ...q, yaw: q.yaw + 0.1 }); else if (e2.key === "ArrowUp") setCam({ ...q, pit: Math.min(1.5, q.pit + 0.08) }); else if (e2.key === "ArrowDown") setCam({ ...q, pit: Math.max(-0.2, q.pit - 0.08) }); else if (e2.key === "+" || e2.key === "=") setCam({ ...q, dist: q.dist * 0.85 }); else if (e2.key === "-") setCam({ ...q, dist: q.dist / 0.85 }); else if (e2.key === "Escape") setSel(null); };
   const B = ({ on = false, f, children }) => <button aria-pressed={on} onClick={f} className={`rounded border px-2 py-1 text-[10px] ${on ? "border-sky-500 text-sky-200" : "border-zinc-700 text-zinc-300"}`}>{children}</button>;
-  const rows = [["Door", c.doorOpen ? "▲ OPEN" : "● closed"], ["Stage mm", `${g.x.toFixed(1)}, ${g.y.toFixed(1)}, ${g.z.toFixed(1)} (±${LIMIT_MM})`], ["Faraday", c.faraday ? "● on" : "▲ OFF (panel open)"], ["Isolation", c.isolation ? "● active" : "▲ OFF (jitter)"], ["Roughing", (c.roughingRpm||0)>1 ? `▶ ${(c.roughingRpm||0).toFixed(0)}%` : "○ off"], ["Turbo", (c.turboRpm||0)>1 ? `▶ ${(c.turboRpm||0).toFixed(0)}%` : "○ off"], ["LDV shutter", state.ldv.shutter ? "▶ open (beam)" : "○ closed"], ["VNA RF", act.rf ? "▶ on" : "○ off"], ["Clock ref", state.clock.locked ? "● locked" : "○ unlocked"]];
+  const rows = [["A/B spacing", "0.400 m"], ["LOC-1 pressure", "101.325 kPa (assumed)"], ["Faraday", c.faraday ? "● on" : "▲ OFF (panel open)"], ["Isolation", c.isolation ? "● active" : "▲ OFF (jitter)"], ["Legacy roughing", (c.roughingRpm||0)>1 ? `▶ ${(c.roughingRpm||0).toFixed(0)}%` : "○ deferred"], ["Legacy turbo", (c.turboRpm||0)>1 ? `▶ ${(c.turboRpm||0).toFixed(0)}%` : "○ deferred"], ["LDV shutter", state.ldv.shutter ? "▶ open (beam)" : "○ closed"], ["VNA role", "exploratory only"], ["Clock ref", state.clock.locked ? "● locked" : "○ unlocked"]];
   return (
     <div className="space-y-2">
-      <div className="rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[10px] text-amber-200">▲ Conceptual, simplified model. Dimensions are plausible approximations, not an exact replica of any instrument. Only the stage ±{LIMIT_MM} mm travel is taken from the simulator.</div>
+      <div className="rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[10px] text-amber-200">▲ Conceptual model only. Fixed A/B nodal mounts are 0.400 m apart; T/R/S/D copper artifacts are ≤1 cm. Legacy XYZ and vacuum simulations are not LOC-1 features.</div>
       <div className="flex flex-wrap items-center gap-1">
         {!hideToolbars && [["lab", "Laboratory"], ["chamber", "Chamber"], ["instrument", "Instrument"], ["exploded", "Exploded"], ["transparent", "Transparent"], ["chain", "Measurement chain"]].map(([m, l]) => <B key={m} on={mode === m} f={() => setM(m)}>{l}</B>)}
         <button onClick={reset} className="rounded border border-zinc-600 px-2 py-1 text-[10px] text-zinc-200">Reset view</button>
         <label className="ml-2 flex items-center gap-1 text-[10px] text-zinc-400">Quality<select aria-label="Render quality" value={qual} onChange={e => setQual(e.target.value)} className="rounded border border-zinc-700 bg-black px-1 py-0.5 text-[10px]"><option value="perf">Performance</option><option value="bal">Balanced</option><option value="qual">Quality</option></select></label>
       </div>
       {!hideToolbars && <div className="flex flex-wrap items-center gap-1">
-        {[["iso", "Isometric"], ["front", "Front"], ["top", "Top"], ["interior", "Chamber interior"], ["optical", "Optical path"], ["rf", "RF path"], ["vacuum", "Vacuum path"], ["rack", "Instrument rack"], ["stage", "Stage position"]].map(([n, l]) => <button key={n} onClick={() => goTo(n)} className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-sky-500">{l}</button>)}
+        {[["iso", "Isometric"], ["front", "Front"], ["top", "Top"], ["interior", "Chamber interior"], ["optical", "Optical path"], ["rf", "RF path"], ["vacuum", "Legacy vacuum fixtures"], ["rack", "Instrument rack"], ["stage", "A/B rail"]].map(([n, l]) => <button key={n} onClick={() => goTo(n)} className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-sky-500">{l}</button>)}
       </div>}
       <div className="flex flex-col gap-3">
         <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800 bg-black">
@@ -3010,10 +3126,12 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
             {line("clk2", [[1580, 0, 1600], [1580, 0, 1950], [110, 0, 1950], [110, 0, 1720]], "#22d3ee", 2, "6 4", act.clk && act.ldv, "Clock reference to LDV")}
             {line("rf", [[1580, 0, 1350], [1580, 0, 1100], [330, 0, 1100], [70, 40, 1100]], "#e879f9", 2.5, "2 5", act.rf, "RF path")}
             {items.map(i => i.s)}
-            {line("las", [[0, 0, 1560], [0, 0, 1405], [g.x, g.y, 1100 + g.z + 25]], "#facc15", 2.2, "", act.las, "LDV laser path")}
+            {line("rail-dimension", [[-200, 0, 815], [200, 0, 815]], "#7dd3fc", 1.4, "4 4", true, "0.400 m A/B spacing")}
+            {dist < 3000 && <g fontSize="10" fill="#e2e8f0" fontFamily="monospace" textAnchor="middle"><text x={labelA[0]} y={labelA[1]}>A · T</text><text x={labelB[0]} y={labelB[1]}>B · R</text></g>}
+            {line("las", [[0, 0, 1560], [0, 0, 1405], [sph[0], sph[1], sph[2] + 4.6]], "#facc15", 2.2, "", act.las, "LDV laser path")}
             {pump && !still && [0, 1, 2, 3, 4, 5].map(i => { const q = P(...along(vac, ((tm / 2600) + i / 6) % 1)); return <circle key={"pp" + i} cx={q[0]} cy={q[1]} r="2.6" fill="#bae6fd" />; })}
             {mode === "exploded" && Object.keys(EXPL).filter(k => !hid[k]).map(k => { const a = P(0, 0, 1100), b = P(EXPL[k][0], EXPL[k][1], 1100 + EXPL[k][2]); return <line key={"x" + k} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#64748b" strokeDasharray="3 4" opacity=".6" />; })}
-            {dist < 3000 && <text x={env[0] + 8} y={env[1]} fontSize="10" fill="#fbbf24" fontFamily="monospace">±{LIMIT_MM} mm stage travel</text>}
+            {dist < 3000 && <text x={env[0] + 8} y={env[1]} fontSize="10" fill="#fbbf24" fontFamily="monospace">A ↔ B: 0.400 m · T/R/S/D: ≤1 cm</text>}
             {dist < 3000 && markers3d.length > 0 && <text x={env[0] + 8} y={env[1] + 13} fontSize="10" fill="#6ee7b7" fontFamily="monospace">● {markers3d.length} measured point{markers3d.length === 1 ? "" : "s"} (green valid, amber suspect)</text>}
             <g fontFamily="monospace" fontSize="10" fill="#cbd5e1"><line x1="20" y1="455" x2={20 + nice * k0} y2="455" stroke="#e2e8f0" strokeWidth="2" /><line x1="20" y1="450" x2="20" y2="460" stroke="#e2e8f0" /><line x1={20 + nice * k0} y1="450" x2={20 + nice * k0} y2="460" stroke="#e2e8f0" /><text x="20" y="444">{nice >= 1000 ? nice / 1000 + " m" : nice + " mm"} (scale at focus)</text><text x="780" y="470" textAnchor="end" fill="#64748b">view dist {(dist / 1000).toFixed(2)} m · LOD {tier} · {items.length} faces</text></g>
           </svg>
@@ -3025,7 +3143,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
               <div key={k} className="border-b border-zinc-900 py-1">
                 <div className="flex items-center justify-between gap-1"><span className={hid[k] ? "text-zinc-600 line-through" : "text-zinc-200"}>{GRP[k]}</span>
                   <span className="flex gap-1"><B on={!!hid[k]} f={() => setHid(prev => ({ ...prev, [k]: !prev[k] }))}>Hide</B><B on={solo === k} f={() => { const nextSolo = solo === k ? null : k; setSolo(nextSolo); if (nextSolo) setHid(prev => ({ ...prev, [k]: false })); }}>Isolate</B><B on={!!ghost[k]} f={() => setGhost(prev => ({ ...prev, [k]: !prev[k] }))}>Ghost</B></span></div>
-                {k === "chamber" && <div className="mt-1 flex flex-wrap gap-1">{["Chamber body", "Door", "Quartz viewport", "Feedthroughs", "Vacuum manifold", "Internal XYZ stage"].map(n => { const p = parts.find(q => q.sub === n); return <button key={n} onClick={() => p && focus(p)} className="rounded bg-zinc-900 px-1.5 py-0.5 text-[9px] text-zinc-400 hover:text-sky-300">{n}</button>; })}</div>}
+                {k === "chamber" && <div className="mt-1 flex flex-wrap gap-1">{["Chamber body", "Door", "Quartz viewport", "Feedthroughs", "Vacuum manifold", "Static A/B rail"].map(n => { const p = parts.find(q => q.sub === n); return <button key={n} onClick={() => p && focus(p)} className="rounded bg-zinc-900 px-1.5 py-0.5 text-[9px] text-zinc-400 hover:text-sky-300">{n}</button>; })}</div>}
               </div>
             ))}
           </div>
@@ -3118,9 +3236,9 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
           <div className="mt-2 flex items-center gap-3"><div><div className="text-[9px] uppercase text-zinc-500">Temperature</div><Sparkline values={trend.map(s => s.temperatureC)} label="Temperature" color="#fdba74" /></div><div><div className="text-[9px] uppercase text-zinc-500">Pressure</div><Sparkline values={trend.map(s => s.pressureTorr)} log label="Pressure" color="#7dd3fc" /></div></div>
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Stage Position <HelpInfo termKey="location_variable" /></div>
-          <div className="mt-2 text-lg font-bold text-violet-300">X:{state.stage.x.toFixed(1)} Y:{state.stage.y.toFixed(1)} Z:{state.stage.z.toFixed(1)}</div>
-          <div className="mt-1 text-[11px] text-zinc-500">Limits: ±35 mm</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center">Artifact Rail <HelpInfo termKey="location_variable" /></div>
+          <div className="mt-2 text-lg font-bold text-violet-300">A ↔ B · 0.400 m</div>
+          <div className="mt-1 text-[11px] text-zinc-500">Static nodal mounts · T/R/S/D ≤ 1 cm OD</div>
         </div>
       </div>
 
@@ -3215,37 +3333,6 @@ function Chamber({ state, dispatch, HelpInfo }) {
   const labStateRef = useRef(state); labStateRef.current = state;
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
 
-  const move = (axis, d) => {
-    if (state.stage.clampActive) {
-      dispatch({ type: "ALARM", text: "Stage move blocked: mechanical stage clamp is currently engaged.", severity: "critical" });
-      return;
-    }
-    dispatch({ type: "MOVE_STAGE", position: { [axis]: clamp(state.stage[axis] + d, -LIMIT_MM, LIMIT_MM) } });
-  };
-
-  const handleTurboClick = () => {
-    if (state.chamber.doorOpen) { dispatch({ type: "ALARM", text: "Turbo activation rejected: chamber door is open.", severity: "critical" }); return; }
-    if (state.chamber.pressure > 50) {
-      dispatch({ type: "ALARM", text: "Turbo activation rejected: chamber pressure exceeds 50 Torr safety interlock.", severity: "critical" });
-      return;
-    }
-    set("chamber", { vent: false, roughing: true, turbo: true });
-  };
-
-  const handleVentClick = () => {
-    if (state.chamber.pressure < 1) {
-      set("ui", {
-        confirmModal: {
-          title: "Vent Chamber Under Deep Vacuum?",
-          desc: "The chamber is currently under deep vacuum (< 1 Torr). Venting now will cause rapid gas rush and potential turbulence shock.",
-          onConfirm: () => { set("chamber", { vent: true, roughing: false, turbo: false }); set("ui", { confirmModal: null }); }
-        }
-      });
-    } else {
-      set("chamber", { vent: true, roughing: false, turbo: false });
-    }
-  };
-
   const handleDoorClick = () => {
     if (state.chamber.pressure < 760 && !state.chamber.doorOpen) {
       set("ui", {
@@ -3263,18 +3350,18 @@ function Chamber({ state, dispatch, HelpInfo }) {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-bold flex items-center">Environmental Chamber & XYZ Stage <HelpInfo termKey="chamber" /></h1>
-        <p className="mt-1 text-sm text-zinc-400">Interactive 3D Hardware Simulation with rendered stainless enclosure, optical window, vacuum fittings, and motorized stage.</p>
+        <h1 className="text-xl font-bold flex items-center">Legacy Environmental Training View <HelpInfo termKey="chamber" /></h1>
+        <p className="mt-1 text-sm text-zinc-400">Separate legacy training simulation. LOC-1 uses the static A/B rail and atmospheric enclosure model in the Protocol Workspace; XYZ travel and vacuum pumping are not LOC-1 controls.</p>
       </div>
 
-      <ChamberLifecyclePanel state={state} cv={null} setCv={null} />
-      <PumpLifecyclePanel state={state} />
-      <StageMotionPanel state={state} />
+      <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-xs text-amber-100">
+        LOC-1 baseline: modeled atmospheric pressure (101.325 kPa) with optical access. Legacy vacuum and XYZ mechanisms are deferred from this protocol view; no physical facility state is represented.
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_.9fr]">
         <div className={`min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl ${sceneView === "schematic" ? "xl:col-span-2" : ""}`}>
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3 flex items-center justify-between">
-            <span className="flex items-center">Thermal-Vacuum Chamber (Hardware View) <HelpInfo termKey="chamber" /></span>
+            <span className="flex items-center">Conceptual Thermal Enclosure (Legacy View) <HelpInfo termKey="chamber" /></span>
             <StatusLED status={getChamberLifecycle(state).visual} />
           </div>
 
@@ -3290,7 +3377,7 @@ function Chamber({ state, dispatch, HelpInfo }) {
           <ChamberViewControls view={sceneView} cam={cur.cam} mode={cur.mode} onCam={chooseCam} onMode={chooseMode} notice={viewNotice} HelpInfo={HelpInfo} />
           {sceneView === "lab" && (!scene3dReady ? <LabEnvironmentSkeleton /> : (
             <Suspense fallback={<LabEnvironmentSkeleton />}>
-              <LabScene3D stateRef={labStateRef} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} command={command} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
+              <LabScene3D stateRef={labStateRef} origin={state.protocol?.dataOrigin || "SYNTHETIC"} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} command={command} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
             </Suspense>
           ))}
           {sceneView === "schematic" && (
@@ -3306,42 +3393,17 @@ function Chamber({ state, dispatch, HelpInfo }) {
 
           <div className="mt-3 flex gap-2 items-center justify-between">
             <div className="flex gap-2">
-              <button onClick={() => dispatch({ type: "HOME_STAGE" })} className="rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">Home Stage</button>
-              <button onClick={() => dispatch({ type: "MOVE_STAGE", position: { x: 0, y: 0, z: 0 } })} className="rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">Park Reference</button>
               <button onClick={handleDoorClick} className={`rounded border px-3 py-1.5 text-xs ${state.chamber.doorOpen ? "border-rose-600 text-rose-300" : "border-zinc-700 bg-zinc-900 text-zinc-200"}`}>
                 {state.chamber.doorOpen ? "Close Door" : "Open Door"}
               </button>
             </div>
-            <label className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-300">
-              <input type="checkbox" aria-label="Stage clamp" checked={state.stage.clampActive} onChange={e => set("stage", { clampActive: e.target.checked })} />
-              <span>Mechanical Clamp</span>
-            </label>
           </div>
         </div>
 
         <div className="space-y-4">
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl space-y-3">
             <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center justify-between">
-              <span>Precision XYZ Stage Controls</span> <HelpInfo termKey="location_variable" />
-            </div>
-            {["x", "y", "z"].map(axis => (
-              <div key={axis} className="bg-zinc-900 p-2 rounded border border-zinc-800">
-                <div className="flex justify-between items-center text-xs mb-1">
-                  <span className="uppercase text-zinc-400 font-bold">Axis {axis}</span>
-                  <span className="font-mono text-sky-300">{state.stage[axis].toFixed(3)} mm</span>
-                </div>
-                <input type="range" aria-label={`Stage ${String(axis).toUpperCase()} position in millimetres`} min={-LIMIT_MM} max={LIMIT_MM} step="0.1" value={state.stage[axis]} disabled={!state.facility.power || state.chamber.doorOpen || state.stage.clampActive} onChange={e => move(axis, Number(e.target.value) - state.stage[axis])} className="w-full accent-sky-400" />
-                <div className="flex gap-1 mt-1">
-                  <button onClick={() => move(axis, -.5)} className="flex-1 bg-zinc-800 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-700">-0.5</button>
-                  <button onClick={() => move(axis, .5)} className="flex-1 bg-zinc-800 py-1 text-xs rounded border border-zinc-700 hover:bg-zinc-700">+0.5</button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl space-y-3">
-            <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 flex items-center justify-between">
-              <span>Thermal & Vacuum Instrumentation</span> <HelpInfo termKey="thermostat" />
+              <span>Thermal Enclosure Training Model</span> <HelpInfo termKey="thermostat" />
             </div>
             <div className="flex items-center justify-between text-xs">
               <span>Active Thermostat <HelpInfo termKey="thermostat" /></span>
@@ -3351,12 +3413,8 @@ function Chamber({ state, dispatch, HelpInfo }) {
               <input type="number" step=".1" value={state.chamber.targetTemp} disabled={!state.chamber.thermostat} onChange={e => set("chamber", { targetTemp: Number(e.target.value) })} className="mt-1 w-full rounded border border-zinc-700 bg-black p-1.5 font-mono text-orange-200 text-xs" />
             </label>
             <div className="text-xs">Current Temp: <span className="font-mono text-orange-300">{state.chamber.temperature.toFixed(3)} °C</span></div>
-            <div className="text-xs">Pressure: <span className="font-mono text-sky-300">{fmtPressureShown(state.chamber.pressure)}</span></div>
-            <div className="grid grid-cols-3 gap-2 pt-2">
-              <button onClick={handleVentClick} className="rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">Vent</button>
-              <div className="flex items-stretch gap-1"><button onClick={() => set("chamber", { vent: false, roughing: true })} disabled={state.chamber.doorOpen} className="flex-1 rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Rough Pump</button><HelpInfo termKey="roughing_pump" /></div>
-              <div className="flex items-stretch gap-1"><button onClick={handleTurboClick} disabled={state.chamber.pressure > 50 || state.chamber.doorOpen} className="flex-1 rounded border border-zinc-700 bg-zinc-900 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40" title={state.chamber.pressure > 50 ? "Interlock active: pressure must be below 50 Torr" : ""}>Turbo Pump</button><HelpInfo termKey="turbo_pump" /></div>
-            </div>
+            <div className="text-xs">LOC-1 pressure assumption: <span className="font-mono text-sky-300">101.325 kPa · atmospheric</span></div>
+            <p className="rounded border border-zinc-800 bg-black/20 p-2 text-[10px] text-zinc-500">Vacuum controls are deferred in the LOC-1 protocol; the historical pumpdown simulation is not part of this view.</p>
           </div>
         </div>
       </div>
@@ -3482,8 +3540,8 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
       <div className={`rounded-lg border p-3 ${visualClass(acqState)}`}><div className="flex flex-wrap items-center gap-3"><StatusLED status={acqState}/><div className="flex-1"><div className="text-xs font-bold uppercase">VNA Acquisition · {(vna.acquisitionPhase || "idle").replaceAll("_"," ")}</div><div className="mt-1 h-1.5 overflow-hidden rounded bg-black/60"><div className="h-full bg-cyan-300 transition-[width]" style={{width:`${Math.round((vna.sweepProgress||0)*100)}%`}}/></div></div>{vna.lastMetrics && <div className="grid grid-cols-4 gap-2 font-mono text-[9px]"><span>f₀ {vna.lastMetrics.f0.toFixed(2)}{vna.lastMetrics.fitOk === false ? "" : ` ± ${Number(vna.lastMetrics.uncertaintyHz).toFixed(2)}`} Hz</span><span>MIN {vna.lastMetrics.minS11.toFixed(2)} dB</span><span>Q {vna.lastMetrics.fitOk === false ? "–" : Math.round(vna.lastMetrics.q)}</span><span>{vna.lastMetrics.quality}</span></div>}</div></div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold flex items-center">Keysight E5080B VNA Hardware Front Panel <HelpInfo termKey="vna" /></h1>
-          <p className="mt-1 text-sm text-zinc-400">Photorealistic vector network analyzer simulation featuring touchscreen display, softkeys, and physical port connectors.</p>
+          <h1 className="text-xl font-bold flex items-center">Exploratory Electromagnetic Diagnostic (VNA) <HelpInfo termKey="vna" /></h1>
+          <p className="mt-1 text-sm text-zinc-400">Synthetic S11 diagnostic model for exploration only; it is not a confirmatory channel or a physical instrument.</p>
         </div>
         <div className="flex gap-2">
           <button onClick={startSweep} disabled={!vna.power} className="rounded border border-sky-500 bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-40">{vna.sweeping ? "Acquiring…" : "Trigger Sweep"}</button>
@@ -3497,7 +3555,7 @@ const Vna = memo(function Vna({ sweep, HelpInfo }: { sweep: () => void; HelpInfo
           <div className="flex justify-between items-center mb-3 border-b border-zinc-700 pb-2">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_2px_rgba(16,185,129,0.7)]" />
-              <span className="font-bold text-xs tracking-wider text-zinc-200 flex items-center">KEYSIGHT E5080B ENA VECTOR NETWORK ANALYZER <HelpInfo termKey="vna" /></span>
+              <span className="font-bold text-xs tracking-wider text-zinc-200 flex items-center">EXPLORATORY ELECTROMAGNETIC DIAGNOSTIC · VNA MODEL <HelpInfo termKey="vna" /></span>
             </div>
             <span className="text-[10px] font-mono text-zinc-400">9 kHz - 4.5 GHz</span>
           </div>

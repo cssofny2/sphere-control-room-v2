@@ -120,9 +120,9 @@ export const OVERVIEW_HELP: Record<string, HelpEntry> = {
     related: ["ov.temperature", "ov.setpoint"],
   },
   "ov.kpi_stage": {
-    title: "Stage position",
-    desc: "Where the platform holding the sample is right now, given as three distances (X, Y, Z) from the centre.",
-    related: ["ov.xyz", "ov.mm", "ov.stage"],
+    title: "LOC-1 A/B rail",
+    desc: "The protocol workspace models fixed kinematic positions A and B separated by 0.400 m. This is a schematic value, not a measured facility installation.",
+    related: ["ov.stage"],
   },
   "ov.kpi_quality": {
     title: "Data quality",

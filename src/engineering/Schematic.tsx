@@ -5,7 +5,6 @@ import { PARTS, PART_BY_ID, fmtP, partsWithProblems, pushSample, signalLinks, ty
 import { select, useSelected } from './selection';
 import { getHelp } from '../overview/overviewHelp';
 
-const LIMIT_MM = 35; // stage travel in the simulator (the one real dimension in these drawings)
 
 // Okabe-Ito colour-blind-safe palette. Status is never colour alone: each state also has its own shape.
 const OK = '#009E73', WARN = '#E69F00', FAIL = '#D55E00', BLUE = '#0072B2', SKY = '#56B4E9', PINK = '#CC79A7';
@@ -114,34 +113,32 @@ function PID({ c }: { c: Ctx }) {
 }
 
 function Cutaway({ c }: { c: Ctx }) {
-  const s = c.state; const sx = 500 + (s.stage.x || 0), sz = 300 - (s.stage.z || 0);
+  const s = c.state; const sx = 300, sz = 375;
   const beam = s.facility.power && s.ldv.power && s.ldv.shutter; const leak = s.failures.vacuumLeak;
   return <>
-    <text className="e-s" x="24" y="26">Side cutaway, scale 1 px = 1 mm. Wall sizes are conceptual; only the ±{LIMIT_MM} mm stage travel comes from the simulator.</text>
+    <text className="e-s" x="24" y="26">Conceptual atmospheric enclosure. Fixed A/B kinematic mounts are 0.400 m apart; artifacts are ≤1 cm OD.</text>
     <PartG c={c} id="faraday" box={[150, 62, 700, 440]} tagAnchor="start" tagDy={-432}><rect className="e-cage" x="150" y="62" width="700" height="440" rx="10" /></PartG>
     <PartG c={c} id="chamber" box={[180, 80, 640, 400]} tagDy={-326}><rect className="e-metal" x="180" y="80" width="640" height="400" rx="8" /><rect style={{ fill: 'var(--e-canvas)', stroke: 'var(--e-ink)' }} x="198" y="98" width="604" height="364" rx="4" /><text className="e-d" x="210" y="122">{fmtP(s.chamber.pressure)} · {s.chamber.temperature.toFixed(2)} °C</text></PartG>
     <PartG c={c} id="door" box={[820, 150, 22, 220]} tagDy={14}><rect className="e-metal" x="820" y="150" width="22" height="220" />{leak && <circle cx="820" cy="260" r="7" fill="none" stroke="var(--e-fail)" strokeWidth="3" />}</PartG>
-    <PartG c={c} id="stage" box={[440, 372, 120, 90]} tagDy={14}><rect className="e-metal" x="440" y="440" width="120" height="22" /><rect className="e-body" x="486" y="372" width="28" height="68" /><rect className="e-metal" x={sx - 40} y="360" width="80" height="12" /></PartG>
-    <rect x={500 - LIMIT_MM} y={300 - LIMIT_MM} width={LIMIT_MM * 2} height={LIMIT_MM * 2} fill="none" stroke="var(--e-blue)" strokeDasharray="3 3" />
-    <PartG c={c} id="sphere" box={[sx - 18, sz - 18, 36, 36]} tagDy={-40}><circle className="e-metal" cx={sx} cy={sz} r="18" /></PartG>
+    <PartG c={c} id="stage" box={[270, 392, 460, 28]} tagDy={18}><line x1="270" y1="406" x2="730" y2="406" stroke="var(--e-metal)" strokeWidth="8" /><circle cx="300" cy="400" r="7" fill="var(--e-fill)" /><circle cx="700" cy="400" r="7" fill="var(--e-fill)" /><text className="e-s" x="300" y="382" textAnchor="middle">A</text><text className="e-s" x="700" y="382" textAnchor="middle">B</text></PartG>
+    <PartG c={c} id="sphere" box={[sx - 5, sz - 5, 10, 10]} tagDy={-14}><circle cx={sx} cy={sz} r="4.6" fill="#c97859" stroke="#ffe1d1" strokeWidth="1" /><text className="e-s" x={sx} y={sz + 21} textAnchor="middle">T · Ø9.2 mm</text></PartG>
+    <circle cx="700" cy={sz} r="4.6" fill="#c97859" stroke="#ffe1d1" strokeWidth="1" /><text className="e-s" x="700" y={sz + 21} textAnchor="middle">R · Ø9.2 mm</text>
     <PartG c={c} id="thermo" box={[232, 140, 28, 28]} tagDy={-22}><circle className="e-body" cx="246" cy="154" r="13" /><text className="e-t" x="246" y="158" textAnchor="middle">TT</text></PartG>
     <PartG c={c} id="gauge" box={[740, 140, 28, 28]} tagDy={-22}><circle className="e-body" cx="754" cy="154" r="13" /><text className="e-t" x="754" y="158" textAnchor="middle">PT</text></PartG>
     <PartG c={c} id="ldv" box={[20, 240, 110, 70]} tagDy={14}><rect className="e-body" x="20" y="240" width="110" height="70" rx="6" /><text className="e-s" x="30" y="280">LDV head</text></PartG>
     <circle cx="180" cy="275" r="14" fill="var(--e-sel)" stroke="var(--e-ink)" strokeWidth="1.5" /><text className="e-s" x="152" y="305">window</text>
-    <path d={`M130,275 L${sx - 18},${sz}`} stroke={PINK} strokeWidth="2.5" fill="none" opacity={beam ? 1 : 0.35} strokeDasharray={beam ? '0' : '3 6'} />
+    <path d={`M130,275 L${sx - 5},${sz}`} stroke={PINK} strokeWidth="2.5" fill="none" opacity={beam ? 1 : 0.35} strokeDasharray={beam ? '0' : '3 6'} />
     <PartG c={c} id="isolation" box={[200, 490, 600, 34]} tagDy={14}><rect className="e-metal" x="200" y="490" width="600" height="12" />{[240, 400, 600, 760].map(x => <path key={x} className="e-pipe" style={{ strokeWidth: 2 }} d={`M${x},502 l7,4 -14,6 14,6 -14,6 7,4`} />)}</PartG>
     {/* dimensions */}
     <Dim x1={180} y1={50} x2={820} y2={50} label="≈ 640 mm (conceptual)" lx={500} ly={44} />
     <Dim x1={870} y1={80} x2={870} y2={480} label="≈ 400 mm" lx={880} ly={284} anchor="start" />
-    <Dim x1={500 - LIMIT_MM} y1={250} x2={500 + LIMIT_MM} y2={250} label={`±${LIMIT_MM} mm travel (X)`} lx={500} ly={240} />
-    <Dim x1={440} y1={300 - LIMIT_MM} x2={440} y2={300 + LIMIT_MM} label={`±${LIMIT_MM} mm (Z)`} lx={432} ly={304} anchor="end" />
-    <text className="e-d" x="560" y="330">live: X {s.stage.x.toFixed(2)}, Y {s.stage.y.toFixed(2)}, Z {s.stage.z.toFixed(2)} mm</text>
+    <Dim x1={300} y1={350} x2={700} y2={350} label="0.400 m A/B spacing" lx={500} ly={342} />
   </>;
 }
 
 const NODES: Record<string, [number, number, number, number, string]> = {
   clock: [40, 230, 150, 90, 'Rubidium clock'], vna: [330, 60, 170, 80, 'Network analyzer'], scope: [330, 240, 170, 80, 'Oscilloscope'], ldv: [330, 420, 170, 80, 'Laser vibrometer'],
-  sphere: [620, 240, 150, 80, 'Test sphere'], pc: [830, 240, 150, 80, 'Workstation'], stage: [830, 420, 150, 80, 'XYZ stage'],
+  sphere: [620, 240, 150, 80, 'Copper artifact T'], pc: [830, 240, 150, 80, 'Workstation'], stage: [830, 420, 150, 80, 'Fixed A/B rail'],
 };
 const PATHS: Record<string, { d: string; mid: [number, number] }> = {
   'ref-vna': { d: 'M190,260 C260,260 260,100 330,100', mid: [262, 170] }, 'ref-scope': { d: 'M190,280 H330', mid: [260, 272] }, 'ref-ldv': { d: 'M190,300 C260,300 260,460 330,460', mid: [262, 390] },

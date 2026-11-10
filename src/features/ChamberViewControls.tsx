@@ -12,7 +12,7 @@ export const CAM_PRESETS: CamPreset[] = [
   { id: 'front', label: 'Front', desc: 'straight on at the chamber door', eng: 'front', lab: true },
   { id: 'top', label: 'Top-down', desc: 'looking straight down from the ceiling', eng: 'top', lab: true },
   { id: 'inside', label: 'Inside chamber', desc: 'the camera sits inside the chamber and looks at the sphere', eng: 'interior', lab: true },
-  { id: 'stage', label: 'Stage & sphere', desc: 'a close-up of the sphere on its XYZ stage', eng: 'stage', lab: true },
+  { id: 'stage', label: 'A/B artifact rail', desc: 'a close-up of the fixed A/B kinematic mounts, 0.40 m apart', eng: 'stage', lab: true },
   { id: 'laser', label: 'Laser path', desc: 'follows the LDV beam from the head to the sphere', eng: 'optical', lab: true },
   { id: 'rf', label: 'RF path', desc: 'follows the RF cable from the rack to the chamber port', eng: 'rf', lab: true },
   { id: 'pumps', label: 'Vacuum & pumps', desc: 'the roughing and turbo pumps and their plumbing', eng: 'vacuum', lab: true },

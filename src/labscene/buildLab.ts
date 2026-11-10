@@ -8,12 +8,11 @@ import { buildProps } from './labProps';
 import { mergeStaticMeshes, type MergeStats } from './staticMerge';
 import type { DeskState } from '../technician/desk';
 
-// A bright, realistic-looking laboratory: stainless thermal-vacuum chamber with door and
-// viewports, an XYZ stage and sphere inside, vacuum pumps, a laser vibrometer on a gantry, an
+// A conceptual thermal enclosure with door and viewports, a fixed A/B artifact rail inside,
+// legacy vacuum training fixtures, a laser vibrometer on a gantry, an
 // instrument rack with live screens, a workstation bench and a whiteboard. Everything is driven
 // by the same simulation state as the rest of the app (see `update`).
 
-export const STAGE_SCALE = 0.003;       // metres of scene per mm of stage travel (35 mm -> 0.105 m, exaggerated)
 const CH_Y = 1.1;                        // chamber axis height
 
 export type Lab = {
@@ -71,8 +70,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     white: track(new THREE.MeshStandardMaterial({ color: 0xf3f5f7, metalness: 0.05, roughness: 0.5 })),
     paint: track(new THREE.MeshStandardMaterial({ color: 0xc9d0d8, metalness: 0.3, roughness: 0.55 })),
     blue: track(new THREE.MeshStandardMaterial({ color: 0x1f6feb, metalness: 0.3, roughness: 0.45 })),
-    copper: track(new THREE.MeshStandardMaterial({ color: 0xb87333, metalness: 1, roughness: 0.3 })),
-    gold: track(new THREE.MeshStandardMaterial({ color: 0xf2b134, metalness: 1, roughness: 0.16 })),
+    copper: track(new THREE.MeshStandardMaterial({ color: 0xc97859, metalness: 1, roughness: 0.22, envMapIntensity: 1.1 })),
     ceramic: track(new THREE.MeshStandardMaterial({ color: 0xf5efe6, metalness: 0, roughness: 0.4 })),
     glass: track(new THREE.MeshPhysicalMaterial({ color: 0xcfe6ff, metalness: 0, roughness: 0.04, transparent: true, opacity: 0.2, clearcoat: 1, depthWrite: false })),
     rubber: track(new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.9 })),
@@ -128,7 +126,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     c.strokeStyle = '#1f6feb'; c.lineWidth = 4; c.beginPath(); c.arc(190, 330, 80, 0, 7); c.stroke(); c.beginPath(); c.ellipse(190, 330, 80, 24, 0, 0, 7); c.stroke();
     c.strokeStyle = '#d62d2d'; c.beginPath(); c.moveTo(190, 150); c.lineTo(190, 250); c.stroke(); c.fillStyle = '#d62d2d'; c.beginPath(); c.moveTo(190, 262); c.lineTo(176, 236); c.lineTo(204, 236); c.fill();
     c.fillStyle = '#1f3a5f'; c.font = '600 34px ui-monospace,monospace'; c.fillText('f0 = f(x, y, z)  ?', 360, 300); c.fillText('Δf ≈ location variable', 360, 360);
-    c.font = '500 26px ui-monospace,monospace'; c.fillStyle = '#51647a'; c.fillText('1. lock clock   2. pump down   3. settle T', 360, 440); c.fillText('4. calibrate VNA   5. scan the stage', 360, 480);
+    c.font = '500 26px ui-monospace,monospace'; c.fillStyle = '#51647a'; c.fillText('1. lock clock   2. stabilize temperature', 360, 440); c.fillText('3. place T at A   4. compare A/B', 360, 480);
   });
   add(box(2.2, 1.25, 0.04), M.alu, room, -0.2, 1.75, -2.57, false);
   add(new THREE.PlaneGeometry(2.1, 1.15), track(new THREE.MeshBasicMaterial({ map: wb.tex })), room, -0.2, 1.75, -2.545, false);
@@ -164,7 +162,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   const bez = new THREE.Mesh(track(new THREE.TorusGeometry(0.255, 0.022, 14, 48)), M.steel); bez.position.z = 0.04; bez.castShadow = true; door.add(bez);
   add(box(0.05, 0.4, 0.06), M.dark, door, 0.45, 0, 0.07); add(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 20), M.dark, door, 0.45, 0, 0.05).rotation.x = Math.PI / 2;
   for (const y of [0.32, -0.32]) add(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 16), M.dark, doorPivot, 0, y, 0);
-  add(new THREE.PlaneGeometry(0.34, 0.12), track(new THREE.MeshBasicMaterial({ map: canvasTex(256, 90, (c, w, h) => { c.fillStyle = '#e9eef3'; c.fillRect(0, 0, w, h); c.fillStyle = '#1f3a5f'; c.font = '800 34px system-ui'; c.fillText('S.P.H.E.R.E.', 14, 40); c.font = '600 20px system-ui'; c.fillStyle = '#51647a'; c.fillText('THERMAL-VAC CHAMBER', 14, 72); }).tex })), door, -0.3, -0.36, 0.039, false);
+  add(new THREE.PlaneGeometry(0.34, 0.12), track(new THREE.MeshBasicMaterial({ map: canvasTex(256, 90, (c, w, h) => { c.fillStyle = '#e9eef3'; c.fillRect(0, 0, w, h); c.fillStyle = '#1f3a5f'; c.font = '800 34px system-ui'; c.fillText('S.P.H.E.R.E.', 14, 40); c.font = '600 20px system-ui'; c.fillStyle = '#51647a'; c.fillText('ATMOSPHERIC ENCLOSURE', 14, 72); }).tex })), door, -0.3, -0.36, 0.039, false);
   // top port (LDV window) and side ports
   const topPort = add(new THREE.CylinderGeometry(0.11, 0.11, 0.16, 40), M.shell, ch, 0, R + 0.06, 0); topPort.material = M.steel;
   add(new THREE.CylinderGeometry(0.15, 0.15, 0.035, 40), M.steel, ch, 0, R + 0.15, 0); add(new THREE.CylinderGeometry(0.11, 0.11, 0.02, 40), M.glass, ch, 0, R + 0.152, 0, false);
@@ -194,27 +192,32 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   const isoLeds: THREE.Mesh[] = [];
   for (const [x, z] of [[-0.5, -0.45], [0.5, -0.45], [-0.5, 0.45], [0.5, 0.45]]) { const m = track(new THREE.MeshBasicMaterial({ color: 0x22c55e })); const l = new THREE.Mesh(track(new THREE.SphereGeometry(0.014, 12, 8)), m); l.position.set(x, 0.1, z + (z > 0 ? 0.045 : -0.045)); frame.add(l); isoLeds.push(l); }
 
-  // ── stage + sphere (inside the chamber) ──
+  // ── fixed A/B artifact rail (0.40 m separation, inside the chamber) ──
   const stageRoot = new THREE.Group(); stageRoot.position.y = CH_Y; bench.add(stageRoot);
-  const holes = canvasTex(256, 256, (c, w, h) => { c.fillStyle = '#d9dee4'; c.fillRect(0, 0, w, h); c.fillStyle = '#5b6672'; for (let x = 8; x < w; x += 16) for (let y = 8; y < h; y += 16) { c.beginPath(); c.arc(x, y, 3, 0, 7); c.fill(); } });
-  holes.tex.wrapS = holes.tex.wrapT = THREE.RepeatWrapping; holes.tex.repeat.set(3, 3);
-  const plate = add(box(0.72, 0.03, 0.86), track(new THREE.MeshStandardMaterial({ map: holes.tex, metalness: 0.8, roughness: 0.4 })), stageRoot, 0, -0.455, 0);
-  for (const [x, z] of [[-0.3, -0.36], [0.3, -0.36], [-0.3, 0.36], [0.3, 0.36]]) add(new THREE.CylinderGeometry(0.025, 0.03, 0.06, 16), M.steel, stageRoot, x, -0.5, z);
-  void plate;
-  for (const x of [-0.17, 0.17]) add(box(0.03, 0.025, 0.8), M.dark, stageRoot, x, -0.425, 0);
-  const yCar = new THREE.Group(); yCar.position.y = -0.4; stageRoot.add(yCar);
-  add(box(0.44, 0.045, 0.3), M.alu, yCar, 0, 0, 0); add(box(0.1, 0.05, 0.1), M.blue, yCar, 0.17, 0.0, 0.17); add(box(0.04, 0.012, 0.22), M.dark, yCar, 0.22, 0.03, 0);
-  const xCar = new THREE.Group(); xCar.position.y = 0.045; yCar.add(xCar);
-  for (const z of [-0.09, 0.09]) add(box(0.4, 0.02, 0.025), M.dark, xCar, 0, -0.01, z);
-  add(box(0.3, 0.04, 0.26), M.alu, xCar, 0, 0.02, 0);
-  const jackBase = add(box(0.16, 0.06, 0.16), M.steel, xCar, 0, 0.07, 0); void jackBase;
-  const column = add(new THREE.CylinderGeometry(0.032, 0.032, 1, 24), M.steel, xCar, 0, 0, 0);
-  const bellows: THREE.Mesh[] = []; for (let i = 0; i < 6; i++) { const b = add(new THREE.TorusGeometry(0.036, 0.007, 8, 24), M.alu, xCar, 0, 0, 0); b.rotation.x = Math.PI / 2; bellows.push(b); }
-  const post = add(new THREE.CylinderGeometry(0.009, 0.009, 0.07, 12), M.ceramic, xCar, 0, 0, 0);
-  const sphere = add(new THREE.SphereGeometry(0.06, 64, 48), M.gold, scene, 0, CH_Y, 0);
-  const sphereGlow = new THREE.Mesh(track(new THREE.SphereGeometry(0.075, 24, 16)), track(new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.0, depthWrite: false }))); scene.add(sphereGlow);
-  const ghost = new THREE.Mesh(track(new THREE.SphereGeometry(0.06, 24, 16)), track(new THREE.MeshBasicMaterial({ color: 0x2563eb, wireframe: true, transparent: true, opacity: 0.0 }))); scene.add(ghost);
-  const spherePos = new THREE.Vector3(0, CH_Y, 0);
+  add(box(0.44, 0.025, 0.06), M.dark, stageRoot, 0, -0.455, 0);
+  for (const x of [-0.2, 0.2]) {
+    add(box(0.08, 0.025, 0.09), M.steel, stageRoot, x, -0.43, 0);
+    add(new THREE.CylinderGeometry(0.006, 0.006, 0.415, 16), M.alu, stageRoot, x, -0.21, 0);
+    add(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 24), M.ceramic, stageRoot, x, -0.004, 0);
+  }
+  const artifactRadius = 0.0046;
+  add(new THREE.SphereGeometry(artifactRadius, 32, 24), M.copper, stageRoot, -0.2, 0.005, 0);
+  add(new THREE.SphereGeometry(artifactRadius, 32, 24), M.copper, stageRoot, 0.2, 0.005, 0);
+  add(box(0.15, 0.012, 0.1), M.dark, stageRoot, 0, -0.43, 0.25);
+  add(new THREE.SphereGeometry(artifactRadius, 32, 24), M.copper, stageRoot, -0.04, -0.418, 0.25);
+  add(new THREE.SphereGeometry(artifactRadius, 32, 24), M.copper, stageRoot, 0.04, -0.418, 0.25);
+  const mountLabel = (text: string, x: number, y = 0.08, z = 0.11) => {
+    const tex = canvasTex(160, 96, (ctx, w, h) => {
+      ctx.fillStyle = '#101820'; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#e2e8f0'; ctx.font = '700 64px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, w / 2, h / 2);
+    });
+    disposables.push(tex.tex);
+    const mesh = new THREE.Mesh(track(new THREE.PlaneGeometry(0.09, 0.054)), track(new THREE.MeshBasicMaterial({ map: tex.tex })));
+    mesh.position.set(x, y, z); stageRoot.add(mesh);
+  };
+  mountLabel('A', -0.2); mountLabel('B', 0.2); mountLabel('S', -0.04, -0.3, 0.34); mountLabel('D', 0.04, -0.3, 0.34);
+  const spherePos = new THREE.Vector3(-0.2, CH_Y + 0.005, 0);
+  const sphereGlow = new THREE.Mesh(track(new THREE.SphereGeometry(0.012, 24, 16)), track(new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.0, depthWrite: false }))); scene.add(sphereGlow);
   const heat = new THREE.PointLight(0x60a5fa, 0, 1.6, 2); heat.position.set(0, CH_Y - 0.2, 0.3); scene.add(heat);
 
   // ── LDV head on an overhead gantry ──
@@ -341,19 +344,8 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
   let lastT = 0;
   const update = (s: any, dt: number, t: number) => {
     lastT = t; if (ssWake < 0) ssWake = t; detailUpdate(s, dt, t);
-    const c = s.chamber, st = s.stage;
-    const ax = st.actualX ?? st.x, ay = st.actualY ?? st.y, az = st.actualZ ?? st.z;
-    // sphere + stage axes (X lateral, Y depth, Z vertical)
-    yCar.position.z = ay * STAGE_SCALE; xCar.position.x = ax * STAGE_SCALE;
-    const wob = st.settling ? Math.exp(-(st.settleTime || 0) * 1.2) * (s.failures?.stageBacklash ? 0.006 : 0.0018) * Math.sin(t * 46) : 0;
-    spherePos.set(ax * STAGE_SCALE + wob, CH_Y + az * STAGE_SCALE, ay * STAGE_SCALE); sphere.position.copy(spherePos); sphereGlow.position.copy(spherePos);
-    const base = CH_Y - 0.4 + 0.045 + 0.1 + 0.03, topY = spherePos.y - 0.06 - 0.01, h = Math.max(0.05, topY - 0.07 - base);
-    column.scale.y = h;
-    column.position.y = (base - (CH_Y - 0.4 + 0.045)) + h / 2;
-    bellows.forEach((b, i) => { b.position.y = (base - (CH_Y - 0.4 + 0.045)) + ((i + 0.5) / bellows.length) * h; });
-    post.position.y = (topY - 0.035) - (CH_Y - 0.4 + 0.045);
-    // commanded target marker
-    const moving = st.moving || st.settling; (ghost.material as THREE.MeshBasicMaterial).opacity = moving ? 0.55 : 0; ghost.position.set(st.x * STAGE_SCALE, CH_Y + st.z * STAGE_SCALE, st.y * STAGE_SCALE);
+    const c = s.chamber;
+    sphereGlow.position.copy(spherePos);
     // door
     doorAng += ((c.doorOpen ? -1.95 : 0) - doorAng) * Math.min(1, dt * 3); doorPivot.rotation.y = doorAng;
     // temperature tint light
@@ -368,7 +360,7 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     ventMat.emissiveIntensity = c.vent ? 1.2 : 0;
     // laser
     const on = s.ldv.power && s.ldv.shutter; laser.visible = laserGlow.visible = dot.visible = halo.visible = on;
-    if (on) { const a = new THREE.Vector3(0, 1.725, 0), b = spherePos.clone(); b.y += 0.058 * 0.95; const d = b.clone().sub(a), len = d.length(); for (const m of [laser, laserGlow]) { m.position.copy(a).addScaledVector(d, 0.5); m.scale.set(1, len, 1); m.quaternion.setFromUnitVectors(up, d.clone().normalize()); } laserGlowMat.opacity = 0.18 + Math.sin(t * 30) * 0.04; dot.position.copy(b); halo.position.copy(b); (halo.material as THREE.SpriteMaterial).opacity = 0.55 + Math.sin(t * 25) * 0.15; }
+    if (on) { const a = new THREE.Vector3(-0.2, 1.725, 0), b = spherePos.clone(); b.y += artifactRadius; const d = b.clone().sub(a), len = d.length(); for (const m of [laser, laserGlow]) { m.position.copy(a).addScaledVector(d, 0.5); m.scale.set(1, len, 1); m.quaternion.setFromUnitVectors(up, d.clone().normalize()); } laserGlowMat.opacity = 0.18 + Math.sin(t * 30) * 0.04; dot.position.copy(b); halo.position.copy(b); (halo.material as THREE.SpriteMaterial).opacity = 0.55 + Math.sin(t * 25) * 0.15; }
     // RF
     const rf = s.vna.power && s.vna.rf; rfMat.emissiveIntensity = rf ? 1.2 + Math.sin(t * 8) * 0.4 : 0;
     (rfPulse.material as THREE.MeshBasicMaterial).opacity = rf ? 0.9 : 0; if (rf) rfPulse.position.copy(rfCurve.getPoint((t * 0.5) % 1));
@@ -390,7 +382,10 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     gauge: new THREE.Vector3(-R - 0.17 - 0.0, CH_Y + 0.04, -0.2), notebook: wsG.localToWorld(new THREE.Vector3(-0.6, 0.94, 0.2)), keyboard: wsG.localToWorld(new THREE.Vector3(-0.02, 0.95, 0.2)), monitor: wsG.localToWorld(new THREE.Vector3(-0.02, 1.2, -0.14)), rackKnob: rack.localToWorld(new THREE.Vector3(0.18, 1.1, 0.28)), doorEdge: new THREE.Vector3(-0.2, CH_Y, 0.72), ldvHead: new THREE.Vector3(0, 2.0, 0.1),
     chamber: new THREE.Vector3(0, CH_Y, 0.2), door: new THREE.Vector3(-0.3, CH_Y, 0.7), stage: spherePos, rack: new THREE.Vector3(-3.15, 1.2, -0.4), bench: new THREE.Vector3(2.7, 1.2, -1.9), board: new THREE.Vector3(-0.2, 1.7, -2.5),
   };
-  const detail = buildDetail({ scene, room, bench, ch, rack, stageRoot, yCar, xCar, M, track, add, box, cuttable, R, L, CH_Y, panels: panels.map(p => ({ name: p.name, y: p.y, h: p.h })), rfCurve, fibreCurve, parts: { chamber: ch, stage: stageRoot, ldv: ldvG, pumps: pumpG }, wsG }, knobs);
+  const detail = buildDetail({ scene, room, bench, ch, rack, stageRoot, M, track, add, box, cuttable, R, L, CH_Y, panels: panels.map(p => ({ name: p.name, y: p.y, h: p.h })), rfCurve, fibreCurve, parts: { chamber: ch, stage: stageRoot, ldv: ldvG, pumps: pumpG }, wsG }, knobs);
+  detail.pickables = detail.pickables.map(part => part.name === 'stage'
+    ? { ...part, label: 'Fixed A/B kinematic rail', help: 'ov.stage', view: 'chamber' }
+    : part);
   detail.pickables.push({ name: 'pumps', label: 'Vacuum pumps', help: 'ov.pumps', root: rough, view: 'chamber' });
   setCutaway(true);
   update({
@@ -433,10 +428,10 @@ export function buildLab(renderer: THREE.WebGLRenderer): Lab {
     }
   };
   const highlightAnchors: Record<string, THREE.Vector3> = Object.fromEntries(Object.entries(HL).map(([id, h]) => [id, h.p]));
-  const dispose = () => { for (const sp of Object.values(hlSprites)) { sp.material.dispose(); } hlTex.dispose(); props.dispose(); camProps.dispose(); detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, deskTex.tex, holes.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
+  const dispose = () => { for (const sp of Object.values(hlSprites)) { sp.material.dispose(); } hlTex.dispose(); props.dispose(); camProps.dispose(); detail.dispose(); halo.material.dispose(); haloTex.dispose(); disposables.forEach(d => { try { d.dispose(); } catch { /* already disposed */ } }); for (const t2 of [floorTex.tex, wb.tex, sign.tex, lcd.tex, monTex.tex, deskTex.tex, ...panels.map(p => p.tex.tex)]) t2.dispose(); };
   void target; void sl; void wl; void back; void left; void bez; void win; void dRing; void dBody; void topPort; void leftPort1; void leftPort2; void rightPort; void capOut; void cap; void liner; void shell; void fl;
   // Fuse the static parts of the room into a few big meshes. Everything that moves or toggles is listed here and left alone.
-  const dynamicParts: THREE.Object3D[] = [yCar, xCar, column, ...bellows, post, sphere, sphereGlow, ghost, doorPivot, bench, turboFan, rough, laser, laserGlow, dot, halo, rfPulse, ...knobs.map(k => k.mesh), ...panels.map(p => p.led), ...isoLeds, ...detail.dynamic];
+  const dynamicParts: THREE.Object3D[] = [sphereGlow, doorPivot, bench, turboFan, rough, laser, laserGlow, dot, halo, rfPulse, ...knobs.map(k => k.mesh), ...panels.map(p => p.led), ...isoLeds, ...detail.dynamic];
   const noMerge = typeof location !== 'undefined' && /[?&]nomerge\b/.test(location.search);
   const props = buildProps({ scene, room, M, track, add, box });
   const mergeStats = noMerge ? { before: 0, after: 0, groups: 0 } : mergeStaticMeshes(scene, { regionRoots: detail.pickables.map(p => p.root), dynamic: dynamicParts, track });

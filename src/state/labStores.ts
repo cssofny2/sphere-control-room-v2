@@ -8,7 +8,7 @@ import { create } from 'zustand';
 export const INSTRUMENT_KEYS = ['vna', 'ldv', 'scope', 'spatialView', 'experiment'] as const;
 export const ENVIRONMENT_KEYS = ['facility', 'clock', 'chamber', 'stage', 'failures', 'model', 'alarms', 'events'] as const;
 // Any key the reducer adds that is not listed above is routed here too.
-export const UI_KEYS = ['ui', 'notebook', 'faultDrill', 'badges', 'activeChallenge', 'challengePassed', 'peerReviewData'] as const;
+export const UI_KEYS = ['ui', 'notebook', 'protocol', 'faultDrill', 'badges', 'activeChallenge', 'challengePassed', 'peerReviewData'] as const;
 
 type Slice = Record<string, any>;
 type Action = { type: string; [k: string]: any };
@@ -25,6 +25,7 @@ export interface EnvironmentStore extends Slice {
 }
 export interface UIStore extends Slice {
   ui: Slice;
+  protocol: Slice;
   setUi: (patch: Slice) => void;
 }
 

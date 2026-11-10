@@ -246,7 +246,7 @@ export const KNOWLEDGE: KBEntry[] = [
    "list",
    "hardware"
   ],
-  "text": "The lab has: a Rubidium atomic clock (SRS FS725) giving a 10 MHz reference; a Keysight E5080B vector network analyzer (VNA); a Polytec PSV-500 scanning laser Doppler vibrometer (LDV); a Tektronix 5 Series mixed-signal oscilloscope; a thermal-vacuum chamber with a Faraday cage and active vibration isolation; a precision XYZ stage inside the chamber; a roughing pump and a turbomolecular pump; an active thermostat; and the control computer (workstation) that runs scans."
+  "text": "The legacy teaching simulator includes a Rubidium clock, VNA, LDV, oscilloscope, vacuum-training fixtures, thermostat, and workstation. Its XYZ travel and vacuum pumpdown are legacy training behaviors, not LOC-1 requirements. The separate LOC-1 Protocol Workspace is explicitly synthetic and provisional: it models an atmospheric thermal enclosure, fixed A/B positions 0.40 m apart, copper artifacts no larger than 1 cm, and an exploratory-only electromagnetic diagnostic. The whitepaper, preregistration, and authoritative LOC-1 export schema are not bundled with this repository, so the protocol fields and educational values must not be described as verified compliance or experimental evidence."
  },
  {
   "id": "project.main-screens-of-the-app",
@@ -624,12 +624,12 @@ export const KNOWLEDGE: KBEntry[] = [
  {
   "id": "glossary.vna",
   "source": "MetrologyLabV3.tsx GLOSSARY",
-  "title": "Keysight E5080B VNA",
+  "title": "Exploratory Electromagnetic Diagnostic",
   "keywords": [
    "vna",
-   "keysight e5080b vna"
+   "exploratory electromagnetic diagnostic"
   ],
-  "text": "Vector Network Analyzer. An instrument used to measure network parameters. Here, it measures the S11 reflection coefficient to identify precise resonant frequencies via an RF coupling fixture."
+  "text": "The simulator's VNA model is an exploratory diagnostic only, not a secondary confirmatory channel. It measures modeled S11 responses and does not provide physical experimental evidence."
  },
  {
   "id": "glossary.s11",
@@ -684,12 +684,12 @@ export const KNOWLEDGE: KBEntry[] = [
  {
   "id": "glossary.chamber",
   "source": "MetrologyLabV3.tsx GLOSSARY",
-  "title": "Thermal-Vacuum Chamber",
+  "title": "Controlled Thermal Enclosure",
   "keywords": [
    "chamber",
-   "thermal-vacuum chamber"
+   "controlled thermal enclosure"
   ],
-  "text": "A custom enclosure isolating the experiment from air mass loading, thermal fluctuations, and acoustic noise."
+  "text": "The LOC-1 concept uses an atmospheric-pressure, optical-window-compatible thermal enclosure. Vacuum pumping belongs only to a separate legacy training simulation."
  },
  {
   "id": "glossary.faraday_cage",
@@ -1286,12 +1286,12 @@ export const KNOWLEDGE: KBEntry[] = [
  {
   "id": "ov.kpi_stage",
   "source": "overview/overviewHelp.ts",
-  "title": "Stage position",
+  "title": "LOC-1 A/B rail",
   "keywords": [
-   "stage position",
+   "loc-1 a/b rail",
    "kpi stage"
   ],
-  "text": "Where the platform holding the sample is right now, given as three distances (X, Y, Z) from the centre."
+  "text": "The protocol workspace models fixed kinematic positions A and B separated by 0.400 m. This is a schematic value, not a measured facility installation."
  },
  {
   "id": "ov.kpi_quality",
