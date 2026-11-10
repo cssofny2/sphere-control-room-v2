@@ -12,6 +12,9 @@ import { BundleImport } from './persistence/BundleUI';
 import ProtocolWorkspace from './protocol/ProtocolWorkspace';
 import { LOC1_FIELDS, toLoc1Csv, toLoc1Record } from './protocol/loc1';
 import { RunCompare } from './analysis/RunCompare';
+import { DIFFICULTIES, availableAt, difficultyHelp, isDifficulty } from './features/difficulty';
+import { createPortal } from 'react-dom';
+import { AnalyticsReport } from './analysis/AnalyticsReport';
 import { RunReviewCard } from './technician/RunReviewCard';
 import { Timeline, installTelemetry, useTelemetrySamples } from './features/Timeline';
 import { EmptyState, SaveImageButton, ShortcutsDialog, Sparkline } from './features/UiBits';
@@ -38,6 +41,7 @@ import type { KV } from './persistence/store';
 const Insights = lazy(() => import('./insights/Insights').then(m => ({ default: m.Insights })));
 const SettingsPage = lazy(() => import('./features/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
+const EngineeringTwin3D = lazy(() => import('./engineering/EngineeringTwin3D'));
 const Schematic = lazy(() => import('./engineering/Schematic'));
 import { OVERVIEW_HELP } from './overview/overviewHelp';
 import PlanBuilder from './PlanBuilder';
@@ -149,6 +153,9 @@ const PROCEDURE_STEPS = [
 // Lets the 3D lab's technician reach UI-only helpers (downloads, a single VNA sweep) that live in the main component.
 const labHelpersRef: { current: { performSweep?: () => void; exportCsv?: () => void; exportJson?: () => void } | undefined } = { current: undefined };
 
+const savedDifficulty = () => {
+  try { const level = localStorage.getItem('sphere.difficulty'); return isDifficulty(level) ? level : null; } catch { return null; }
+};
 const initialState = {
   protocol: { dataOrigin: "SYNTHETIC", osfStrict: false, alpha: 0.01, separationM: 0.4 },
   macro: { status: "idle", message: "", startedAt: null as number | null, ldvScanId: null as string | null, result: null as any },
@@ -204,7 +211,7 @@ const initialState = {
     id: null, active: false, axis: "x", start: -20, stop: 20,
     step: 5, repeats: 3, randomized: true, records: []
   },
-  ui: { active: "dashboard", modal: null, alarmsOpen: false, helpModal: null, glossaryOpen: false, manualOpen: false, peerModal: false, videoModal: false, activeVideo: TUTORIAL_VIDEOS[0], confirmModal: null, validatorModalOpen: false, wizardOpen: false, cmdPaletteOpen: false, navCollapsed: false, calModalOpen: false },
+  ui: { active: "dashboard", difficulty: "Full Simulation", modal: null, alarmsOpen: false, helpModal: null, glossaryOpen: false, manualOpen: false, peerModal: false, videoModal: false, activeVideo: TUTORIAL_VIDEOS[0], confirmModal: null, validatorModalOpen: false, wizardOpen: false, cmdPaletteOpen: false, navCollapsed: false, calModalOpen: false },
   notebook: [],
   operator: { ...EMPTY_OPERATOR },
   faultDrill: { hiddenKey: null, revealed: false, startedAt: null },
@@ -458,7 +465,7 @@ function reducer(state, action) {
       }, `Laboratory macro completed: ${result.records} VNA records (${result.validRecords} valid) and LDV scan ${result.ldvVerdict}.`, "info", "RESEARCH");
     }
     case "POWER": {
-      if (!action.value) return addEvent({ ...initialState, notebook: state.notebook, operator: state.operator, protocol: state.protocol, faultDrill: initialState.faultDrill, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
+      if (!action.value) return addEvent({ ...initialState, ui: { ...initialState.ui, difficulty: state.ui.difficulty }, notebook: state.notebook, operator: state.operator, protocol: state.protocol, faultDrill: initialState.faultDrill, facility: { ...initialState.facility, power: false } }, "MAIN BREAKER opened; all instrument states reset.", "warning", "SYSTEM");
       return addEvent({ ...state, facility: { ...state.facility, power: true } }, "MAIN BREAKER closed; facility AC online.", "info", "SYSTEM");
     }
     case "SET_MODE": {
@@ -831,6 +838,8 @@ export default function MetrologyLab() {
   useUnits(); // re-render when the display units change
   // The shell still needs the whole picture (header, alarms, validation); instrument panels subscribe to their own slice.
   const state: any = useLab(s => s);
+  const [launchOpen, setLaunchOpen] = useState(() => !savedDifficulty());
+  useEffect(() => { const level = savedDifficulty(); if (level) dispatch({ type: 'SET_UI', patch: { difficulty: level } }); }, []);
   useEffect(() => () => resetLabStores(), []);
   useEffect(() => { try { if (new URLSearchParams(window.location.search).has('labdebug')) (window as any).__dispatch = dispatch; } catch { /* ignore */ } }, [dispatch]);
   const [journalFilter, setJournalFilter] = useState("all");
@@ -1319,6 +1328,13 @@ export default function MetrologyLab() {
     }
   ];
 
+  const difficulty = isDifficulty(state.ui.difficulty) ? state.ui.difficulty : "Full Simulation";
+  const chooseDifficulty = (next: string) => {
+    if (!isDifficulty(next)) return;
+    set("ui", { difficulty: next, ...(!availableAt(next, active) ? { active: "dashboard" } : {}) });
+    try { localStorage.setItem('sphere.difficulty', next); } catch { toast('Difficulty will not be saved in this browser.', 'warn'); }
+  };
+  const visibleNavGroups = navGroups.map(group => ({ ...group, items: group.items.filter(([id]) => availableAt(difficulty, id)) })).filter(group => group.items.length);
   const collapsed = navCompact && !navDrawerOpen;
   const navigate = (id: string) => { set("ui", { active: id }); setNavDrawerOpen(false); };
   const toggleJournal = () => {
@@ -1335,6 +1351,16 @@ export default function MetrologyLab() {
       <style>{TW_FALLBACK}</style>
       <Announcer />
       <ToastHost />
+      {launchOpen && <div className="launch-backdrop">
+        <div className="launch-dialog" role="dialog" aria-modal="true" aria-labelledby="launch-title">
+          <h1 id="launch-title">Choose your simulation level</h1>
+          <p>Start with a level that suits you. You can change it at any time. All data is simulated.</p>
+          <div className="launch-options" role="radiogroup" aria-label="Simulation level">
+            {DIFFICULTIES.map(level => <label key={level}><input type="radio" name="launch-difficulty" checked={difficulty === level} autoFocus={level === difficulty} onChange={() => chooseDifficulty(level)} /><span><strong>{level}</strong><small>{difficultyHelp[level]}</small></span></label>)}
+          </div>
+          <button type="button" className="chrome-button" onClick={() => { chooseDifficulty(difficulty); setLaunchOpen(false); }}>Start simulation</button>
+        </div>
+      </div>}
       <aside
         aria-label="Mandatory simulator evidence notice"
         data-evidence-caption
@@ -1344,7 +1370,7 @@ export default function MetrologyLab() {
         Conceptual rendering of a proposed S.P.H.E.R.E. facility. Not a photograph of existing equipment. Instrument appearance is approximate, and equipment selections are provisional. Copper artifact not to scale.
       </aside>
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
-      <WorkspaceHeader state={state} navOptions={navGroups.flatMap(group => group.items.map(([id, label]) => ({ id, label })))} focus={focusMode} fullscreen={fullscreen} journalOpen={journalOpen && !focusMode} alarms={unresolved}
+      <WorkspaceHeader state={state} navOptions={visibleNavGroups.flatMap(group => group.items.map(([id, label]) => ({ id, label })))} focus={focusMode} fullscreen={fullscreen} journalOpen={journalOpen && !focusMode} alarms={unresolved}
         onNavigate={navigate} onNavigation={toggleNavigation} onJournal={toggleJournal} onFocus={() => { setFocusMode(v => !v); setNavDrawerOpen(false); }} onFullscreen={toggleFullscreen}
         onSearch={() => set("ui", { cmdPaletteOpen: true })} onTool={tool => tool === "share" ? copyPageLink() : tool === "shortcuts" ? setShortcutsOpen(true) : set("ui", { [({ wizard: "wizardOpen", videos: "videoModal", procedure: "manualOpen", glossary: "glossaryOpen" })[tool]]: true })}
         operator={state.operator} onOperator={() => setOperatorOpen(true)} onMode={mode => dispatch({ type: "SET_MODE", mode })} onSpeed={speed => set("facility", { speed })} detailsOpen={detailsOpen} onDetails={() => setDetailsOpen(v => !v)} settings={<FxSettings fx={fx} setFx={setFx} />}
@@ -1362,9 +1388,9 @@ export default function MetrologyLab() {
           aria-label={`Data source: ${state.protocol?.dataOrigin || "SYNTHETIC"}`}
           title={state.protocol?.dataOrigin === "LIVE QUALIFIED" ? "Connected and validated live metrology data" : "This simulator does not produce physical or live-qualified data"}
         >{state.protocol?.dataOrigin || "SYNTHETIC"}</span>
-        <span className="status-chip"><span>Clock</span><strong>{clockStatus}</strong></span>
+        {difficulty !== "Beginner" && <><span className="status-chip"><span>Clock</span><strong>{clockStatus}</strong></span>
         <span className="status-chip"><span>Pressure</span><strong>{fmtPressureShown(state.chamber.pressure)}</strong></span>
-        <span className={`status-chip ${tempStable ? "" : "status-warning"}`}><span>Temp</span><strong>{fmtTemp(state.chamber.temperature)}</strong></span>
+        <span className={`status-chip ${tempStable ? "" : "status-warning"}`}><span>Temp</span><strong>{fmtTemp(state.chamber.temperature)}</strong></span></>}
         <button className="status-chip" aria-label="Inspect measurement quality" onClick={() => set("ui", { validatorModalOpen: true })}><span>Quality</span><strong>{recordQuality}</strong></button>
         <span className="status-chip status-run" title={state.experiment.id || "No active run"}><span>Run</span><strong>{state.experiment.active ? "RECORDING" : recordingState}</strong></span>
         <button className={`status-chip ${unresolved ? "status-warning" : ""}`} aria-label={`Open alarms: ${unresolved}`} onClick={() => { setFocusMode(false); setJournalOpen(true); set("ui", { alarmsOpen: true }); }}><AlertTriangle size={13} /><span>Alarms</span><strong>{unresolved}</strong></button>
@@ -1463,7 +1489,7 @@ export default function MetrologyLab() {
           </div>
 
           <div className="grid grid-cols-2 gap-2 md:block md:space-y-4 overflow-y-auto flex-1 pr-1">
-            {navGroups.map((group, idx) => (
+            {visibleNavGroups.map((group, idx) => (
               <div key={idx} className="space-y-1">
                 {!collapsed && <div className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 px-2">{group.group}</div>}
                 {group.items.map(([id, label, Icon]) => {
@@ -1508,7 +1534,12 @@ export default function MetrologyLab() {
 
         <section className="workspace-instrument min-w-0 bg-zinc-950 flex flex-col" aria-label="Active instrument workspace" tabIndex={-1}>
           <PageBoundary pageKey={String(active)}>
-          {active === "dashboard" && <><PageAlert k="facility" name="Facility" onGo={navigate} /><Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} onSaveOperator={saveProfile} /></>}
+          <div className="difficulty-bar">
+            <label>Simulation level <select aria-label="Simulation difficulty" value={difficulty} onChange={e => chooseDifficulty(e.target.value)}>{DIFFICULTIES.map(level => <option key={level}>{level}</option>)}</select></label>
+            <span>{difficultyHelp[difficulty]}</span>
+          </div>
+          {!availableAt(difficulty, active) ? <div role="status" className="rounded border border-amber-700 p-3 text-sm">This workspace is not available at the {difficulty} level. Choose a higher level or return to the console.</div> : <>
+          {active === "dashboard" && (difficulty === "Beginner" ? <div className="beginner-card"><h1>Welcome to the simulator</h1><p>This is a simulation, not physical laboratory equipment. Use the Power button above to start, then open a guided learning path or ask the Copilot for help.</p><div><button className="chrome-button" onClick={() => navigate("learn")}>Open learning paths</button> <button className="chrome-button" onClick={() => navigate("copilot")}>Open Copilot</button></div><p>Change the simulation level above when you are ready for more instruments.</p></div> : <><PageAlert k="facility" name="Facility" onGo={navigate} /><Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} onSaveOperator={saveProfile} /></>)}
           {active === "overview" && <LabOverview state={overviewState} dispatch={dispatch} quality={recordQuality} reduced={FX.reduced || FX.hide} lab={{ getSubsystemVisualState, visualToken, fmtPressure: fmtPressureShown, WARMUP_SECONDS, resolveHelp }} />}
           {active === "chamber" && <><PageAlert k={["chamber", "pumps", "stage"]} name="Chamber & stage" onGo={navigate} /><Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
           {active === "spatial" && <><PageAlert k="spatial" name="Data quality" onGo={navigate} /><SpatialField state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
@@ -1521,12 +1552,13 @@ export default function MetrologyLab() {
           {active === "copilot" && <LabCopilot state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "protocol" && <ProtocolWorkspace state={state} dispatch={dispatch} records={state.experiment.records} onExportJson={exportProtocolJson} onExportManifest={exportProtocolManifest} />}
           {active === "timeline" && <Timeline />}
-          {active === "insights" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading insights…</div>}><Insights records={state.experiment.records} events={state.events} operator={operatorFullName(state.operator)} /></Suspense>}
+          {active === "insights" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading insights…</div>}><AnalyticsReport records={state.experiment.records} /><Insights records={state.experiment.records} events={state.events} operator={operatorFullName(state.operator)} /></Suspense>}
           {active === "settings" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading settings…</div>}><SettingsPage /></Suspense>}
           {active === "learn" && <LearningPaths dispatch={dispatch} learnerName={operatorFullName(state.operator)} />}
           {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "faults" && <FaultInjector state={state} dispatch={dispatch} />}
           {active === "challenges" && <ChallengeMode state={state} dispatch={dispatch} HelpInfo={HelpInfo} />}
+          </>}
                   </PageBoundary>
         </section>
 
@@ -3003,6 +3035,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
   const camRef = useRef(cam); camRef.current = cam;
   const raf = useRef(0), drag = useRef(null), svgRef = useRef(null);
   const [mode, setMode] = useState("lab");
+  const [platformFocus, setPlatformFocus] = useState(false);
   const [qual, setQual] = useState("bal");
   const [hid, setHid] = useState({}), [solo, setSolo] = useState(null), [ghost, setGhost] = useState({}), [sel, setSel] = useState(null), [tm, setTm] = useState(0);
   const { chamber: c } = renderState;
@@ -3016,6 +3049,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
     el.addEventListener("wheel", w, { passive: false }); return () => el.removeEventListener("wheel", w);
   }, []);
   const goTo = n => {
+    setPlatformFocus(false);
     const c2 = n === "stage" ? { yaw: -0.5, pit: 0.4, dist: 260, t: [-200, 0, 854.6] } : CAM[n];
     cancelAnimationFrame(raf.current);
     if (FX.reduced) { setCam(c2); return; }
@@ -3044,7 +3078,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
   const P = (...coordinates: number[]) => { let [x, y, z] = coordinates; x -= t[0]; y -= t[1]; z -= t[2]; const x1 = x * cy - y * sy, y1 = x * sy + y * cy, y2 = y1 * cp - z * sp, z2 = y1 * sp + z * cp, k = 700 / Math.max(60, dist + y2); return [400 + x1 * k, 240 - z2 * k, y2, k]; };
   const items = [];
   parts.forEach(p => {
-    if (hid[p.g] || (solo && solo !== p.g)) return;
+    if (p.wall === "cage" || hid[p.g] || (solo && solo !== p.g)) return;
     if (p.hi && tier !== "high") return;
     { const q0 = P(...p.c), md = p.s ? Math.max(...p.s) : p.len ? Math.max(p.len, p.r * 2) : p.r * 2, rp = md * q0[3];
       if (q0[2] + dist < 50 || rp < 2.5 || q0[0] + rp < -50 || q0[0] - rp > 850 || q0[1] + rp < -50 || q0[1] - rp > 530) return; }
@@ -3053,6 +3087,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
     if (p.wall === "cage") a = mode === "transparent" ? 0.03 : mode === "chamber" ? 0.015 : 0.07;
     if (p.wall === "ch") a = mode === "transparent" ? 0.07 : 0.2;
     if (ghost[p.g]) a *= 0.25;
+    if (platformFocus && p.g !== "sphere" && !["rail", "nodeA", "nodeB"].includes(p.id)) a *= 0.08;
     if (mode === "chain" && !chain.has(p.id)) a *= 0.15;
     const on = sel === p.id, st = { fill: p.col, a, stroke: on ? "#fff" : p.col, sw: on ? 2.5 : 0.8 };
     if (p.k === "sph") { const q = P(...C); items.push({ d: q[2], s: <circle key={p.id} cx={q[0]} cy={q[1]} r={Math.max(2, p.r * q[3])} fill={p.mt === "copper" ? "url(#tw-cu)" : p.col} fillOpacity={a} stroke={st.stroke} strokeWidth={st.sw} onClick={() => !(drag.current && drag.current.m > 4) && setSel(p.id)}><title>{p.label}</title></circle> }); return; }
@@ -3070,7 +3105,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
       let fill = base, spec = 0;
       if (!(mat && mat.emit)) { const n = nrm(V[f[0]], V[f[1]], V[f[2]]); fill = shadeHex(base, 0.5 + 0.7 * Math.abs(n[0] * LV[0] + n[1] * LV[1] + n[2] * LV[2])); if (mat && mat.sp && tier === "high") spec = mat.sp * Math.pow(Math.abs((n[0] * hv[0] + n[1] * hv[1] + n[2] * hv[2]) / hl), mat.sh); }
       items.push({ d: pts.reduce((m, q) => m + q[2], 0) / pts.length, s: <g key={p.id + i}>
-        <polygon points={ps} fill={fill} fillOpacity={Math.min(1, a)} stroke={mat && mat.gl ? "#e0f2fe" : st.stroke} strokeOpacity={Math.min(1, a + 0.35)} strokeWidth={st.sw} strokeDasharray={p.id === "env" ? "4 3" : undefined} onClick={() => !(drag.current && drag.current.m > 4) && setSel(p.id)}><title>{p.label}</title></polygon>
+        <polygon points={ps} fill={fill} fillOpacity={Math.min(1, a)} stroke={mat && mat.gl ? "#e0f2fe" : st.stroke} strokeOpacity={Math.min(1, a + (platformFocus ? 0 : 0.35))} strokeWidth={st.sw} strokeDasharray={p.id === "env" ? "4 3" : undefined} onClick={() => !(drag.current && drag.current.m > 4) && setSel(p.id)}><title>{p.label}</title></polygon>
         {spec > 0.04 && <polygon points={ps} fill="#fff" fillOpacity={Math.min(0.55, spec * a)} pointerEvents="none" />}
         {tier === "high" && mat && mat.tx && <polygon points={ps} fill={mat.tx === "brush" ? "url(#tw-brush)" : "url(#tw-mesh)"} fillOpacity={mat.tx === "mesh" ? Math.min(1, a * 6) : a} pointerEvents="none" />}
       </g> });
@@ -3108,30 +3143,31 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
       <div className="flex flex-wrap items-center gap-1">
         {!hideToolbars && [["lab", "Laboratory"], ["chamber", "Chamber"], ["instrument", "Instrument"], ["exploded", "Exploded"], ["transparent", "Transparent"], ["chain", "Measurement chain"]].map(([m, l]) => <B key={m} on={mode === m} f={() => setM(m)}>{l}</B>)}
         <button onClick={reset} className="rounded border border-zinc-600 px-2 py-1 text-[10px] text-zinc-200">Reset view</button>
+        <button onClick={() => { cancelAnimationFrame(raf.current); setHid({}); setSolo(null); setPlatformFocus(true); setCam({ yaw: -0.5, pit: 0.4, dist: 650, t: [0, 0, 854.6] }); }} className="rounded border border-sky-600 px-2 py-1 text-[10px] text-sky-200">Focus A/B platform</button>
         <label className="ml-2 flex items-center gap-1 text-[10px] text-zinc-400">Quality<select aria-label="Render quality" value={qual} onChange={e => setQual(e.target.value)} className="rounded border border-zinc-700 bg-black px-1 py-0.5 text-[10px]"><option value="perf">Performance</option><option value="bal">Balanced</option><option value="qual">Quality</option></select></label>
       </div>
       {!hideToolbars && <div className="flex flex-wrap items-center gap-1">
         {[["iso", "Isometric"], ["front", "Front"], ["top", "Top"], ["interior", "Chamber interior"], ["optical", "Optical path"], ["rf", "RF path"], ["vacuum", "Legacy vacuum fixtures"], ["rack", "Instrument rack"], ["stage", "A/B rail"]].map(([n, l]) => <button key={n} onClick={() => goTo(n)} className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-sky-500">{l}</button>)}
       </div>}
       <div className="flex flex-col gap-3">
-        <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800 bg-black">
+        <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-700 bg-slate-100">
           <svg ref={svgRef} viewBox="0 0 800 480" tabIndex={0} role="application" aria-label="3D laboratory digital twin. Drag to rotate, shift-drag to pan, wheel or plus and minus to zoom, arrow keys to orbit." onKeyDown={key} className="w-full cursor-grab touch-none select-none"
             onPointerDown={e => { drag.current = { x: e.clientX, y: e.clientY, m: 0 }; e.currentTarget.setPointerCapture(e.pointerId); }}
             onPointerMove={e => { const d = drag.current; if (!d || !e.buttons) return; const dx = e.clientX - d.x, dy = e.clientY - d.y; d.x = e.clientX; d.y = e.clientY; d.m += Math.abs(dx) + Math.abs(dy); const q = camRef.current; if (e.shiftKey || e.buttons > 1) { const kk = q.dist / 700; setCam({ ...q, t: [q.t[0] - (dx * cy) * kk, q.t[1] + (dx * sy) * kk, q.t[2] + dy * kk] }); } else setCam({ ...q, yaw: q.yaw + dx * 0.008, pit: Math.max(-0.2, Math.min(1.5, q.pit + dy * 0.008)) }); }}
             onPointerUp={() => setTimeout(() => { drag.current = null; }, 0)} onContextMenu={e => e.preventDefault()}>
-            <rect width="800" height="480" fill="#04070b" /><TwDefs />
-            <polygon points={[[-1800, -1500], [1800, -1500], [1800, 1500], [-1800, 1500]].map(([x, y]) => P(x, y, 0).slice(0, 2).map(v => v.toFixed(1)).join(",")).join(" ")} fill="#0b121b" stroke="#1e2a38" />
+            <rect width="800" height="480" fill="#edf3f7" /><TwDefs />
+            <polygon points={[[-1800, -1500], [1800, -1500], [1800, 1500], [-1800, 1500]].map(([x, y]) => P(x, y, 0).slice(0, 2).map(v => v.toFixed(1)).join(",")).join(" ")} fill="#dbe5ed" stroke="#9aabb9" />
             {line("vac", vac, "#7dd3fc", 3, "2 8", pump, "Vacuum path")}
             {line("clk1", [[1580, 0, 1600], [1580, 0, 1350]], "#22d3ee", 2, "6 4", act.clk && act.vna, "Clock reference to VNA")}
             {line("clk2", [[1580, 0, 1600], [1580, 0, 1950], [110, 0, 1950], [110, 0, 1720]], "#22d3ee", 2, "6 4", act.clk && act.ldv, "Clock reference to LDV")}
             {line("rf", [[1580, 0, 1350], [1580, 0, 1100], [330, 0, 1100], [70, 40, 1100]], "#e879f9", 2.5, "2 5", act.rf, "RF path")}
             {items.map(i => i.s)}
             {line("rail-dimension", [[-200, 0, 815], [200, 0, 815]], "#7dd3fc", 1.4, "4 4", true, "0.400 m A/B spacing")}
-            {dist < 3000 && <g fontSize="10" fill="#e2e8f0" fontFamily="monospace" textAnchor="middle"><text x={labelA[0]} y={labelA[1]}>A · T</text><text x={labelB[0]} y={labelB[1]}>B · R</text></g>}
+            {dist < 3000 && <g fontSize="10" fill="#172b3a" fontFamily="monospace" textAnchor="middle"><text x={labelA[0]} y={labelA[1]}>A · T</text><text x={labelB[0]} y={labelB[1]}>B · R</text></g>}
             {line("las", [[0, 0, 1560], [0, 0, 1405], [sph[0], sph[1], sph[2] + 4.6]], "#facc15", 2.2, "", act.las, "LDV laser path")}
             {pump && !still && [0, 1, 2, 3, 4, 5].map(i => { const q = P(...along(vac, ((tm / 2600) + i / 6) % 1)); return <circle key={"pp" + i} cx={q[0]} cy={q[1]} r="2.6" fill="#bae6fd" />; })}
             {mode === "exploded" && Object.keys(EXPL).filter(k => !hid[k]).map(k => { const a = P(0, 0, 1100), b = P(EXPL[k][0], EXPL[k][1], 1100 + EXPL[k][2]); return <line key={"x" + k} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#64748b" strokeDasharray="3 4" opacity=".6" />; })}
-            {dist < 3000 && <text x={env[0] + 8} y={env[1]} fontSize="10" fill="#fbbf24" fontFamily="monospace">A ↔ B: 0.400 m · T/R/S/D: ≤1 cm</text>}
+            {dist < 3000 && <text x={env[0] + 8} y={env[1]} fontSize="10" fill="#734500" fontFamily="monospace">A ↔ B: 0.400 m · T/R/S/D: ≤1 cm</text>}
             {dist < 3000 && markers3d.length > 0 && <text x={env[0] + 8} y={env[1] + 13} fontSize="10" fill="#6ee7b7" fontFamily="monospace">● {markers3d.length} measured point{markers3d.length === 1 ? "" : "s"} (green valid, amber suspect)</text>}
             <g fontFamily="monospace" fontSize="10" fill="#cbd5e1"><line x1="20" y1="455" x2={20 + nice * k0} y2="455" stroke="#e2e8f0" strokeWidth="2" /><line x1="20" y1="450" x2="20" y2="460" stroke="#e2e8f0" /><line x1={20 + nice * k0} y1="450" x2={20 + nice * k0} y2="460" stroke="#e2e8f0" /><text x="20" y="444">{nice >= 1000 ? nice / 1000 + " m" : nice + " mm"} (scale at focus)</text><text x="780" y="470" textAnchor="end" fill="#64748b">view dist {(dist / 1000).toFixed(2)} m · LOD {tier} · {items.length} faces</text></g>
           </svg>
@@ -3311,21 +3347,63 @@ function useAfterFirstPaint() {
 function LabEnvironmentSkeleton({ label = "Loading Lab Environment…" }) {
   return <div role="status" aria-live="polite" className="grid h-[320px] w-full animate-pulse place-items-center rounded-lg border border-zinc-800 bg-zinc-900 text-xs text-zinc-400">{label}</div>;
 }
+function DetachedTwin({ children, origin }: { children: React.ReactNode; origin: string }) {
+  const [target, setTarget] = useState<{ win: Window; root: HTMLElement } | null>(null);
+  useEffect(() => {
+    if (!target) return;
+    const closed = () => setTarget(null);
+    const syncStyles = () => {
+      target.win.document.head.querySelectorAll('[data-twin-style]').forEach(node => node.remove());
+      document.querySelectorAll('link[rel="stylesheet"], style').forEach(node => {
+        const clone = node.cloneNode(true) as HTMLElement;
+        clone.dataset.twinStyle = '';
+        target.win.document.head.appendChild(clone);
+      });
+    };
+    const observer = new MutationObserver(syncStyles);
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    target.win.addEventListener('beforeunload', closed);
+    const timer = window.setInterval(() => { if (target.win.closed) closed(); }, 500);
+    return () => { window.clearInterval(timer); observer.disconnect(); target.win.removeEventListener('beforeunload', closed); if (!target.win.closed) target.win.close(); };
+  }, [target]);
+  const open = () => {
+    const win = window.open('', 'sphere-digital-twin', 'popup,width=1200,height=800');
+    if (!win) { toast('The browser blocked the detached window. Allow pop-ups and try again.', 'error'); return; }
+    win.document.title = 'S.P.H.E.R.E. digital twin';
+    document.querySelectorAll('link[rel="stylesheet"], style').forEach(node => {
+      const clone = node.cloneNode(true) as HTMLElement; clone.dataset.twinStyle = ''; win.document.head.appendChild(clone);
+    });
+    const root = win.document.createElement('div');
+    win.document.body.appendChild(root);
+    setTarget({ win, root });
+  };
+  return <>
+    <button type="button" className="chrome-button" onClick={() => target ? setTarget(null) : open()}>{target ? 'Return twin to workspace' : 'Open twin in separate window'}</button>
+    {target ? <>
+      <p className="text-xs text-zinc-400" role="status">The live twin is open in a separate window. Closing it returns the view here.</p>
+      {createPortal(<div className="lab-root detached-twin">
+        <div className="detached-origin">{origin}</div>{children}
+        <footer className="detached-caption">Conceptual rendering of a proposed S.P.H.E.R.E. facility. Not a photograph of existing equipment. Instrument appearance is approximate, and equipment selections are provisional. Copper artifact not to scale.</footer>
+      </div>, target.root)}
+    </> : children}
+  </>;
+}
 function Chamber({ state, dispatch, HelpInfo }) {
   const scene3dReady = useAfterFirstPaint();
   // Engineering model is the default; the realistic lab is a fun, lifelike view of the same live data.
   const [sceneView, setSceneView] = useState<ChamberViewId>("engineering");
+  const [classicEngineering, setClassicEngineering] = useState(false);
   const [vs, setVs] = useState<Record<ChamberViewId, { cam: string; mode: string; cmd: { cam?: string; mode?: string }; n: number }>>({
     engineering: { cam: "overview", mode: "standard", cmd: {}, n: 0 }, schematic: { cam: "overview", mode: "standard", cmd: {}, n: 0 }, lab: { cam: "overview", mode: "cutaway", cmd: {}, n: 0 },
   });
   const [viewNotice, setViewNotice] = useState("");
   const cur = vs[sceneView];
   const chooseCam = (p: CamPreset) => { setVs(v => ({ ...v, [sceneView]: { ...v[sceneView], cam: p.id, cmd: { cam: sceneView === "lab" ? p.id : p.eng }, n: v[sceneView].n + 1 } })); setViewNotice(`Camera → ${p.label}: ${p.desc}.`); };
-  const chooseMode = (m: ViewMode) => { setVs(v => ({ ...v, [sceneView]: { ...v[sceneView], mode: m.id, cmd: { mode: sceneView === "lab" ? m.id : m.eng }, n: v[sceneView].n + 1 } })); setViewNotice(`Viewing mode → ${m.label}: ${m.desc}.`); };
+  const chooseMode = (m: ViewMode) => { setVs(v => ({ ...v, [sceneView]: { ...v[sceneView], mode: m.id, cmd: { mode: sceneView === "lab" ? m.id : m.id === "blueprint" && !classicEngineering ? "blueprint" : m.eng }, n: v[sceneView].n + 1 } })); setViewNotice(`Viewing mode → ${m.label}: ${m.desc}.`); };
   const switchView = (view: ChamberViewId) => {
     setSceneView(view); setViewNotice("");
     // each view remembers its own camera and mode; coming back re-applies both
-    setVs(v => { const c = v[view], p = CAM_PRESETS.find(x => x.id === c.cam), m = VIEW_MODES.find(x => x.id === c.mode); return { ...v, [view]: { ...c, cmd: { cam: view === "lab" ? c.cam : p?.eng, mode: view === "lab" ? c.mode : m?.eng }, n: c.n + 1 } }; });
+    setVs(v => { const c = v[view], p = CAM_PRESETS.find(x => x.id === c.cam), m = VIEW_MODES.find(x => x.id === c.mode); return { ...v, [view]: { ...c, cmd: { cam: view === "lab" ? c.cam : p?.eng, mode: view === "lab" ? c.mode : c.mode === "blueprint" && !classicEngineering ? "blueprint" : m?.eng }, n: c.n + 1 } }; });
   };
   const resetEngineering = () => setVs(v => ({ ...v, engineering: { cam: "overview", mode: "standard", cmd: {}, n: v.engineering.n } }));
   const command = { ...cur.cmd, n: cur.n };
@@ -3358,8 +3436,8 @@ function Chamber({ state, dispatch, HelpInfo }) {
         LOC-1 baseline: modeled atmospheric pressure (101.325 kPa) with optical access. Legacy vacuum and XYZ mechanisms are deferred from this protocol view; no physical facility state is represented.
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.35fr_.9fr]">
-        <div className={`min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl ${sceneView === "schematic" ? "xl:col-span-2" : ""}`}>
+      <div className="grid gap-4">
+        <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
           <div className="text-xs font-bold uppercase text-zinc-300 border-b border-zinc-800 pb-2 mb-3 flex items-center justify-between">
             <span className="flex items-center">Conceptual Thermal Enclosure (Legacy View) <HelpInfo termKey="chamber" /></span>
             <StatusLED status={getChamberLifecycle(state).visual} />
@@ -3375,6 +3453,8 @@ function Chamber({ state, dispatch, HelpInfo }) {
             {sceneView === "lab" && <><b>Realistic lab</b> — made for fun and entertainment. It is a lifelike room with Dr. Wire working in it, and it is driven by the same live simulation data as the other views (so what you switch on really happens), but stage motion is exaggerated ×3 and proportions are artistic. Use the Engineering model for precise inspection.</>}
           </p>
           <ChamberViewControls view={sceneView} cam={cur.cam} mode={cur.mode} onCam={chooseCam} onMode={chooseMode} notice={viewNotice} HelpInfo={HelpInfo} />
+          {sceneView === "engineering" && <button className="chrome-button" type="button" onClick={() => { setClassicEngineering(v => !v); resetEngineering(); }}>{classicEngineering ? "Use WebGL model" : "Use classic SVG model"}</button>}
+          <DetachedTwin origin={state.protocol?.dataOrigin || "SYNTHETIC"}>
           {sceneView === "lab" && (!scene3dReady ? <LabEnvironmentSkeleton /> : (
             <Suspense fallback={<LabEnvironmentSkeleton />}>
               <LabScene3D stateRef={labStateRef} origin={state.protocol?.dataOrigin || "SYNTHETIC"} dispatch={dispatch} helpersRef={labHelpersRef} reduced={FX.reduced || FX.hide} command={command} onHelp={(k) => dispatch({ type: "PATCH", domain: "ui", patch: { helpModal: resolveHelp(k) } })} />
@@ -3387,9 +3467,11 @@ function Chamber({ state, dispatch, HelpInfo }) {
           )}
           {sceneView === "engineering" && (
           <div className={`relative chamber-phase4 ${cur.mode === "blueprint" ? "cv-blueprint" : ""}`} data-camera={cur.cam} data-view-mode={cur.mode}>
-            <DigitalTwin state={state} dispatch={dispatch} command={command} hideToolbars onReset={resetEngineering} />
+            {classicEngineering ? <DigitalTwin state={state} dispatch={dispatch} command={command} hideToolbars onReset={resetEngineering} /> :
+              <Suspense fallback={<LabEnvironmentSkeleton label="Loading engineering model…" />}><EngineeringTwin3D parts={twinParts(state)} records={state.experiment.records} command={command} dispatch={dispatch} onReset={resetEngineering} /></Suspense>}
           </div>
           )}
+          </DetachedTwin>
 
           <div className="mt-3 flex gap-2 items-center justify-between">
             <div className="flex gap-2">

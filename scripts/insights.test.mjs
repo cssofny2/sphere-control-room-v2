@@ -5,8 +5,27 @@ const ld = p => loadTypeScript(new URL(`../src/${p}`, import.meta.url));
 const St = await ld('insights/stability.ts'), Out = await ld('insights/outliers.ts'), Bud = await ld('insights/budget.ts'), Con = await ld('insights/conformance.ts');
 const Log = await ld('insights/eventLog.ts'), Rep = await ld('insights/report.ts'), U = await ld('features/units.ts'), D = await ld('features/displaySettings.ts');
 const Tpl = await ld('simulation/templates.ts'), Plan = await ld('simulation/plan.ts');
+const Analytics = await ld('analysis/analyticsReport.ts'), Difficulty = await ld('features/difficulty.ts');
 const near = (a, b, e = 1e-9) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`);
 
+{ const levels = Difficulty.DIFFICULTIES;
+  assert.equal(levels.length, 5);
+  for (let i = 1; i < levels.length; i++) for (const page of ['dashboard', 'overview', 'chamber', 'vna', 'faults'])
+    if (Difficulty.availableAt(levels[i - 1], page)) assert.equal(Difficulty.availableAt(levels[i], page), true);
+  assert.equal(Difficulty.availableAt('Beginner', 'vna'), false);
+  assert.equal(Difficulty.availableAt('Full Simulation', 'faults'), true);
+  assert.equal(Difficulty.isDifficulty('unknown'), false);
+  console.log('PASS difficulty tiers progressively expose workspaces'); }
+{ const datasets = [{ id: 'A', records: [{ resonance: 100 }, { resonance: 102 }, { resonance: 200, excluded: true }] }, { id: 'B', records: [{ resonance: 104 }, { resonance: NaN }] }];
+  assert.deepEqual(Analytics.summarizeDataset(datasets[0]), { id: 'A', count: 2, excluded: 1, meanHz: 101, rangeHz: 2 });
+  const report = Analytics.makeAnalyticsReport(datasets, [{ t: 0, temperatureC: 22, pressureTorr: 760, f0Hz: null, x: 0, y: 0, z: 0, turboPct: 0 }]);
+  assert.ok(report.includes('B versus A: mean difference 3.000 Hz'));
+  assert.ok(report.includes('1 samples; 0 fitted resonance'));
+  assert.ok(report.includes('not attributed to the selected historical runs'));
+  assert.ok(Analytics.makeAnalyticsReport([], []).includes('No datasets selected.'));
+  assert.equal(Analytics.summarizeDataset({ id: 'empty', records: [] }).meanHz, null);
+  assert.equal(Analytics.summarizeDataset({ id: 'failed fit', records: [{ resonance: 42, fit: { ok: false } }] }).count, 0);
+  console.log('PASS comparative summaries exclude invalid data and describe telemetry provenance'); }
 // Allan deviation: constant -> 0; alternating +-1 -> 2 at m=1 (known value); needs 3+ samples; skips NaN
 { assert.deepEqual(St.overlappingAllan([1, 1, 1, 1, 1, 1], 1).map(p => p.adev), [0, 0]);
   const alt = St.overlappingAllan([1, -1, 1, -1, 1, -1, 1, -1], 2); near(alt[0].adev, Math.sqrt(2)); assert.equal(alt[0].tauS, 2); assert.equal(alt[1].tauS, 4);

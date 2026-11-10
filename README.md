@@ -77,6 +77,10 @@ The tests execute the simulator's actual helper functions using Vite's bundled p
 
 ## Compact workspace
 
+- The simulation-level selector progressively exposes workspaces from Beginner through Full Simulation. It is an educational display preference, not an access-control boundary; Full Simulation is the default.
+- The enclosure page offers engineering, schematic and realistic conceptual views. Open the twin in a separate window to share the running simulator state; allow pop-ups. Closing it returns the view to the main workspace. The engineering view uses a Three.js model with a classic SVG fallback; neither is a dimensionally validated CAD model. Platform focus samples sightlines to the A/B rail and fades intersecting meshes, and is not an exact collision or safety analysis.
+- Insights can compare current and saved runs in a locally generated descriptive report. Current-session telemetry is not attributed to historical runs. The report is rule-based, not an AI model or a significance test.
+- The proposed hardware replay interface and its safety prerequisites are documented in [the API draft](docs/hardware-output-api-draft.md); no hardware-output driver is implemented.
 - The header and essential status strip remain visible while only the instrument workspace scrolls.
 - The operations journal starts collapsed. Open it from the header; drag its left edge on laptops/desktops or its top edge on tablets to resize it. A focused resize handle supports arrow keys, Home/End, and double-click reset.
 - Journal filters and dimensions survive collapse/expand and instrument focus mode within the current session.

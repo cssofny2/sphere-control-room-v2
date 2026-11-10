@@ -79,15 +79,12 @@ function loadSettings(): Settings {
 }
 const urlParam = (k: string) => { try { return new URLSearchParams(window.location.search).get(k); } catch { return null; } };
 
-const PIN_SHORT: Record<string, string> = { breaker: 'Power', clock: 'Clock', vna: 'VNA', rf: 'RF line', scope: 'Scope', ldv: 'Laser', rough: 'Roughing', turbo: 'Turbo', vent: 'Vent', thermo: 'Thermostat', faraday: 'Faraday', isolation: 'Isolation', stage: 'A/B rail', door: 'Door', daq: 'Workstation' };
-
 function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, dispatch, helpersRef, command }: Props) {
   const dispatchRef = useRef(dispatch); dispatchRef.current = dispatch;
   const helpersRefLocal = useRef<Ctx['helpers'] | undefined>(undefined); const helpers = helpersRef || helpersRefLocal;
   const wrap = useRef<HTMLDivElement>(null);
   const canvasHost = useRef<HTMLDivElement>(null);
   const bubbleEl = useRef<HTMLDivElement>(null);
-  const hoverEl = useRef<HTMLDivElement>(null);
   const reducedRef = useRef(reduced); reducedRef.current = reduced;
   const onHelpRef = useRef(onHelp); onHelpRef.current = onHelp;
   const api = useRef<{ lab?: Lab; cam?: THREE.PerspectiveCamera; controls?: OrbitControls; sci?: Scientist; go?: (k: string) => void; tech?: Technician; sys?: TechnicianSystem; say?: (r: Say) => void; foley?: Foley; snapshot?: () => void; setQ?: (q: QualitySel) => void; setCamView?: (v: number | 'grid' | null) => void }>({});
@@ -111,11 +108,10 @@ function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, d
   const [sysReady, setSysReady] = useState<TechnicianSystem | null>(null);
   const [consentOpen, setConsentOpen] = useState(false);
   const [camView, setCamView] = useState<number | 'grid' | null>(null);
-  const [hud, setHud] = useState(true);
+  const [hud, setHud] = useState(false);
   const [camName, setCamName] = useState('overview');
   const [rows, setRows] = useState<EquipUse[]>([]);
-  const hudRef = useRef(true); hudRef.current = hud;
-  const pinEls = useRef<Record<string, HTMLDivElement | null>>({});
+  const hudRef = useRef(false); hudRef.current = hud;
   const [clockTxt, setClockTxt] = useState('');
   const counter = useRef(0);
 
@@ -129,6 +125,7 @@ function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, d
 
   useEffect(() => {
     const host = canvasHost.current; if (!host) return;
+    const sceneWindow = host.ownerDocument.defaultView || window;
     let renderer: THREE.WebGLRenderer;
     try { const hiDpiTouch = (window.devicePixelRatio || 1) >= 2 && !!window.matchMedia?.('(pointer: coarse)').matches; renderer = new THREE.WebGLRenderer({ antialias: !hiDpiTouch, powerPreference: 'high-performance' }); /* phones and tablets: no 4x MSAA on a dense screen, it costs a lot of fill for little gain */ } catch { setFailed(true); return; }
     renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap; renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true;   // shadows are refreshed every few frames (see the loop), not every frame
@@ -195,21 +192,20 @@ function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, d
     applyQuality(pickQuality(qualitySelRef.current));
     { const sid = getSelected(); const pd = sid ? PART_BY_ID[sid] : null; if (pd) { api.current.go?.(pd.view); setPart({ label: pd.label, help: pd.help }); } } // coming from the schematic: look at the part chosen there
 
-    // ── picking: hover labels + click to look at a part ──
+    // ── picking: click to look at a part ──
     const ray = new THREE.Raycaster(); const ndc = new THREE.Vector2(); const roots: THREE.Object3D[] = [];
     for (const p of lab.pickables) { roots.push(p.root); p.root.traverse(o => { (o as any).userData.pickName = p.name; }); }
-    let hoverName: string | null = null, lastPick = 0, down: { x: number; y: number } | null = null;
+    let lastPick = 0, down: { x: number; y: number } | null = null;
     const pickAt = (clientX: number, clientY: number) => {
       if (view !== null) return null;
       const r = canvas.getBoundingClientRect(); ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, cam);
       const hits = ray.intersectObjects(roots, true); for (const h of hits) { if (!h.object.visible) continue; const n = (h.object as any).userData.pickName as string | undefined; if (n) return n; } return null;
     };
     const onMove = (e: PointerEvent) => {
-      const now = performance.now(); const el = hoverEl.current; if (now - lastPick < 50) { if (el && hoverName) { const r = host.getBoundingClientRect(); el.style.transform = `translate(${e.clientX - r.left + 12}px, ${e.clientY - r.top + 14}px)`; } return; } lastPick = now;
-      const n = pickAt(e.clientX, e.clientY); hoverName = n; canvas.style.cursor = n ? 'pointer' : '';
-      if (el) { if (n) { const p = lab.pickables.find(q => q.name === n); const r = host.getBoundingClientRect(); el.textContent = ''; const b = document.createElement('span'); b.textContent = p?.label || n; const i = document.createElement('i'); i.textContent = '  click to look'; el.append(b, i); el.style.visibility = 'visible'; el.style.transform = `translate(${e.clientX - r.left + 12}px, ${e.clientY - r.top + 14}px)`; } else el.style.visibility = 'hidden'; }
+      const now = performance.now(); if (now - lastPick < 50) return; lastPick = now;
+      canvas.style.cursor = pickAt(e.clientX, e.clientY) ? 'pointer' : '';
     };
-    const onLeave = () => { hoverName = null; if (hoverEl.current) hoverEl.current.style.visibility = 'hidden'; };
+    const onLeave = () => { canvas.style.cursor = ''; };
     const onDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; foley.unlock(); };
     const onUp = (e: PointerEvent) => {
       if (!down) return; const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y); down = null; if (moved > 5) return;
@@ -243,13 +239,13 @@ function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, d
       }, 'image/png');
     };
 
-    let raf = 0, last = performance.now(), visible = true, brainAcc = 0;
-    const io = new IntersectionObserver(es => { visible = es[0]?.isIntersecting ?? true; }, { threshold: 0.01 }); io.observe(host);
-    const v3 = new THREE.Vector3(), pinV = new THREE.Vector3(); let hudPoll = -1000, hudSig = '', activeIds = new Set<string>(), pinTick = 0;
+    let raf = 0, last = sceneWindow.performance.now(), visible = true, brainAcc = 0;
+    const io = new sceneWindow.IntersectionObserver(es => { visible = es[0]?.isIntersecting ?? true; }, { threshold: 0.01 }); io.observe(host);
+    const v3 = new THREE.Vector3(); let hudPoll = -1000, hudSig = '', activeIds = new Set<string>();
     const loop = (now: number) => {
-      raf = requestAnimationFrame(loop);
+      raf = sceneWindow.requestAnimationFrame(loop);
       const dt = Math.min(0.1, (now - last) / 1000); last = now;
-      if (document.hidden || !visible) return;
+      if (host.ownerDocument.hidden || !visible) return;
       const s = stateRef.current; const t = now / 1000;
       lab.update(s, dt, t);
       sci.reduced = reducedRef.current; sci.root.visible = showSciRef.current; sci.laserOn = !!(s.ldv?.power && s.ldv?.shutter); foley.muted = !soundRef.current; if (!foley.muted) { const sp = sci.root.position, dx = sp.x - cam.position.x, dz = sp.z - cam.position.z; foley.dist = Math.hypot(dx, sp.y - cam.position.y, dz); fwd.set(0, 0, -1).applyQuaternion(cam.quaternion); foley.pan = foley.dist > 0.01 ? Math.max(-1, Math.min(1, (dx * -fwd.z + dz * fwd.x) / Math.max(0.01, Math.hypot(dx, dz)) * 0.9)) : 0; foley.clockDist = Math.hypot(0.9 - cam.position.x, 2.5 - cam.position.y, -2.58 - cam.position.z); foley.setLab({ power: !!s.facility?.power, roughing: !!(s.chamber?.roughing && !s.chamber?.vent), turbo: !!(s.chamber?.turbo && !s.chamber?.vent), rack: !!s.facility?.power }); } if (showSciRef.current) sci.update(dt, cam.position);
@@ -269,7 +265,6 @@ function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, d
       // Live equipment: glow on what is working now, and screen pins that follow those parts around the picture.
       if (now - hudPoll > 250) { hudPoll = now; const list = getEquipmentUse(s), sig = list.map(r => `${r.id}${r.active ? 1 : 0}${r.on ? 1 : 0}${r.level}${r.doing}`).join('|'); activeIds = new Set(list.filter(r => r.active).map(r => r.id)); if (sig !== hudSig) { hudSig = sig; setRows(list); } }
       lab.setHighlights(hudRef.current ? activeIds : null, t);
-      if (hudRef.current && ++pinTick % 2 === 0) for (const id in lab.highlightAnchors) { const el = pinEls.current[id]; if (!el) continue; pinV.copy(lab.highlightAnchors[id]).project(activeCam); const vis = view !== 'grid' && pinV.z < 1 && Math.abs(pinV.x) < 1.04 && Math.abs(pinV.y) < 1.04; el.style.visibility = vis ? 'visible' : 'hidden'; if (vis) el.style.transform = `translate(${(pinV.x * 0.5 + 0.5) * hostW}px, ${(-pinV.y * 0.5 + 0.5) * hostH}px)`; }
       if (eff === 'low' && now - lastRender < 30) return; lastRender = now;
       if (++shadowTick >= (eff === 'low' ? 3 : 2)) { shadowTick = 0; renderer.shadowMap.needsUpdate = true; }   // shadow map refreshed every 2nd (High) or 3rd (Low) frame
       if (view === 'grid') {
@@ -282,9 +277,9 @@ function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, d
       const el = bubbleEl.current;
       if (el) { const hw = sci.headWorld.project(activeCam); const w = hostW, h = hostH; const ok = hw.z < 1 && showSciRef.current; el.style.visibility = ok ? 'visible' : 'hidden'; if (++bubbleMeasure > 20 || !bubbleW) { bubbleMeasure = 0; bubbleW = el.offsetWidth; bubbleH = el.offsetHeight; } const bw = bubbleW, bh = bubbleH; /* sizes are cached: reading them every frame forces a layout pass */ const x = Math.min(w - bw / 2 - 8, Math.max(bw / 2 + 8, (hw.x * 0.5 + 0.5) * w)); const y = Math.max(bh + 12, (-hw.y * 0.5 + 0.5) * h - 10); el.style.transform = `translate(${x - bw / 2}px, ${y - bh - 10}px)`; }
     };
-    raf = requestAnimationFrame(loop);
+    raf = sceneWindow.requestAnimationFrame(loop);
     return () => {
-      cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); window.clearTimeout(bubbleTimer.current);
+      sceneWindow.cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); window.clearTimeout(bubbleTimer.current);
       canvas.removeEventListener('pointermove', onMove); canvas.removeEventListener('pointerleave', onLeave); canvas.removeEventListener('pointerdown', onDown); canvas.removeEventListener('pointerup', onUp);
       unDesk(); sys.dispose(); controls.dispose(); sci.dispose(); foley.dispose(); lab.dispose(); composer?.dispose(); renderer.dispose(); renderer.forceContextLoss();
       if (canvas.parentNode === host) host.removeChild(canvas); api.current = {}; if ((window as any).__lab) delete (window as any).__lab;
@@ -340,7 +335,7 @@ function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, d
           <Btn on={camView === 'grid'} f={() => api.current.setCamView?.(camView === 'grid' ? null : 'grid')} label="All security cameras at once">All cams</Btn>
           <span className="ls-lbl">View</span>
           <Btn on={cutaway} f={() => setCutaway(v => !v)}>Cutaway</Btn>
-          <Btn on={hud} f={() => setHud(v => !v)} label="Highlight the equipment that is working right now" title="Glow and name tags on the equipment in use, plus a live list">Live highlights</Btn>
+          <Btn on={hud} f={() => setHud(v => !v)} label="Highlight the equipment that is working right now" title="Highlight equipment and show its status list">Live highlights</Btn>
           <Btn f={() => setPhoto(true)} label="Photo mode: hide the controls and save a picture">Photo mode</Btn>
           <label className="ls-lbl" htmlFor="ls-q">Quality</label>
           <select id="ls-q" className="ls-btn" value={qualitySel} onChange={e => setQualitySel(e.target.value as QualitySel)}><option value="auto">Auto</option><option value="high">High</option><option value="low">Low</option></select>
@@ -359,17 +354,11 @@ function LabScene3D({ stateRef, origin = 'SYNTHETIC', reduced = false, onHelp, d
           className="absolute left-3 top-3 z-20 rounded border px-2 py-1 font-mono text-[10px] font-black tracking-widest shadow-lg"
           style={{ pointerEvents: 'none', color: origin === 'IMPORTED' ? '#f5d0fe' : origin === 'LIVE QUALIFIED' ? '#bbf7d0' : '#fde68a', background: origin === 'IMPORTED' ? '#3b0764' : origin === 'LIVE QUALIFIED' ? '#064e3b' : '#451a03', borderColor: origin === 'IMPORTED' ? '#d946ef' : origin === 'LIVE QUALIFIED' ? '#34d399' : '#f59e0b' }}
         >{origin}</span>
-        <div ref={hoverEl} className="ls-hover" style={{ visibility: 'hidden' }} aria-hidden="true" />
         {bubble && showSci && (
           <div ref={bubbleEl} className={`ls-bubble${bubble.kind === 'alert' ? ' is-alert' : ''}${bubble.kind === 'joke' ? ' is-joke' : ''}`} data-lab-bubble data-kind={bubble.kind} data-text={bubble.text} style={{ visibility: 'hidden' }}>
             <b>Dr. Wire</b><Typed text={bubble.text} />
           </div>
         )}
-        {!photo && hud && camView === null && rows.map(r => (
-          <div key={r.id} ref={el => { pinEls.current[r.id] = el; }} className={`ls-pin${r.active ? ' is-active' : ''}${r.level === 'error' ? ' is-error' : ''}`} style={{ ['--c' as any]: EQUIP_COLOR[r.group], visibility: 'hidden' }} aria-hidden="true">
-            <i /><span>{PIN_SHORT[r.id] || r.name}{r.active ? ' · in use' : ''}</span>
-          </div>
-        ))}
         {!photo && hud && camView === null && rows.length > 0 && (
           <div className={`ls-hud${camName === 'inside' ? ' is-inside' : ''}`} aria-label="Equipment in use right now" data-live-equipment>
             <div className="ls-hud-h"><b>{camName === 'inside' ? 'INSIDE THE CHAMBER · LIVE' : 'LIVE EQUIPMENT'}</b><span>{activeRows.length} in use</span></div>
