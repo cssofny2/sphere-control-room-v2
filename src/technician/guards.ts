@@ -42,7 +42,7 @@ export function createSpend() {
   const reset = (now: number) => { const day = new Date(now).toISOString().slice(0, 10); if (s.day !== day) { s.day = day; s.usd = 0; s.reserved = 0; } };
   return {
     over(now: number, cap: number) { reset(now); return s.usd + s.reserved >= cap; },
-    reserve(now: number, cap: number, estimate: number) { reset(now); if (s.usd + s.reserved + estimate > cap) return false; s.reserved += estimate; return true; },
+    reserve(now: number, cap: number, estimate: number) { reset(now); if (s.usd + s.reserved >= cap) return false; s.reserved += estimate; return true; },
     settle(estimate: number, usd: number) { s.reserved = Math.max(0, s.reserved - estimate); s.usd += usd; },
     add(usd: number) { s.usd += usd; },
   };
