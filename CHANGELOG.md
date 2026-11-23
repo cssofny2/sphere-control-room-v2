@@ -4,6 +4,8 @@ Versions follow semantic versioning. The version lives in `package.json` and is 
 
 ## Unreleased
 
+- Security and sanitization hardening: require access token authentication for technician email operations; eliminate spoofable client session identifiers from rate-limit keys; add pre-request spend reservation to prevent concurrent spend-cap bypass; prevent duplicate email sends through reply claiming; neutralize formula injection in LOC-1 CSV exports; and implement robust HTML tag stripping that handles nested tags safely while preserving clean search text.
+
 - Added an isolated A/B resonance training module to the LOC-1 workspace: deterministic synthetic null, thermal-artifact and hypothetical-injection scenarios, draft center coordinates, quality flags, displayed observations and a synthetic JSON export. Historical replay is represented as a sourced claim sequence only; no sphere motion or physical effect is simulated.
 
 - Added a five-tier simulator launcher and saved difficulty preference, high-contrast dropdown styling, reduced decorative motion and a denser glass-style workspace. The engineering twin now has a Three.js renderer, a light background, a dedicated A/B-platform focus with raycast obstruction fading, plus the classic SVG fallback. A separate window can host the live twin. Insights can compare saved/current runs in a descriptive, local report. The hardware replay API is design-only; no physical output control is implemented.

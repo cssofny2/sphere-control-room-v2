@@ -77,7 +77,8 @@ export function toLoc1Record(record: Record<string, any>, index: number, configu
 
 export function toLoc1Csv(rows: readonly Loc1Record[]): string {
   const quote = (value: string | number | boolean | null): string => {
-    const text = value === null ? '' : String(value);
+    const raw = value === null ? '' : String(value);
+    const text = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
     return `"${text.replace(/"/g, '""')}"`;
   };
   return [LOC1_FIELDS.map(quote).join(','), ...rows.map(row => LOC1_FIELDS.map(field => quote(row[field])).join(','))].join('\n');

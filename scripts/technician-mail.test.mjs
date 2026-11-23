@@ -7,7 +7,7 @@ const ML = await loadTypeScript(new URL('../src/technician/mail.ts', import.meta
 const SV = await loadTypeScript(new URL('../src/technician/server.ts', import.meta.url));
 
 const T0 = Date.UTC(2026, 9, 17, 12);
-const req = (body, o = {}) => new Request('https://lab.spheredesci.org/api/x', { method: o.method || 'POST', headers: { 'content-type': 'application/json', host: 'lab.spheredesci.org', 'x-forwarded-for': o.ip || '1.1.1.1', ...(o.origin === null ? {} : { origin: o.origin || 'https://lab.spheredesci.org' }), ...(o.headers || {}) }, body: o.method === 'GET' ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)) });
+const req = (body, o = {}) => new Request('https://lab.spheredesci.org/api/x', { method: o.method || 'POST', headers: { 'content-type': 'application/json', host: 'lab.spheredesci.org', 'x-forwarded-for': o.ip || '1.1.1.1', 'x-technician-email-token': 'email-token', ...(o.origin === null ? {} : { origin: o.origin || 'https://lab.spheredesci.org' }), ...(o.headers || {}) }, body: o.method === 'GET' ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)) });
 const prod = { VERCEL_ENV: 'production' };
 
 // ——— look-up endpoint ———
@@ -16,8 +16,10 @@ const prod = { VERCEL_ENV: 'production' };
   const h = mk(); const res = await h(req({ query: 'melting point of copper' })); assert.equal(res.status, 200); const b = await res.json();
   assert.equal(b.answer, 'Copper melts at 1,085 degrees Celsius.'); assert.deepEqual(b.sources.map(s => s.domain), ['example.org', 'other.net'], 'https only, www stripped');
   assert.equal(calls[0].tools[0].type, 'web_search_20250305'); assert.equal(calls[0].tools[0].max_uses, 2); assert.match(calls[0].system, /untrusted/); assert.equal(calls[0].messages[0].content, 'melting point of copper');
-  const hostile = LS.parseLookup([{ type: 'text', text: 'safe', citations: [{ title: '<scr<script>ipt>', url: 'https://example.org' }] }]); assert.equal(hostile.sources[0].title, 'scrscriptipt');
-  const brave = await LS.braveSearch('x', 'k', async () => new Response(JSON.stringify({ web: { results: [{ title: 'ok', url: 'https://example.org', description: '<scr<script>ipt>' }] } }))); assert.equal(brave[0].description, 'scrscriptipt');
+  const hostile = LS.parseLookup([{ type: 'text', text: 'safe', citations: [{ title: '<scr<script>ipt>', url: 'https://example.org' }] }]); assert.equal(hostile.sources[0].title, '');
+  const brave = await LS.braveSearch('x', 'k', async () => new Response(JSON.stringify({ web: { results: [{ title: 'ok', url: 'https://example.org', description: '<scr<script>ipt>' }] } }))); assert.equal(brave[0].description, '');
+  assert.equal(LS.stripHtml('Moon <b>facts</b>'), 'Moon facts');
+  assert.equal(LS.stripHtml('The Moon is <strong>384,400</strong> km away.'), 'The Moon is 384,400 km away.');
   assert.equal((await h(req({ query: 'x' }, { method: 'GET', ip: '2.2.2.2' }))).status, 405); assert.equal((await h(req({ query: 'x' }, { origin: 'https://evil.example', ip: '2.2.2.3' }))).status, 403); assert.equal((await h(req({ query: 'x' }, { origin: null, ip: '2.2.2.4' }))).status, 403);
   assert.equal((await h(req({ query: '' }, { ip: '2.2.2.5' }))).status, 400); assert.equal((await h(req({ query: 'a'.repeat(300) }, { ip: '2.2.2.6' }))).status, 400); assert.equal((await h(req('nope', { ip: '2.2.2.7' }))).status, 400);
   assert.equal((await LS.createLookupHandler({ env: prod, client: () => ({ messages: { create } }) })(req({ query: 'x' }, { ip: '2.2.2.8' }))).status, 503);
@@ -27,8 +29,8 @@ const prod = { VERCEL_ENV: 'production' };
   console.log('PASS look-up endpoint: web search, https-only sources, origin, size, rate and spend limits'); }
 
 // ——— inbound mail ———
-const baseEnv = { ...prod, TECHNICIAN_EMAIL_ADDRESS: 'drwire@spheredesci.org', TECHNICIAN_EMAIL_ALLOWED_SENDERS: 'Michael <michael@example.com>, boss@example.com', TECHNICIAN_INBOUND_SECRET: 'sekret-value' };
-const inboundReq = (body, secret = 'sekret-value', o = {}) => req(body, { origin: null, headers: secret === null ? {} : { 'x-inbound-secret': secret }, ...o });
+const baseEnv = { ...prod, TECHNICIAN_EMAIL_ADDRESS: 'drwire@spheredesci.org', TECHNICIAN_EMAIL_ALLOWED_SENDERS: 'Michael <michael@example.com>, boss@example.com', TECHNICIAN_INBOUND_SECRET: 'sekret-value', TECHNICIAN_EMAIL_ACCESS_TOKEN: 'email-token' };
+const inboundReq = (body, secret = 'sekret-value', o = {}) => req(typeof body === 'object' && body !== null ? { authenticated: true, ...body } : body, { origin: null, headers: secret === null ? {} : { 'x-inbound-secret': secret }, ...o });
 { const store = MS.memoryStore(); const h = MS.createInboundHandler({ env: baseEnv, store, now: () => T0 });
   assert.equal((await h(inboundReq({ from: 'michael@example.com', subject: 'Hi', text: 'hello' }, 'wrong'))).status, 401); assert.equal((await h(inboundReq({ from: 'michael@example.com' }, null))).status, 401);
   assert.equal((await h(inboundReq({ from: 'michael@example.com', subject: 'Hi', text: 'hello', messageId: '<a1@x>' }))).status, 200); assert.equal((await store.load()).length, 1);
@@ -40,6 +42,7 @@ const inboundReq = (body, secret = 'sekret-value', o = {}) => req(body, { origin
   assert.equal((await MS.createInboundHandler({ env: { ...baseEnv, TECHNICIAN_INBOUND_SECRET: '' }, store })(inboundReq({ from: 'a@b.co' }, ''))).status, 503);
   assert.equal((await h(inboundReq({ from: 'michael@example.com', text: 'x'.repeat(5000) }, 'sekret-value', { ip: '9.9.9.9' }))).status, 200); assert.ok((await store.load()).every(m => m.text.length <= 4000));
   assert.equal((await h(inboundReq('{', 'sekret-value', { ip: '9.9.9.8' }))).status, 400); assert.equal((await h(req({}, { method: 'GET', origin: null }))).status, 405);
+  assert.deepEqual(await (await h(req({ from: 'michael@example.com', subject: 'spoof', text: 'x' }, { origin: null, headers: { 'x-inbound-secret': 'sekret-value' } }))).json(), { ok: true, dropped: true });
   console.log('PASS inbound mail: secret, allow-list, duplicates, Postmark shape, size cap'); }
 
 // ——— mailbox for the lab page ———
@@ -48,6 +51,8 @@ const inboundReq = (body, secret = 'sekret-value', o = {}) => req(body, { origin
   const create = async p => ({ content: [{ type: 'text', text: 'Hello Michael,\n\n**It is** 760 Torr.\n\nDr. Wire' }], usage: { input_tokens: 500, output_tokens: 80 } });
   const env = { ...baseEnv, RESEND_API_KEY: 're_test', ANTHROPIC_API_KEY: 'k' };
   const h = MS.createMailHandler({ env, store, fetchImpl, client: () => ({ messages: { create } }), now: () => T0 });
+  assert.equal((await MS.createMailHandler({ env: { ...env, TECHNICIAN_EMAIL_ACCESS_TOKEN: '' }, store })(req({ action: 'status' }))).status, 503);
+  assert.equal((await MS.createMailHandler({ env, store })(req({ action: 'status' }, { headers: { 'x-technician-email-token': 'wrong' } }))).status, 401);
   const post = async (b, o) => { const r = await h(req(b, o)); return { status: r.status, body: await r.json() }; };
   assert.deepEqual((await post({ action: 'status' })).body, { enabled: true, canSend: true, canDraft: true, durable: false, address: 'drwire@spheredesci.org' });
   assert.equal((await post({ action: 'status' }, { origin: 'https://evil.example', ip: '7.7.7.1' })).status, 403);
@@ -61,7 +66,7 @@ const inboundReq = (body, secret = 'sekret-value', o = {}) => req(body, { origin
   assert.equal((await post({ action: 'send', id: 'm2', body: 'hi' })).status, 403, 'never replies to someone who is not on the list'); assert.equal(sends.length, 1);
   assert.equal((await post({ action: 'send', id: 'm1', body: '' })).status, 409); assert.equal((await post({ action: 'bogus' })).status, 400);
   const noSend = MS.createMailHandler({ env: { ...baseEnv }, store, fetchImpl, now: () => T0 }); const ns = await noSend(req({ action: 'send', id: 'm2', body: 'x' }, { ip: '8.8.8.8' })); assert.equal(ns.status, 503);
-  const off = MS.createMailHandler({ env: { ...prod }, store }); assert.deepEqual((await (await off(req({ action: 'status' }, { ip: '8.8.8.9' }))).json()).enabled, false); assert.deepEqual((await (await off(req({ action: 'poll' }, { ip: '8.8.8.9' }))).json()).mail, []);
+  const off = MS.createMailHandler({ env: { ...prod, TECHNICIAN_EMAIL_ACCESS_TOKEN: 'email-token' }, store }); assert.deepEqual((await (await off(req({ action: 'status' }, { ip: '8.8.8.9' }))).json()).enabled, false); assert.deepEqual((await (await off(req({ action: 'poll' }, { ip: '8.8.8.9' }))).json()).mail, []);
   const failing = MS.createMailHandler({ env, store: (() => { const s = MS.memoryStore(); s.save([{ id: 'z', from: 'boss@example.com', subject: 'q', text: 't', receivedAt: 0, delivered: false, replied: false }]); return s; })(), fetchImpl: async () => new Response('no', { status: 500 }) }); assert.equal((await failing(req({ action: 'send', id: 'z', body: 'x' }, { ip: '6.6.6.6' }))).status, 502);
   let n = 0; const limited = MS.createMailHandler({ env, store, now: () => T0 }); for (let i = 0; i < 41; i++) n = (await limited(req({ action: 'status' }, { ip: '1.9.9.9' }))).status; assert.equal(n, 429);
   console.log('PASS mailbox: poll, draft, and send only to the allowed sender, once, through the provider'); }

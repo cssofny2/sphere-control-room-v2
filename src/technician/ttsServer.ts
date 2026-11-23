@@ -51,15 +51,16 @@ export function createTtsHandler(deps: TtsDeps) {
     text = text.replace(/\s+/g, ' ').trim();
     if (!text || text.length > MAX_TEXT) return json(400, { error: 'bad_text' });
     const now = nowMs();
-    if (limited(clientKey(req), now, rate()) || spend.over(now, cap())) return json(429, { error: 'busy' }, { 'retry-after': '30' });
+    const estimate = text.length * USD_PER_CHAR[p];
+    if (limited(clientKey(req), now, rate()) || !spend.reserve(now, cap(), estimate)) return json(429, { error: 'busy' }, { 'retry-after': '30' });
     const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 15000);
     try {
       const r = await synth(p, text, ctl.signal);
       if (!r.ok) return json(r.status === 429 ? 429 : 502, { error: r.status === 429 ? 'busy' : 'upstream' });
       const audio = await r.arrayBuffer(); if (!audio.byteLength) return json(502, { error: 'upstream' });
-      spend.add(text.length * USD_PER_CHAR[p]);
+      spend.settle(estimate, estimate);
       return new Response(audio, { status: 200, headers: { 'content-type': 'audio/mpeg', 'cache-control': 'no-store', 'x-tts-provider': p } });
-    } catch { return json(502, { error: 'upstream' }); }
+    } catch { spend.settle(estimate, 0); return json(502, { error: 'upstream' }); }
     finally { clearTimeout(timer); }
   };
 }
