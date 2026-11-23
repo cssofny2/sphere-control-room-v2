@@ -53,5 +53,5 @@ export function fmtPressure(p: number): string {
   if (!isFinite(p)) return 'unknown';
   if (p >= 100) return `${p.toFixed(0)} Torr`;
   if (p >= 1) return `${p.toFixed(1)} Torr`;
-  return `${p.toExponential(1).replace('e-', 'e-')} Torr`;
+  return `${p.toExponential(1)} Torr`;
 }

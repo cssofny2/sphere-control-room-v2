@@ -25,7 +25,7 @@ const AI_SYSTEM = `You are helping a laboratory technician answer a general ques
 const toSource = (title: unknown, url: unknown): Src | null => {
   if (typeof url !== 'string' || !/^https:\/\//.test(url)) return null;
   let domain = ''; try { domain = new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
-  return { title: String(title || domain).replace(/<[^>]*>/g, '').slice(0, 90), url: url.slice(0, 300), domain };
+  return { title: String(title || domain).replace(/[<>]/g, '').slice(0, 90), url: url.slice(0, 300), domain };
 };
 
 export function parseLookup(content: any[]): LookupResult {
@@ -45,7 +45,7 @@ export async function braveSearch(q: string, key: string, f: typeof fetch, signa
     if (!r.ok) return [];
     const j: any = await r.json();
     return (Array.isArray(j?.web?.results) ? j.web.results : []).slice(0, 5)
-      .map((x: any) => ({ title: String(x?.title || ''), url: String(x?.url || ''), description: String(x?.description || '').replace(/<[^>]*>/g, '').slice(0, 400) }))
+      .map((x: any) => ({ title: String(x?.title || ''), url: String(x?.url || ''), description: String(x?.description || '').replace(/[<>]/g, '').slice(0, 400) }))
       .filter((x: any) => /^https:\/\//.test(x.url));
   } catch { return []; }
 }
