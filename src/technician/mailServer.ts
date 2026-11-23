@@ -14,14 +14,27 @@
 import { createLimiter, createSpend, capUsd, clientKey, json, originAllowed, safeEqual, type Env } from './guards';
 
 export type Mail = { id: string; from: string; subject: string; text: string; receivedAt: number; messageId?: string; delivered: boolean; replied: boolean };
-export type MailStore = { load(): Promise<Mail[]>; save(m: Mail[]): Promise<void>; durable: boolean };
+export type MailStore = { load(): Promise<Mail[]>; save(m: Mail[]): Promise<void>; durable: boolean; claimReply?(id: string): Promise<Mail | null>; releaseReply?(id: string): Promise<void>; finishReply?(id: string): Promise<void> };
 
-export function memoryStore(): MailStore { let m: Mail[] = []; return { durable: false, async load() { return m; }, async save(x) { m = x; } }; }
+export function memoryStore(): MailStore {
+  let m: Mail[] = [];
+  return {
+    durable: false, async load() { return m; }, async save(x) { m = x; },
+    async claimReply(id) { const i = m.findIndex(x => x.id === id); if (i < 0 || m[i].replied) return null; m[i] = { ...m[i], replied: true }; return m[i]; },
+    async releaseReply(id) { m = m.map(x => x.id === id ? { ...x, replied: false } : x); },
+    async finishReply() {},
+  };
+}
 export function upstashStore(url: string, token: string, f: typeof fetch = fetch): MailStore {
   const KEY = 'drwire:inbox'; const call = async (cmd: unknown[]) => { const r = await f(url, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(cmd) }); if (!r.ok) throw new Error('store'); return (await r.json()) as { result?: unknown }; };
+  const lockKey = (id: string) => `${KEY}:reply:${id}`;
   return { durable: true,
     async load() { const r = await call(['GET', KEY]); try { const j = JSON.parse(String(r.result ?? '[]')); return Array.isArray(j) ? j : []; } catch { return []; } },
-    async save(m) { await call(['SET', KEY, JSON.stringify(m.slice(-50)), 'EX', 60 * 60 * 24 * 14]); } };
+    async save(m) { await call(['SET', KEY, JSON.stringify(m.slice(-50)), 'EX', 60 * 60 * 24 * 14]); },
+    async claimReply(id) { const lock = await call(['SET', lockKey(id), '1', 'NX', 'EX', 60]); if (lock.result !== 'OK') return null; const m = (await this.load()).find(x => x.id === id); if (!m || m.replied) { await call(['DEL', lockKey(id)]); return null; } return m; },
+    async releaseReply(id) { const all = await this.load(); await this.save(all.map(x => x.id === id ? { ...x, replied: false } : x)); await call(['DEL', lockKey(id)]); },
+    async finishReply(id) { await call(['DEL', lockKey(id)]); },
+  };
 }
 
 const addr = (s: unknown): string => { const t = String(s ?? ''); const m = t.match(/<([^<>\s]+@[^<>\s]+)>/) || t.match(/([^\s<>,;"']+@[^\s<>,;"']+)/); return (m ? m[1] : '').toLowerCase(); };
@@ -35,6 +48,12 @@ export function normalizeInbound(b: any): { from: string; subject: string; text:
   const text = clip(b.text ?? b.TextBody ?? '', 4000).trim(); const subject = clip(b.subject ?? b.Subject ?? '(no subject)', 140).replace(/\s+/g, ' ').trim() || '(no subject)';
   const mid = b.messageId ?? b.MessageID; return { from, subject, text, ...(mid ? { messageId: clip(mid, 200) } : {}) };
 }
+const senderAuthenticated = (b: any): boolean => {
+  if (b?.authenticated === true) return true;
+  const headers = Array.isArray(b?.Headers) ? b.Headers : [];
+  const result = String(b?.AuthenticationResults || headers.find((h: any) => /authentication-results/i.test(String(h?.Name || '')))?.Value || '').toLowerCase();
+  return /\bspf=pass\b/.test(result) && /\bdkim=pass\b/.test(result);
+};
 
 export type MailDeps = { env: Env; store?: MailStore; fetchImpl?: typeof fetch; client?: () => { messages: { create(p: any): Promise<{ content: any[]; usage?: any }> } }; now?: () => number };
 const storeFor = (d: MailDeps): MailStore => d.store || (d.env.UPSTASH_REDIS_REST_URL && d.env.UPSTASH_REDIS_REST_TOKEN ? upstashStore(d.env.UPSTASH_REDIS_REST_URL, d.env.UPSTASH_REDIS_REST_TOKEN, d.fetchImpl) : memoryStore());
@@ -51,6 +70,7 @@ export function createInboundHandler(deps: MailDeps) {
     if (limited(clientKey(req), nowMs(), 60)) return json(429, { error: 'rate_limited' });
     let body: any; try { const t = await req.text(); if (t.length > 256 * 1024) return json(413, { error: 'too_large' }); body = JSON.parse(t); } catch { return json(400, { error: 'bad_json' }); }
     const m = normalizeInbound(body); if (!m) return json(400, { error: 'bad_message' });
+    if (!senderAuthenticated(body)) return json(200, { ok: true, dropped: true });
     if (!allowedSenders(env).includes(m.from)) return json(200, { ok: true, dropped: true });   // quietly ignore strangers
     const all = await store.load();
     if (m.messageId && all.some(x => x.messageId === m.messageId)) return json(200, { ok: true, duplicate: true });
@@ -68,6 +88,11 @@ export function createMailHandler(deps: MailDeps) {
   const limited = createLimiter(), spend = createSpend(); const sent: number[] = []; const sending = new Set<string>();
   return async function handle(req: Request): Promise<Response> {
     if (req.method !== 'POST') return json(405, { error: 'method_not_allowed' }, { allow: 'POST' });
+    const access = env.TECHNICIAN_EMAIL_ACCESS_TOKEN;
+    if (!access) return json(503, { error: 'not_configured' });
+    const authorization = req.headers.get('authorization') || '';
+    const given = req.headers.get('x-technician-email-token') || (/^bearer /i.test(authorization) ? authorization.slice(7) : '');
+    if (!given || !safeEqual(given, access)) return json(401, { error: 'unauthorized' });
     if (!originAllowed(req, env)) return json(403, { error: 'forbidden_origin' });
     if (Number(req.headers.get('content-length') || 0) > 16 * 1024) return json(413, { error: 'too_large' });
     if (limited(clientKey(req), nowMs(), 40)) return json(429, { error: 'rate_limited' }, { 'retry-after': '30' });
@@ -86,19 +111,20 @@ export function createMailHandler(deps: MailDeps) {
       }
       case 'draft': {
         if (!env.ANTHROPIC_API_KEY || !deps.client) return json(503, { error: 'no_key' });
-        if (spend.over(nowMs(), capUsd(env.TECHNICIAN_DAILY_CAP_USD, 5))) return json(503, { error: 'cap_reached' });
         const m = (await store.load()).find(x => x.id === String(b.id || '')); if (!m) return json(404, { error: 'not_found' });
+        const estimate = 0.02;
+        if (!spend.reserve(nowMs(), capUsd(env.TECHNICIAN_DAILY_CAP_USD, 5), estimate)) return json(503, { error: 'cap_reached' });
         let snap = ''; try { snap = JSON.stringify(b.snapshot ?? {}).slice(0, 3000); } catch { snap = '{}'; }
         try {
           const r = await deps.client().messages.create({ model: env.TECHNICIAN_MODEL || 'claude-sonnet-5-5', max_tokens: 400, system: `${DRAFT_SYSTEM}\n\nLIVE LAB SNAPSHOT: ${snap}`, messages: [{ role: 'user', content: `From: ${m.from}\nSubject: ${m.subject}\n\n${m.text}` }] });
-          const u = r.usage || {}; spend.add(((u.input_tokens || 0) * 3 + (u.output_tokens || 0) * 15) / 1e6);
+          const u = r.usage || {}; spend.settle(estimate, ((u.input_tokens || 0) * 3 + (u.output_tokens || 0) * 15) / 1e6);
           const draft = r.content.filter((x: any) => x.type === 'text').map((x: any) => x.text).join('').replace(/[*_#`]/g, '').trim().slice(0, 1500);
           return draft ? json(200, { draft }) : json(502, { error: 'empty' });
-        } catch { return json(502, { error: 'upstream' }); }
+        } catch { spend.settle(estimate, 0); return json(502, { error: 'upstream' }); }
       }
       case 'send': {
         if (!canSend) return json(503, { error: 'send_not_configured' });
-        const all = await store.load(); const m = all.find(x => x.id === String(b.id || '')); if (!m) return json(404, { error: 'not_found' });
+        const all = await store.load(); const id = String(b.id || ''); const m = all.find(x => x.id === id); if (!m) return json(404, { error: 'not_found' });
         if (m.replied || sending.has(m.id)) return json(409, { error: 'already_replied' });
         if (!allowedSenders(env).includes(m.from)) return json(403, { error: 'sender_not_allowed' });
         const text = clip(b.body, 1800).trim(); if (!text) return json(400, { error: 'empty_body' });
@@ -106,12 +132,14 @@ export function createMailHandler(deps: MailDeps) {
         const subject = /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`;
         const payload: any = { from: `Dr. Wire <${addr(env.TECHNICIAN_EMAIL_ADDRESS)}>`, to: [m.from], subject, text: text + SIGNATURE };
         if (m.messageId) payload.headers = { 'In-Reply-To': m.messageId, References: m.messageId };
+        const claimed = store.claimReply ? await store.claimReply(m.id) : null;
+        if (store.claimReply && !claimed) return json(409, { error: 'already_replied' });
         sending.add(m.id);
         try {
           const r = await f('https://api.resend.com/emails', { method: 'POST', headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
-          if (!r.ok) return json(502, { error: 'send_failed' });
-          sent.push(now); await store.save((await store.load()).map(x => (x.id === m.id ? { ...x, replied: true, delivered: true } : x)));
-        } catch { return json(502, { error: 'send_failed' }); } finally { sending.delete(m.id); }
+          if (!r.ok) { if (store.releaseReply) await store.releaseReply(m.id); return json(502, { error: 'send_failed' }); }
+          sent.push(now); await store.save((await store.load()).map(x => (x.id === m.id ? { ...x, replied: true, delivered: true } : x))); if (store.finishReply) await store.finishReply(m.id);
+        } catch { if (store.releaseReply) await store.releaseReply(m.id); return json(502, { error: 'send_failed' }); } finally { sending.delete(m.id); }
         return json(200, { ok: true, to: m.from });
       }
       default: return json(400, { error: 'bad_action' });

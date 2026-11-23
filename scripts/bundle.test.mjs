@@ -54,6 +54,7 @@ console.log('PASS bundle round-trips with a stable SHA-256');
   assert.equal(csvRows[1].length, 25);
   assert.equal(row.data_origin, 'IMPORTED');
   assert.equal(row.configuration_hash, 'abc');
+  assert.match(L.toLoc1Csv([{ ...row, run_id: '=HYPERLINK("https://example.test")' }]), /"'=HYPERLINK/);
   const image = I.svgDocument([], '#000', 12, 'Test');
   assert.match(image.svg, /Not a photograph of existing equipment/);
   assert.match(image.svg, /Copper artifact not to scale\./);

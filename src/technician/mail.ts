@@ -5,6 +5,7 @@ export type MailStatus = { enabled: boolean; canSend: boolean; canDraft: boolean
 
 export type MailClientOpts = {
   fetchImpl?: typeof fetch; endpoint?: string; intervalMs?: number; onMail: (m: InMail) => void;
+  accessToken?: string;
   timers?: { setInterval: (f: () => void, ms: number) => any; clearInterval: (h: any) => void };
   visible?: () => boolean;
 };
@@ -14,7 +15,7 @@ export function createMailClient(o: MailClientOpts) {
   let status: MailStatus = { enabled: false, canSend: false, canDraft: false, durable: false, address: null };
   let timer: any = null, polling = false; const seen = new Set<string>(); const subs = new Set<() => void>();
   async function call(body: unknown): Promise<{ ok: boolean; status: number; data: any }> {
-    try { const r = await f(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); let data: any = null; try { data = await r.json(); } catch { /* HTML from a static host */ } return { ok: r.ok, status: r.status, data }; }
+    try { const r = await f(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(o.accessToken ? { authorization: 'Bearer ' + o.accessToken } : {}) }, body: JSON.stringify(body) }); let data: any = null; try { data = await r.json(); } catch { /* HTML from a static host */ } return { ok: r.ok, status: r.status, data }; }
     catch { return { ok: false, status: 0, data: null }; }
   }
   async function poll() {

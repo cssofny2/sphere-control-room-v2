@@ -20,12 +20,13 @@ DoorDash and parts suppliers need your payment method and account. The app never
 | `TECHNICIAN_LOOKUP_DAILY_CAP_USD` (2), `TECHNICIAN_LOOKUP_RATE_PER_MIN` (6), `TECHNICIAN_LOOKUP_MODEL` | Look-up limits. Each search costs about two cents plus tokens. |
 | `TECHNICIAN_EMAIL_ADDRESS` | His address, e.g. `drwire@spheredesci.org` (also the From of replies). |
 | `TECHNICIAN_EMAIL_ALLOWED_SENDERS` | **Required.** Comma-separated addresses allowed to write to him. Everything else is dropped. |
+| `TECHNICIAN_EMAIL_ACCESS_TOKEN` | **Required.** Access token for the lab mailbox API; keep it separate from the inbound provider secret. |
 | `TECHNICIAN_INBOUND_SECRET` | Long random string the mail provider sends with each message. |
 | `RESEND_API_KEY` | Sends replies. The sending domain must be verified in Resend. Without it, replies are written on screen but not sent. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Durable inbox (free tier is enough). Without it the inbox lives in function memory and can lose mail. |
 
 ### Inbound mail
-Point an inbound provider at `POST https://lab.spheredesci.org/api/email-inbound` with the secret in the `x-inbound-secret` header (or as the password of HTTP Basic auth, which Postmark supports in the webhook URL). The body is either `{ "from", "subject", "text", "messageId" }` or Postmark's inbound JSON.
+Point an inbound provider at `POST https://lab.spheredesci.org/api/email-inbound` with the secret in the `x-inbound-secret` header (or as the password of HTTP Basic auth, which Postmark supports in the webhook URL). The provider must verify SPF and DKIM and include `Authentication-Results` with both passing before forwarding; messages without sender authentication are dropped. The body is either `{ "from", "subject", "text", "messageId", "authenticated": true }` or Postmark's inbound JSON.
 
 Cloudflare Email Routing (the domain is already on Cloudflare) with an Email Worker:
 
@@ -36,7 +37,7 @@ export default {
     const text = raw.split(/\r?\n\r?\n/).slice(1).join('\n').slice(0, 4000);   // plain bodies; use postal-mime for MIME
     await fetch('https://lab.spheredesci.org/api/email-inbound', { method: 'POST',
       headers: { 'content-type': 'application/json', 'x-inbound-secret': env.SECRET },
-      body: JSON.stringify({ from: message.from, subject: message.headers.get('subject') || '', text, messageId: message.headers.get('message-id') || undefined }) });
+      body: JSON.stringify({ from: message.from, subject: message.headers.get('subject') || '', text, messageId: message.headers.get('message-id') || undefined, authenticated: true }) });
   },
 };
 ```
