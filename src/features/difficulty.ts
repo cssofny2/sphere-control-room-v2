@@ -2,11 +2,11 @@ export const DIFFICULTIES = ['Beginner', 'Novice', 'Advanced', 'Expert', 'Full S
 export type Difficulty = typeof DIFFICULTIES[number];
 
 const pages: Record<Difficulty, readonly string[]> = {
-  Beginner: ['dashboard', 'overview', 'copilot', 'learn', 'settings'],
-  Novice: ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'chamber', 'training', 'timeline', 'runs'],
-  Advanced: ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'chamber', 'training', 'timeline', 'runs', 'protocol', 'ldv', 'scope', 'clock', 'insights', 'notebook'],
-  Expert: ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'chamber', 'training', 'timeline', 'runs', 'protocol', 'ldv', 'scope', 'clock', 'insights', 'notebook', 'spatial', 'vna', 'challenges'],
-  'Full Simulation': ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'chamber', 'training', 'timeline', 'runs', 'protocol', 'ldv', 'scope', 'clock', 'insights', 'notebook', 'spatial', 'vna', 'challenges', 'faults'],
+  Beginner: ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'changelog'],
+  Novice: ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'changelog', 'chamber', 'training', 'timeline', 'runs'],
+  Advanced: ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'changelog', 'chamber', 'training', 'timeline', 'runs', 'protocol', 'ldv', 'scope', 'clock', 'insights', 'notebook'],
+  Expert: ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'changelog', 'chamber', 'training', 'timeline', 'runs', 'protocol', 'ldv', 'scope', 'clock', 'insights', 'notebook', 'spatial', 'vna', 'challenges'],
+  'Full Simulation': ['dashboard', 'overview', 'copilot', 'learn', 'settings', 'changelog', 'chamber', 'training', 'timeline', 'runs', 'protocol', 'ldv', 'scope', 'clock', 'insights', 'notebook', 'spatial', 'vna', 'challenges', 'faults'],
 };
 
 export function isDifficulty(value: unknown): value is Difficulty {

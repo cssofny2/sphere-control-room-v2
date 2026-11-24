@@ -40,6 +40,8 @@ import { MAX_RECORDS, mergeRecords } from './persistence/sessions';
 import type { KV } from './persistence/store';
 const Insights = lazy(() => import('./insights/Insights').then(m => ({ default: m.Insights })));
 const SettingsPage = lazy(() => import('./features/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const ChangelogPage = lazy(() => import('./features/ChangelogPage').then(m => ({ default: m.ChangelogPage })));
+import { LatestChangesCard } from './features/LatestChangesCard';
 const LabScene3D = lazy(() => import('./labscene/LabScene3D'));
 const EngineeringTwin3D = lazy(() => import('./engineering/EngineeringTwin3D'));
 const Schematic = lazy(() => import('./engineering/Schematic'));
@@ -78,7 +80,7 @@ import {
   Zap, BookOpen, Book, HelpCircle, X, Info, ShieldCheck, Download, Archive, ListOrdered, Save, BrainCircuit, TimerReset,
   AlertTriangle, Radio, ScanLine, Waves, FlaskConical, Cpu, Award, CheckSquare, FileText,
   Sliders, Disc, Compass, Box, Orbit, Cuboid, Video, PlaySquare, MonitorPlay, Tv, Wrench, Compass as CompassIcon,
-  Search, Command, Filter, Terminal, Layers, FileSpreadsheet, Gauge, SlidersHorizontal
+  Search, Command, Filter, Terminal, Layers, FileSpreadsheet, Gauge, SlidersHorizontal, History
 } from 'lucide-react';
 
 const ALERT_ALL: AlertKey[] = ["facility", "clock", "vna", "scope", "ldv", "chamber", "pumps", "stage", "experiment", "spatial"];
@@ -1324,6 +1326,7 @@ export default function MetrologyLab() {
       group: "Preferences",
       items: [
         ["settings", "Display & Units", SlidersHorizontal],
+        ["changelog", "Version & Changes", History],
       ]
     }
   ];
@@ -1539,7 +1542,7 @@ export default function MetrologyLab() {
             <span>{difficultyHelp[difficulty]}</span>
           </div>
           {!availableAt(difficulty, active) ? <div role="status" className="rounded border border-amber-700 p-3 text-sm">This workspace is not available at the {difficulty} level. Choose a higher level or return to the console.</div> : <>
-          {active === "dashboard" && (difficulty === "Beginner" ? <div className="beginner-card"><h1>Welcome to the simulator</h1><p>This is a simulation, not physical laboratory equipment. Use the Power button above to start, then open a guided learning path or ask the Copilot for help.</p><div><button className="chrome-button" onClick={() => navigate("learn")}>Open learning paths</button> <button className="chrome-button" onClick={() => navigate("copilot")}>Open Copilot</button></div><p>Change the simulation level above when you are ready for more instruments.</p></div> : <><PageAlert k="facility" name="Facility" onGo={navigate} /><Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} onSaveOperator={saveProfile} /></>)}
+          {active === "dashboard" && (difficulty === "Beginner" ? <div className="space-y-4"><div className="beginner-card"><h1>Welcome to the simulator</h1><p>This is a simulation, not physical laboratory equipment. Use the Power button above to start, then open a guided learning path or ask the Copilot for help.</p><div><button className="chrome-button" onClick={() => navigate("learn")}>Open learning paths</button> <button className="chrome-button" onClick={() => navigate("copilot")}>Open Copilot</button></div><p>Change the simulation level above when you are ready for more instruments.</p></div><LatestChangesCard onOpenChangelog={() => navigate("changelog")} /></div> : <><PageAlert k="facility" name="Facility" onGo={navigate} /><Dashboard state={state} dispatch={dispatch} f0={f0} validationResult={validationResult} sweep={performSweep} HelpInfo={HelpInfo} onSaveOperator={saveProfile} onOpenChangelog={() => navigate("changelog")} /></>)}
           {active === "overview" && <LabOverview state={overviewState} dispatch={dispatch} quality={recordQuality} reduced={FX.reduced || FX.hide} lab={{ getSubsystemVisualState, visualToken, fmtPressure: fmtPressureShown, WARMUP_SECONDS, resolveHelp }} />}
           {active === "chamber" && <><PageAlert k={["chamber", "pumps", "stage"]} name="Chamber & stage" onGo={navigate} /><Chamber state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
           {active === "spatial" && <><PageAlert k="spatial" name="Data quality" onGo={navigate} /><SpatialField state={state} dispatch={dispatch} HelpInfo={HelpInfo} /></>}
@@ -1554,6 +1557,7 @@ export default function MetrologyLab() {
           {active === "timeline" && <Timeline />}
           {active === "insights" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading insights…</div>}><AnalyticsReport records={state.experiment.records} /><Insights records={state.experiment.records} events={state.events} operator={operatorFullName(state.operator)} /></Suspense>}
           {active === "settings" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading settings…</div>}><SettingsPage /></Suspense>}
+          {active === "changelog" && <Suspense fallback={<div className="p-4 text-xs text-zinc-400">Loading version history…</div>}><ChangelogPage /></Suspense>}
           {active === "learn" && <LearningPaths dispatch={dispatch} learnerName={operatorFullName(state.operator)} />}
           {active === "notebook" && <LabNotebook state={state} dispatch={dispatch} validationResult={validationResult} f0={f0} />}
           {active === "faults" && <FaultInjector state={state} dispatch={dispatch} />}
@@ -1589,7 +1593,7 @@ export default function MetrologyLab() {
         <span className="workspace-footer-sep" aria-hidden="true">·</span>
         <span data-credit>Designed and developed by <strong>{AUTHOR}</strong>.</span>
         <span className="workspace-footer-sep" aria-hidden="true">·</span>
-        <span data-footer-version>Version {APP_VERSION}</span>
+        <button type="button" className="workspace-footer-link" data-footer-version onClick={() => navigate("changelog")} title="View site version and chronological changelog">Version {APP_VERSION} · Latest changes</button>
       </footer>
 
       {state.ui.cmdPaletteOpen && (
@@ -3194,7 +3198,7 @@ function DigitalTwin({ state, dispatch, command = null, hideToolbars = false, on
   );
 }
 
-function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onSaveOperator }) {
+function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onSaveOperator, onOpenChangelog }) {
   const set = (domain, patch) => dispatch({ type: "PATCH", domain, patch });
   const valid = validationResult.overall === "VALID";
   const records = state.experiment.records;
@@ -3303,6 +3307,8 @@ function Dashboard({ state, dispatch, f0, validationResult, sweep, HelpInfo, onS
           <div className="h-[180px] flex-1"><ChamberSVG state={state} mini /></div>
         </div>
       </div>
+
+      <LatestChangesCard onOpenChangelog={onOpenChangelog} />
     </div>
   );
 }

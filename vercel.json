@@ -20,7 +20,7 @@
   },
   "redirects": [
     {
-      "source": "/(overview|dashboard|chamber|copilot|protocol|timeline|spatial|vna|ldv|scope|clock|runs|insights|notebook|training|challenges|faults|learn|settings)",
+      "source": "/(overview|dashboard|chamber|copilot|protocol|timeline|spatial|vna|ldv|scope|clock|runs|insights|notebook|training|challenges|faults|learn|settings|changelog)",
       "destination": "/#/$1",
       "permanent": false
     }

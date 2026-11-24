@@ -5,6 +5,7 @@ export const GOTO_KEYS: Readonly<Record<string, { page: string; label: string }>
   s: { page: 'spatial', label: 'Spatial Field Explorer' }, v: { page: 'vna', label: 'VNA Analysis' }, l: { page: 'ldv', label: 'LDV Scanner' },
   p: { page: 'scope', label: 'Oscilloscope' }, k: { page: 'clock', label: 'Frequency Reference' }, r: { page: 'runs', label: 'Experiment Runs' },
   n: { page: 'notebook', label: 'Lab Notebook' }, t: { page: 'timeline', label: 'Live Timeline' }, e: { page: 'learn', label: 'Learning Paths' },
+  u: { page: 'changelog', label: 'Version & Changes' },
 };
 
 export const OTHER_SHORTCUTS: ReadonlyArray<{ keys: string; does: string }> = [

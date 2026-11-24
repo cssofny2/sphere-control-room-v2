@@ -60,7 +60,16 @@ export default function WorkspaceHeader(props: Props) {
         <a className="workspace-logo" href="https://spheredesci.org/demo" target="_blank" rel="noreferrer" aria-label="S.P.H.E.R.E. project website">
           <Target size={21} /><span>S.P.H.E.R.E.<small>SIMULATOR</small></span>
         </a>
-        <span className="app-version" data-app-version title={VERSION_TITLE} aria-label={VERSION_TITLE}>{VERSION_LABEL}</span>
+        <button
+          type="button"
+          className="app-version"
+          data-app-version
+          title={`${VERSION_TITLE} — View chronological changelog`}
+          aria-label={`${VERSION_TITLE}. Open Version and Changes`}
+          onClick={() => props.onNavigate('changelog')}
+        >
+          {VERSION_LABEL}
+        </button>
       </div>
       <select className="workspace-view-select" aria-label="Active workspace" value={props.state.ui.active} onChange={e => props.onNavigate(e.target.value)}>
         {props.navOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
@@ -87,6 +96,7 @@ export default function WorkspaceHeader(props: Props) {
               <button onClick={() => tool('videos')}>Videos</button>
               <button onClick={() => tool('procedure')}>Procedure</button>
               <button onClick={() => tool('glossary')}>Glossary</button>
+              <button onClick={() => { setToolsOpen(false); props.onNavigate('changelog'); }}>Version &amp; changes ({VERSION_LABEL})</button>
               <button onClick={() => tool('share')}>Copy link to this page</button>
               <button onClick={() => tool('shortcuts')}>Keyboard shortcuts (?)</button>
               <button aria-pressed={props.detailsOpen} onClick={props.onDetails}>{props.detailsOpen ? 'Hide detailed telemetry' : 'Show detailed telemetry'}</button>
