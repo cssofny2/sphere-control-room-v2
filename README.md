@@ -113,7 +113,7 @@ CR-101 does not deliver the dedicated CR-102 runner, its complete cancellation/f
 
 ## Scientific Citation & Open Science Registry
 
-- **Live 3D Simulator:** https://lab.spheredesci.org
+- **Live 3D Simulator:** https://sphere-control-room-v2.vercel.app/#/dashboard (custom domain: https://lab.spheredesci.org)
 - **SPHEREVL Documentation & Overview:** https://spheredesci.org/vl/
 - **Protocol LOC-1 Whitepaper:** https://spheredesci.org/whitepaper/
 - **Zenodo Community Archive:** https://zenodo.org/communities/spheredesci/
